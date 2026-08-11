@@ -1,0 +1,56 @@
+import { NextRequest, NextResponse } from "next/server";
+import {
+  fetchUpcomingMatches,
+  toErrorResponse,
+} from "@/lib/api-football";
+import { chileDateString } from "@/lib/utils";
+
+function isValidDate(value: string | null): value is string {
+  return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const leagues = searchParams.get("leagues")?.split(",").filter(Boolean);
+  const dateParam = searchParams.get("date");
+  const daysParam = searchParams.get("days");
+  const daysAhead = daysParam ? Number(daysParam) : 0;
+  const poolModeParam = searchParams.get("pool");
+  const poolMode =
+    poolModeParam === "expanded"
+      ? "expanded"
+      : poolModeParam === "core"
+        ? "core"
+        : undefined;
+
+  const date = isValidDate(dateParam) ? dateParam : undefined;
+
+  try {
+    const { matches, source, daysFetched, poolMode: usedPool } =
+      await fetchUpcomingMatches({
+        leagues,
+        date,
+        daysAhead: date
+          ? 0
+          : Number.isFinite(daysAhead)
+            ? daysAhead
+            : 0,
+        poolMode,
+        expandIfFewerThan: poolMode === "expanded" ? 12 : 10,
+      });
+
+    return NextResponse.json({
+      success: true,
+      source,
+      count: matches.length,
+      date: date ?? chileDateString(),
+      daysAhead: date ? 0 : Number.isFinite(daysAhead) ? daysAhead : 0,
+      daysFetched: daysFetched ?? null,
+      poolMode: usedPool ?? null,
+      matches,
+    });
+  } catch (error) {
+    const { body, status } = toErrorResponse(error);
+    return NextResponse.json(body, { status });
+  }
+}
