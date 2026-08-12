@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Fixture snapshot for analytics & result reconciliation
+model MatchFixture {
+  id           String   @id @default(cuid())
+  apiFixtureId Int      @unique
+  homeTeam     String
+  awayTeam     String
+  leagueId     String
+  leagueName   String
+  matchDate    DateTime
+  finalScore   String?
+  status       String   @default("NS")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  predictions Prediction[]
+}
+
+/// Individual model pick (leg) linked to a fixture and optional ticket
+model Prediction {
+  id               String   @id @default(cuid())
+  fixtureId        String
+  ticketId         String?
+  market           String
+  selection        String
+  odds             Float
+  modelProbability Float
+  /// WON | LOST | PENDING | VOID
+  outcome          String   @default("PENDING")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  fixture MatchFixture       @relation(fields: [fixtureId], references: [id], onDelete: Cascade)
+  ticket  AccumulatorTicket? @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@index([outcome])
+  @@index([market])
+}
+
+/// Accumulator or single-pick ticket
+model AccumulatorTicket {
+  id        String   @id @default(cuid())
+  date      String
+  mode      String
+  stakeCLP  Float
+  totalOdds Float
+  payoutCLP Float
+  /// PENDING | WON | LOST | VOID
+  status    String   @default("PENDING")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  predictions Prediction[]
+
+  @@index([date])
+  @@index([mode])
+  @@index([status])
+}

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "calibratedAt": null,
+  "sampleSize": 0,
+  "global": {
+    "strictMinProbability": 0.78,
+    "backfillMinProbability": 0.55,
+    "over15MinProbability": 0.78,
+    "defaultMinOdds": 1.12,
+    "homeAdvantage": 1.08,
+    "leagueAvgGoals": 1.35
+  },
+  "leagues": {},
+  "markets": {},
+  "summary": {
+    "leaguesAdjusted": 0,
+    "marketsAdjusted": 0,
+    "message": "Pesos por defecto (sin calibración)."
+  }
+}

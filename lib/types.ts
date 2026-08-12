@@ -122,6 +122,13 @@ export interface ParlayConfig {
   minOdds: number;
   maxOdds: number;
   minProbability?: number;
+  /**
+   * Exact number of selections the generator should produce.
+   * When the strict probability filter yields fewer picks, lower-probability
+   * candidates are backfilled until this count is reached (if matches exist).
+   * Defaults to 15 for fun / accumulator modes.
+   */
+  targetLegCount?: number;
   strategyMode?: StrategyMode;
 }
 

@@ -9,7 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { addBetFromParlay } from "@/lib/history-tracker";
+import { addBetFromParlay, loadBets, saveBets } from "@/lib/history-tracker";
 import type { GeneratedParlay, ParlayLeg } from "@/lib/types";
 import {
   chileDateString,
@@ -84,14 +84,67 @@ export function ParlaySlip({
     setTimeout(() => setCopied(false), 2000);
   }
 
-  function handleRegister() {
-    const bet = addBetFromParlay(parlay, historyDate ?? chileDateString());
-    if (!bet) {
-      setRegisterMsg("No se pudo registrar la apuesta.");
-      return;
+  async function handleRegister() {
+    const date = historyDate ?? chileDateString();
+    // Keep localStorage for result-checker UX; primary persistence is SQLite
+    const local = addBetFromParlay(parlay, date);
+
+    try {
+      const res = await fetch("/api/bets/record", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date,
+          strategyMode: parlay.strategyMode ?? "daily-fun",
+          stakeCLP: parlay.stake,
+          totalOdds: parlay.totalOdds,
+          payoutCLP: parlay.potentialPayout,
+          legs: parlay.legs.map((l) => ({
+            matchId: l.matchId,
+            matchLabel: l.matchLabel,
+            leagueName: l.leagueName,
+            kickoff: l.kickoff,
+            market: l.market,
+            marketLabel: l.marketLabel,
+            odds: l.odds,
+            modelProbability: l.modelProbability,
+          })),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setRegisterMsg(
+          typeof data.error === "string"
+            ? data.error
+            : local
+              ? "Guardada localmente; falló SQLite."
+              : "No se pudo registrar la apuesta."
+        );
+        if (local) setRegistered(true);
+        return;
+      }
+      setRegistered(true);
+      setRegisterMsg(
+        data.duplicate
+          ? "Ticket ya registrado en la base de datos."
+          : "Apuesta guardada en SQLite + historial."
+      );
+
+      // Align localStorage id with SQLite ticket id for outcome sync
+      if (local && typeof data.ticketId === "string") {
+        const bets = loadBets().map((b) =>
+          b.id === local.id ? { ...b, id: data.ticketId as string } : b
+        );
+        saveBets(bets);
+      }
+    } catch {
+      if (local) {
+        setRegistered(true);
+        setRegisterMsg("Guardada localmente; sin conexión a la DB.");
+      } else {
+        setRegisterMsg("No se pudo registrar la apuesta.");
+      }
     }
-    setRegistered(true);
-    setRegisterMsg("Apuesta guardada en el historial.");
   }
 
   let legNumber = 0;

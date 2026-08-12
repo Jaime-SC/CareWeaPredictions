@@ -9,7 +9,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { addBetFromSinglePick } from "@/lib/history-tracker";
+import {
+  addBetFromSinglePick,
+  loadBets,
+  saveBets,
+} from "@/lib/history-tracker";
 import type { SafePickItem } from "@/lib/parlay-storage";
 import {
   formatCLP,
@@ -57,10 +61,46 @@ export function SafePicksList({
     return `${p.matchId}:${p.market}`;
   }
 
-  function handleRegister(pick: SafePickItem) {
-    const bet = addBetFromSinglePick(pick, stakeCLP, date);
-    if (!bet) return;
+  async function handleRegister(pick: SafePickItem) {
+    const local = addBetFromSinglePick(pick, stakeCLP, date);
+    if (!local) return;
     setRegisteredKeys((prev) => new Set(prev).add(pickKey(pick)));
+
+    try {
+      const res = await fetch("/api/bets/record", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date,
+          strategyMode: "daily-safe",
+          mode: "Segura",
+          stakeCLP,
+          totalOdds: pick.odds,
+          payoutCLP: Math.round(stakeCLP * pick.odds),
+          legs: [
+            {
+              matchId: pick.matchId,
+              matchLabel: pick.matchLabel,
+              leagueName: pick.leagueName,
+              kickoff: pick.kickoff,
+              market: pick.market,
+              marketLabel: pick.marketLabel,
+              odds: pick.odds,
+              modelProbability: pick.modelProbability,
+            },
+          ],
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success && typeof data.ticketId === "string") {
+        const bets = loadBets().map((b) =>
+          b.id === local.id ? { ...b, id: data.ticketId as string } : b
+        );
+        saveBets(bets);
+      }
+    } catch {
+      // Local registration already applied
+    }
   }
 
   return (

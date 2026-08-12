@@ -17,6 +17,12 @@ import {
   resolveStrategyMode,
 } from "./parlay-defaults";
 import { predictMatchMarkets } from "./poisson";
+import {
+  getLeagueWeight,
+  getMarketWeight,
+  loadModelWeights,
+  resolveMinProbability,
+} from "./model-weights";
 
 export { DEFAULT_AUTO_PARLAY_CONFIG } from "./parlay-defaults";
 
@@ -43,6 +49,27 @@ const FUN_MARKETS = new Set<MarketType>([
 ]);
 
 const MAX_MARKET_SHARE = 0.4;
+
+/** Fallback strict gate when weights file is missing. */
+export const STRICT_MIN_PROBABILITY = 0.78;
+
+/** Floor used when backfilling to reach targetLegCount. */
+const BACKFILL_MIN_PROBABILITY = 0.55;
+
+/** Default exact leg count for fun / accumulator tickets. */
+export const DEFAULT_TARGET_LEG_COUNT = 15;
+
+function getStrictMinProbability(): number {
+  return (
+    loadModelWeights().global.strictMinProbability ?? STRICT_MIN_PROBABILITY
+  );
+}
+
+function getBackfillMinProbability(): number {
+  return (
+    loadModelWeights().global.backfillMinProbability ?? BACKFILL_MIN_PROBABILITY
+  );
+}
 
 type MarketFamily =
   | "double_chance"
@@ -138,6 +165,8 @@ function isMarketAllowed(
   market: MarketType,
   strategyMode: StrategyMode
 ): boolean {
+  const mkt = getMarketWeight(market);
+  if (mkt.disabled) return false;
   return isSafeStrategy(strategyMode)
     ? SAFE_MARKETS.has(market)
     : FUN_MARKETS.has(market);
@@ -146,7 +175,8 @@ function isMarketAllowed(
 /**
  * Collect eligible safe legs according to strategy mode.
  * Safe modes: one highest-probability pick per match.
- * Fun modes: multiple market families per match for diversity.
+ * Fun modes: one best pick per match (maximizes unique fixtures).
+ * Applies calibrated league / market thresholds from model-weights.json.
  */
 export function collectSafePicks(
   matches: Match[],
@@ -158,37 +188,132 @@ export function collectSafePicks(
 ): ParlayLeg[] {
   const strategyMode = resolveMode(config as ParlayConfig);
   const preset = getStrategyPreset(strategyMode);
-  const minProb = config.minProbability ?? preset.minProbability ?? 0.8;
+  const baseMinProb =
+    config.minProbability ??
+    preset.minProbability ??
+    getStrictMinProbability();
+  const weights = loadModelWeights();
   const legs: ParlayLeg[] = [];
 
   for (const match of matches) {
+    const leagueCfg = getLeagueWeight(match.leagueName, weights);
+    const leagueMinOdds = Math.max(
+      config.minOdds,
+      leagueCfg.minOdds || config.minOdds
+    );
+
     const { markets } = predictMatchMarkets(match, {
-      minSafeProbability: minProb,
-      minSafeOdds: config.minOdds,
+      minSafeProbability: baseMinProb,
+      minSafeOdds: leagueMinOdds,
       maxSafeOdds: config.maxOdds,
     });
 
-    const eligible = markets.filter(
-      (m) =>
-        isMarketAllowed(m.market, strategyMode) &&
+    const eligible = markets.filter((m) => {
+      if (!isMarketAllowed(m.market, strategyMode)) return false;
+      const minProb = resolveMinProbability(
+        baseMinProb,
+        m.market,
+        match.leagueName,
+        weights
+      );
+      return (
         m.modelProbability >= minProb &&
-        m.odds >= config.minOdds &&
+        m.odds >= leagueMinOdds &&
         m.odds <= config.maxOdds
-    );
+      );
+    });
 
     if (eligible.length === 0) continue;
 
-    eligible.sort((a, b) => compareMarkets(a, b, mode));
-
-  if (isSafeStrategy(strategyMode)) {
-      legs.push(toLeg(match, eligible[0]));
-    } else {
-      // Fun: one best pick per match (maximizes unique fixtures for long tickets)
-      legs.push(toLeg(match, eligible[0]));
-    }
+    eligible.sort((a, b) => {
+      const wa = getMarketWeight(a.market, weights).weight;
+      const wb = getMarketWeight(b.market, weights).weight;
+      // Prefer higher calibrated market weight, then rank mode
+      if (Math.abs(wb - wa) > 0.01) return wb - wa;
+      return compareMarkets(a, b, mode);
+    });
+    legs.push(toLeg(match, eligible[0]));
   }
 
-  return legs.sort((a, b) => compareLegs(a, b, mode));
+  return legs.sort((a, b) => {
+    const wa = getMarketWeight(a.market, weights).weight;
+    const wb = getMarketWeight(b.market, weights).weight;
+    if (Math.abs(wb - wa) > 0.01) return wb - wa;
+    return compareLegs(a, b, mode);
+  });
+}
+
+/**
+ * Strict pool (≥ calibrated minProbability) plus probability-ranked backfill
+ * until the pool has at least `targetLegCount` unique-match candidates.
+ */
+export function collectPicksWithBackfill(
+  matches: Match[],
+  config: Pick<
+    ParlayConfig,
+    "minOdds" | "maxOdds" | "minProbability" | "strategyMode"
+  >,
+  targetLegCount: number,
+  mode: RankMode = "edge"
+): { pool: ParlayLeg[]; strictCount: number; backfilled: number } {
+  const strictMin =
+    config.minProbability ?? getStrictMinProbability();
+
+  const strict = collectSafePicks(
+    matches,
+    { ...config, minProbability: strictMin },
+    mode
+  );
+
+  if (strict.length >= targetLegCount) {
+    return {
+      pool: strict,
+      strictCount: strict.length,
+      backfilled: 0,
+    };
+  }
+
+  const relaxed = collectSafePicks(
+    matches,
+    { ...config, minProbability: getBackfillMinProbability() },
+    "probability"
+  );
+
+  const used = new Set(strict.map((l) => l.matchId));
+  const extras = relaxed
+    .filter((l) => !used.has(l.matchId))
+    .sort((a, b) => compareLegs(a, b, "probability"));
+
+  const needed = targetLegCount - strict.length;
+  const backfill = extras.slice(0, needed);
+  const pool = [...strict, ...backfill].sort((a, b) =>
+    compareLegs(a, b, mode)
+  );
+
+  return {
+    pool,
+    strictCount: strict.length,
+    backfilled: backfill.length,
+  };
+}
+
+function resolveTargetLegCount(config: ParlayConfig): number {
+  if (
+    typeof config.targetLegCount === "number" &&
+    config.targetLegCount > 0
+  ) {
+    return Math.floor(config.targetLegCount);
+  }
+  const strategyMode = resolveMode(config);
+  const preset = getStrategyPreset(strategyMode);
+  if (
+    typeof preset.targetLegCount === "number" &&
+    preset.targetLegCount > 0
+  ) {
+    return preset.targetLegCount;
+  }
+  if (isFunStrategy(strategyMode)) return DEFAULT_TARGET_LEG_COUNT;
+  return preset.minLegs;
 }
 
 function compareMarkets(
@@ -258,6 +383,10 @@ function respectsDiversity(
 /**
  * Multi-strategy generator: tries edge / odds / probability / balanced pools
  * and keeps the candidate best suited to the risk tier.
+ *
+ * Fun / accumulator modes honor `targetLegCount` (default 15): if the strict
+ * probability filter yields fewer matches, the next highest-probability
+ * candidates are backfilled until the exact count is reached.
  */
 export function generateParlay(
   matches: Match[],
@@ -265,13 +394,26 @@ export function generateParlay(
 ): GeneratedParlay {
   const strategyMode = resolveMode(config);
   const preset = getStrategyPreset(strategyMode);
+  const targetLegCount = resolveTargetLegCount({
+    ...preset,
+    ...config,
+    strategyMode,
+  });
+
   const effective: ParlayConfig = {
     stake: config.stake ?? preset.stake,
     targetMultiplier: config.targetMultiplier ?? preset.targetMultiplier,
-    maxLegs: config.maxLegs ?? preset.maxLegs,
+    maxLegs: Math.max(
+      config.maxLegs ?? preset.maxLegs,
+      targetLegCount
+    ),
     minOdds: config.minOdds ?? preset.minOdds,
     maxOdds: config.maxOdds ?? preset.maxOdds,
-    minProbability: config.minProbability ?? preset.minProbability,
+    minProbability:
+      config.minProbability ??
+      preset.minProbability ??
+      getStrictMinProbability(),
+    targetLegCount,
     strategyMode,
   };
 
@@ -279,12 +421,43 @@ export function generateParlay(
     ? ["probability", "balanced", "edge"]
     : ["balanced", "odds", "edge", "probability"];
   const candidates: GeneratedParlay[] = [];
+  let bestBackfillMeta = { strictCount: 0, backfilled: 0 };
 
   for (const mode of modes) {
-    const pool = collectSafePicks(matches, effective, mode);
+    const { pool, strictCount, backfilled } = isFunStrategy(strategyMode)
+      ? collectPicksWithBackfill(matches, effective, targetLegCount, mode)
+      : {
+          pool: collectSafePicks(matches, effective, mode),
+          strictCount: 0,
+          backfilled: 0,
+        };
+
     if (pool.length === 0) continue;
-    candidates.push(buildGreedy(pool, effective, preset.minLegs));
-    candidates.push(buildClosestToTarget(pool, effective, preset.minLegs));
+
+    if (backfilled > bestBackfillMeta.backfilled) {
+      bestBackfillMeta = { strictCount, backfilled };
+    }
+
+    const minLegs = isFunStrategy(strategyMode)
+      ? targetLegCount
+      : preset.minLegs;
+
+    candidates.push(
+      enforceExactLegCount(
+        buildGreedy(pool, effective, minLegs),
+        pool,
+        effective,
+        targetLegCount
+      )
+    );
+    candidates.push(
+      enforceExactLegCount(
+        buildClosestToTarget(pool, effective, minLegs),
+        pool,
+        effective,
+        targetLegCount
+      )
+    );
   }
 
   if (candidates.length === 0) {
@@ -307,9 +480,9 @@ export function generateParlay(
       return aDist - bDist;
     }
 
-    // Fun: prioritize leg count toward minLegs, then target odds
-    const aFill = a.legs.length >= preset.minLegs ? 1 : 0;
-    const bFill = b.legs.length >= preset.minLegs ? 1 : 0;
+    // Fun: prioritize exact targetLegCount fill, then target odds
+    const aFill = a.legs.length >= targetLegCount ? 1 : 0;
+    const bFill = b.legs.length >= targetLegCount ? 1 : 0;
     if (aFill !== bFill) return bFill - aFill;
     if (a.legs.length !== b.legs.length) return b.legs.length - a.legs.length;
     if (a.hitTarget !== b.hitTarget) return a.hitTarget ? -1 : 1;
@@ -323,20 +496,71 @@ export function generateParlay(
   });
 
   const best = candidates[0];
-  return withFillNotice(best, preset.minLegs);
+  return withFillNotice(best, targetLegCount, bestBackfillMeta);
+}
+
+/**
+ * Top up or trim so the ticket has exactly `targetLegCount` legs when the
+ * pool allows it (fun / accumulator modes only).
+ */
+function enforceExactLegCount(
+  parlay: GeneratedParlay,
+  pool: ParlayLeg[],
+  config: ParlayConfig,
+  targetLegCount: number
+): GeneratedParlay {
+  const strategyMode = resolveMode(config);
+  if (!isFunStrategy(strategyMode)) return parlay;
+
+  if (parlay.legs.length === targetLegCount) return parlay;
+
+  if (parlay.legs.length > targetLegCount) {
+    return finalize(
+      parlay.legs.slice(0, targetLegCount),
+      config.stake,
+      config.targetMultiplier,
+      strategyMode
+    );
+  }
+
+  const used = new Set(parlay.legs.map((l) => l.matchId));
+  const extras = pool.filter((l) => !used.has(l.matchId));
+  const filled = [...parlay.legs];
+
+  for (const leg of extras) {
+    if (filled.length >= targetLegCount) break;
+    if (filled.length >= config.maxLegs) break;
+    filled.push(leg);
+  }
+
+  return finalize(
+    filled,
+    config.stake,
+    config.targetMultiplier,
+    strategyMode
+  );
 }
 
 function withFillNotice(
   parlay: GeneratedParlay,
-  minLegs: number
+  targetLegCount: number,
+  backfillMeta?: { strictCount: number; backfilled: number }
 ): GeneratedParlay {
   if (parlay.legs.length === 0) return parlay;
-  if (parlay.legs.length >= minLegs) {
+
+  if (parlay.legs.length >= targetLegCount) {
+    if (backfillMeta && backfillMeta.backfilled > 0) {
+      return {
+        ...parlay,
+        fillNotice: `Filtro estricto (≥${(getStrictMinProbability() * 100).toFixed(0)}%): ${backfillMeta.strictCount} picks · se rellenaron ${backfillMeta.backfilled} slots con la siguiente mayor probabilidad para llegar a ${targetLegCount} legs`,
+      };
+    }
     return { ...parlay, fillNotice: undefined };
   }
+
   return {
     ...parlay,
-    fillNotice: `Se incluyeron los ${parlay.legs.length} partidos disponibles que cumplen con el filtro hoy`,
+    fillNotice: `Se incluyeron los ${parlay.legs.length} partidos disponibles (objetivo: ${targetLegCount} legs)`,
   };
 }
 

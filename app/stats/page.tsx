@@ -10,11 +10,17 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import type {
+  DateMarketStatsRow,
+  LeagueStatsRow,
+  TrainingFeatureRow,
+} from "@/lib/bet-types";
 import {
   type BetStatus,
   type BreakdownItem,
   type HistoryBet,
   type HistoryBetLeg,
+  type HistorySummary,
   type LegStatus,
   clearHistory,
   computeBankrollSeries,
@@ -26,6 +32,7 @@ import {
   formatSignedCLP,
   loadBets,
   purgeFakeHistory,
+  replaceBets,
   updateBetStatus,
 } from "@/lib/history-tracker";
 import { formatLegMatchStatus, updatePendingBets } from "@/lib/result-checker";
@@ -36,8 +43,10 @@ import {
   ChevronDown,
   CircleSlash,
   Clock,
+  Download,
   Loader2,
   RefreshCw,
+  Settings2,
   Trash2,
   X,
   XCircle,
@@ -54,27 +63,109 @@ import {
   YAxis,
 } from "recharts";
 
+type StatsApiPayload = {
+  success: boolean;
+  tickets?: HistoryBet[];
+  summary?: {
+    totalTickets: number;
+    pending: number;
+    won: number;
+    lost: number;
+    voided: number;
+    totalStaked: number;
+    netProfit: number;
+    roi: number;
+    legsWon: number;
+    legsEvaluated: number;
+    legAccuracy: number;
+  };
+  byLeague?: LeagueStatsRow[];
+  byDateMarket?: DateMarketStatsRow[];
+  trainingExport?: TrainingFeatureRow[];
+  error?: string;
+};
+
+function summaryFromApi(
+  api: StatsApiPayload["summary"],
+  bets: HistoryBet[]
+): HistorySummary {
+  if (!api) return computeSummary(bets);
+  return {
+    netProfit: api.netProfit,
+    totalStaked: api.totalStaked,
+    totalReturned: 0,
+    roi: api.roi,
+    winRate:
+      api.won + api.lost > 0 ? api.won / (api.won + api.lost) : 0,
+    legAccuracy: api.legAccuracy,
+    legsWon: api.legsWon,
+    legsEvaluated: api.legsEvaluated,
+    totalBets: api.totalTickets,
+    won: api.won,
+    lost: api.lost,
+    pending: api.pending,
+    voided: api.voided,
+    completed: api.won + api.lost,
+  };
+}
+
 export default function StatsPage() {
   const [bets, setBets] = useState<HistoryBet[]>([]);
+  const [byLeague, setByLeague] = useState<LeagueStatsRow[]>([]);
+  const [byDateMarket, setByDateMarket] = useState<DateMarketStatsRow[]>([]);
+  const [trainingExport, setTrainingExport] = useState<TrainingFeatureRow[]>(
+    []
+  );
+  const [apiSummary, setApiSummary] =
+    useState<StatsApiPayload["summary"]>(undefined);
   const [hydrated, setHydrated] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [calibrating, setCalibrating] = useState(false);
+  const [calibrateMsg, setCalibrateMsg] = useState<string | null>(null);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
 
-  const refresh = useCallback(() => {
+  const refreshFromDb = useCallback(async () => {
     purgeFakeHistory();
-    setBets(loadBets());
+    const local = loadBets();
+    try {
+      const res = await fetch("/api/stats/summary");
+      const data = (await res.json()) as StatsApiPayload;
+      if (res.ok && data.success) {
+        const tickets = data.tickets ?? [];
+        // Prefer SQLite; keep localStorage if DB still empty (pre-migration)
+        if (tickets.length > 0) {
+          setBets(tickets);
+          replaceBets(tickets);
+        } else {
+          setBets(local);
+        }
+        setByLeague(data.byLeague ?? []);
+        setByDateMarket(data.byDateMarket ?? []);
+        setTrainingExport(data.trainingExport ?? []);
+        setApiSummary(data.summary);
+        setHydrated(true);
+        return;
+      }
+    } catch {
+      // fall through to local
+    }
+
+    setBets(local);
+    setByLeague([]);
+    setByDateMarket([]);
+    setTrainingExport([]);
+    setApiSummary(undefined);
     setHydrated(true);
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    void refreshFromDb();
+  }, [refreshFromDb]);
 
-  // Auto-check pending fixtures once on mount (real API only)
   useEffect(() => {
     if (!hydrated) return;
-    const pending = loadBets().some(
+    const pending = bets.some(
       (b) => b.status === "pending" || b.legs.some((l) => l.status === "pending")
     );
     if (!pending) return;
@@ -84,12 +175,12 @@ export default function StatsPage() {
       setUpdating(true);
       const result = await updatePendingBets();
       if (cancelled) return;
-      setBets(result.bets);
       setUpdating(false);
       if (result.ok && result.updatedTickets > 0) {
         setUpdateMsg(
           `Auto-check: ${result.updatedTickets} ticket(s) actualizado(s) con API-Football.`
         );
+        await refreshFromDb();
       }
     })();
 
@@ -99,7 +190,10 @@ export default function StatsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once after hydrate
   }, [hydrated]);
 
-  const summary = useMemo(() => computeSummary(bets), [bets]);
+  const summary = useMemo(
+    () => summaryFromApi(apiSummary, bets),
+    [apiSummary, bets]
+  );
   const series = useMemo(() => computeBankrollSeries(bets), [bets]);
   const marketBreakdown = useMemo(
     () => computeMarketBreakdown(bets),
@@ -109,23 +203,36 @@ export default function StatsPage() {
     () => computeStrategyBreakdown(bets),
     [bets]
   );
-  const leagueBreakdown = useMemo(
+  const leagueBreakdownFallback = useMemo(
     () => computeLeagueBreakdown(bets),
     [bets]
   );
+
+  const leagueRows =
+    byLeague.length > 0
+      ? byLeague
+      : leagueBreakdownFallback.map((item) => ({
+          leagueName: item.label,
+          total: item.total,
+          won: item.won,
+          lost: item.lost,
+          winRate: item.winRate,
+          netRoi: 0,
+        }));
 
   async function handleUpdateFromApi() {
     setUpdating(true);
     setUpdateMsg(null);
     setUpdateError(null);
     const result = await updatePendingBets();
-    setBets(result.bets);
     setUpdating(false);
 
     if (!result.ok) {
       setUpdateError(result.error ?? "Error al actualizar.");
       return;
     }
+
+    await refreshFromDb();
 
     if (result.checkedFixtures === 0) {
       setUpdateMsg(
@@ -141,29 +248,132 @@ export default function StatsPage() {
     );
   }
 
-  function handleStatus(id: string, status: BetStatus) {
+  async function handleStatus(id: string, status: BetStatus) {
     updateBetStatus(id, status);
-    refresh();
+    try {
+      await fetch("/api/stats/summary", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "status", ticketId: id, status }),
+      });
+    } catch {
+      // local already updated
+    }
+    await refreshFromDb();
   }
 
-  function handleClear() {
+  async function handleClear() {
     if (
       !window.confirm(
-        "¿Limpiar todo el historial real? Esta acción no se puede deshacer."
+        "¿Limpiar todo el historial (SQLite + local)? Esta acción no se puede deshacer."
       )
     ) {
       return;
     }
     clearHistory();
+    try {
+      await fetch("/api/stats/summary", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear" }),
+      });
+    } catch {
+      // ignore
+    }
     setBets([]);
+    setByLeague([]);
+    setByDateMarket([]);
+    setTrainingExport([]);
+    setApiSummary(undefined);
     setUpdateMsg(null);
     setUpdateError(null);
+  }
+
+  function handleExportTraining() {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      featureVectors: trainingExport.length
+        ? trainingExport
+        : bets.flatMap((bet) =>
+            bet.legs.map((leg) => ({
+              league: leg.leagueName,
+              market: leg.market,
+              selection: leg.marketLabel,
+              modelProbability: 0,
+              odds: leg.odds,
+              outcome:
+                leg.status === "won"
+                  ? "WON"
+                  : leg.status === "lost"
+                    ? "LOST"
+                    : leg.status === "void"
+                      ? "VOID"
+                      : "PENDING",
+              matchDate: leg.kickoff,
+              homeTeam: leg.homeTeam ?? "",
+              awayTeam: leg.awayTeam ?? "",
+            }))
+          ),
+      schema: {
+        league: "string",
+        market: "MarketType",
+        selection: "string",
+        modelProbability: "0-1",
+        odds: "decimal",
+        outcome: "WON|LOST|PENDING|VOID",
+      },
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `parleylab-training-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleCalibrateModel() {
+    setCalibrating(true);
+    setCalibrateMsg(null);
+    setUpdateError(null);
+    try {
+      const res = await fetch("/api/model/calibrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          featureVectors: trainingExport.length
+            ? trainingExport
+            : undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setUpdateError(
+          typeof data.error === "string"
+            ? data.error
+            : "No se pudo recalibrar el modelo."
+        );
+        return;
+      }
+      setCalibrateMsg(
+        typeof data.message === "string"
+          ? data.message
+          : `Parámetros actualizados: ${data.leaguesAdjusted ?? 0} ligas ajustadas, umbral de goles ajustado a ${Math.round((data.over15MinProbability ?? 0.78) * 100)}%`
+      );
+    } catch {
+      setUpdateError("Error de red al recalibrar el modelo.");
+    } finally {
+      setCalibrating(false);
+    }
   }
 
   if (!hydrated) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-16 text-center text-sm text-slate-500">
-        Cargando historial…
+        Cargando analytics desde SQLite…
       </div>
     );
   }
@@ -174,17 +384,26 @@ export default function StatsPage() {
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <Badge variant="info">Estadísticas</Badge>
-            <Badge variant="success">Solo resultados API-Football</Badge>
+            <Badge variant="success">Prisma · SQLite</Badge>
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-slate-50">
-            Rendimiento verificado
+            Analytics de entrenamiento
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-400">
-            Net Profit, hit rate y acierto por mercado calculados únicamente
-            con scores oficiales. Sin simulaciones ni backtests ficticios.
+            Rendimiento agrupado por competición, fecha y mercado — datos
+            persistidos para afinar el modelo Poisson / ML.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportTraining}
+            disabled={bets.length === 0 && trainingExport.length === 0}
+          >
+            <Download className="h-4 w-4" />
+            📥 Exportar Datos de Entrenamiento (JSON)
+          </Button>
           <Button
             variant="default"
             size="sm"
@@ -196,12 +415,12 @@ export default function StatsPage() {
             ) : (
               <RefreshCw className="h-4 w-4" />
             )}
-            🔄 Actualizar Resultados de la API
+            Actualizar Resultados
           </Button>
           {bets.length > 0 && (
             <Button variant="danger" size="sm" onClick={handleClear}>
               <Trash2 className="h-4 w-4" />
-              Limpiar historial
+              Limpiar
             </Button>
           )}
         </div>
@@ -221,14 +440,21 @@ export default function StatsPage() {
           </CardContent>
         </Card>
       )}
+      {calibrateMsg && !updateError && (
+        <Card className="border-sky-500/30 bg-sky-950/20">
+          <CardContent className="p-4 text-sm text-sky-100">
+            ⚙️ {calibrateMsg}
+          </CardContent>
+        </Card>
+      )}
 
       {bets.length === 0 ? (
         <Card className="border-dashed border-slate-700">
           <CardContent className="flex flex-col items-center gap-4 px-6 py-14 text-center">
             <p className="max-w-lg text-sm leading-relaxed text-slate-300">
-              Aún no has registrado apuestas reales. Genera una combinada y
-              presiona &apos;Registrar Apuesta&apos; para hacer seguimiento
-              automático con resultados oficiales.
+              Aún no hay tickets en SQLite. Genera una combinada y pulsa
+              &apos;Registrar Apuesta&apos; para alimentar el motor de
+              analytics.
             </p>
             <Link href="/builder">
               <Button>Ir al Generador</Button>
@@ -239,19 +465,214 @@ export default function StatsPage() {
         <>
           <StatsOverview summary={summary} />
 
+          {/* 1. By competition */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Rendimiento por Competición</CardTitle>
+              <CardDescription>
+                Identifica ligas predecibles vs. alta varianza — Total · Won ·
+                Lost · Win Rate · Net ROI
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              {leagueRows.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  Sin legs evaluadas todavía. Actualiza resultados tras el FT.
+                </p>
+              ) : (
+                <table className="w-full min-w-[640px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-xs uppercase tracking-wide text-slate-500">
+                      <th className="pb-2 pr-3 font-medium">Liga / Torneo</th>
+                      <th className="pb-2 pr-3 font-medium">Total</th>
+                      <th className="pb-2 pr-3 font-medium">Won</th>
+                      <th className="pb-2 pr-3 font-medium">Lost</th>
+                      <th className="pb-2 pr-3 font-medium">Win Rate</th>
+                      <th className="pb-2 font-medium">Net ROI</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leagueRows.map((row) => (
+                      <tr
+                        key={row.leagueName}
+                        className="border-b border-slate-800/60"
+                      >
+                        <td className="py-2.5 pr-3 font-medium text-slate-100">
+                          {row.leagueName}
+                        </td>
+                        <td className="py-2.5 pr-3 text-slate-300">
+                          {row.total}
+                        </td>
+                        <td className="py-2.5 pr-3 text-emerald-400">
+                          {row.won}
+                        </td>
+                        <td className="py-2.5 pr-3 text-rose-400">
+                          {row.lost}
+                        </td>
+                        <td className="py-2.5 pr-3">
+                          <Badge
+                            variant={
+                              row.winRate >= 0.55
+                                ? "success"
+                                : row.winRate >= 0.4
+                                  ? "warning"
+                                  : "danger"
+                            }
+                          >
+                            {formatPercent(row.winRate)}
+                          </Badge>
+                        </td>
+                        <td
+                          className={cn(
+                            "py-2.5 font-mono text-xs",
+                            row.netRoi >= 0
+                              ? "text-emerald-400"
+                              : "text-rose-400"
+                          )}
+                        >
+                          {row.netRoi >= 0 ? "+" : ""}
+                          {row.netRoi.toFixed(1)}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* 2. By date & market */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Acierto por Fecha y Mercado</CardTitle>
+              <CardDescription>
+                Doble Oportunidad · +1.5 Goles · Apuesta sin Empate · etc.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              {byDateMarket.length === 0 ? (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-500">
+                    Vista agregada por mercado (sin desglose diario aún — se
+                    llena al resolver picks en SQLite).
+                  </p>
+                  <MarketBars items={marketBreakdown} />
+                </div>
+              ) : (
+                <table className="w-full min-w-[560px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-xs uppercase tracking-wide text-slate-500">
+                      <th className="pb-2 pr-3 font-medium">Fecha</th>
+                      <th className="pb-2 pr-3 font-medium">Mercado</th>
+                      <th className="pb-2 pr-3 font-medium">Total</th>
+                      <th className="pb-2 pr-3 font-medium">Won / Lost</th>
+                      <th className="pb-2 font-medium">Win Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {byDateMarket.map((row) => (
+                      <tr
+                        key={`${row.date}-${row.marketLabel}`}
+                        className="border-b border-slate-800/60"
+                      >
+                        <td className="py-2.5 pr-3 font-mono text-xs text-slate-400">
+                          {row.date}
+                        </td>
+                        <td className="py-2.5 pr-3 text-slate-100">
+                          {row.marketLabel}
+                        </td>
+                        <td className="py-2.5 pr-3 text-slate-300">
+                          {row.total}
+                        </td>
+                        <td className="py-2.5 pr-3 text-xs">
+                          <span className="text-emerald-400">{row.won}</span>
+                          <span className="text-slate-600"> / </span>
+                          <span className="text-rose-400">{row.lost}</span>
+                        </td>
+                        <td className="py-2.5">
+                          <Badge
+                            variant={
+                              row.winRate >= 0.55
+                                ? "success"
+                                : row.winRate >= 0.4
+                                  ? "warning"
+                                  : "danger"
+                            }
+                          >
+                            {formatPercent(row.winRate)}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* 3. Model insight */}
+          <Card className="border-sky-500/20 bg-sky-950/10">
+            <CardHeader>
+              <CardTitle>Model Decision Insight</CardTitle>
+              <CardDescription>
+                Vectores de features listos para reentrenar pesos Poisson / ML:
+                League · Market · Model Prob · Odds · Outcome
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-slate-300">
+                {trainingExport.length ||
+                  bets.reduce((n, b) => n + b.legs.length, 0)}{" "}
+                filas de entrenamiento disponibles en SQLite.
+              </p>
+              <Button variant="default" size="sm" onClick={handleExportTraining}>
+                <Download className="h-4 w-4" />
+                📥 Exportar Datos de Entrenamiento (JSON)
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="border-amber-500/25 bg-amber-950/10">
+            <CardHeader>
+              <CardTitle>Auto-Tuning Engine</CardTitle>
+              <CardDescription>
+                Recalcula multiplicadores por liga, pesos de mercado y umbrales
+                de probabilidad a partir del historial (SQLite / JSON). Los
+                nuevos pesos se aplican automáticamente a futuras predicciones.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="max-w-xl text-sm text-slate-400">
+                Ligas &lt;70% WR → mayor penalización · Ligas &gt;88% → umbral de
+                cuota más flexible · Mercados con ROI negativo → cutoff más alto.
+              </p>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleCalibrateModel}
+                disabled={calibrating}
+              >
+                {calibrating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Settings2 className="h-4 w-4" />
+                )}
+                ⚙️ Re-Calibrar Modelo con Datos Históricos
+              </Button>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Crecimiento de bankroll</CardTitle>
               <CardDescription>
-                Beneficio acumulado en CLP (solo tickets resueltos por API o
-                override)
+                Beneficio acumulado en CLP (tickets resueltos)
               </CardDescription>
             </CardHeader>
             <CardContent className="h-72 pt-2 sm:h-80">
               {series.length === 0 ? (
                 <p className="flex h-full items-center justify-center text-sm text-slate-500">
-                  Sin tickets resueltos aún. Actualiza resultados cuando
-                  terminen los partidos.
+                  Sin tickets resueltos aún.
                 </p>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
@@ -328,28 +749,22 @@ export default function StatsPage() {
 
           <div className="grid gap-4 lg:grid-cols-2">
             <BreakdownCard
-              title="Acierto por Mercado"
-              description="Win rate por tipo de mercado (legs evaluadas con score oficial)"
-              items={marketBreakdown}
-            />
-            <BreakdownCard
               title="Acierto por Estrategia"
-              description="Comparación Modo Segura vs Modo Diversión (tickets)"
+              description="Modo Segura vs Modo Diversión (tickets)"
               items={strategyBreakdown}
             />
+            <BreakdownCard
+              title="Acierto por Mercado (agregado)"
+              description="Win rate global por familia de mercado"
+              items={marketBreakdown}
+            />
           </div>
-
-          <BreakdownCard
-            title="Acierto por Liga"
-            description="Legs correctas por competición"
-            items={leagueBreakdown}
-          />
 
           <Card>
             <CardHeader>
               <CardTitle>Historial de apuestas</CardTitle>
               <CardDescription>
-                Estado automático vía API-Football · override manual disponible
+                Persistido en SQLite · override manual disponible
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -364,6 +779,49 @@ export default function StatsPage() {
           </Card>
         </>
       )}
+    </div>
+  );
+}
+
+function MarketBars({ items }: { items: BreakdownItem[] }) {
+  if (items.length === 0) {
+    return (
+      <p className="text-sm text-slate-500">
+        Sin legs evaluadas todavía.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      {items.map((item) => (
+        <div key={item.key} className="space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm text-slate-200">{item.label}</span>
+            <div className="flex items-center gap-2">
+              <Badge
+                variant={
+                  item.winRate >= 0.55
+                    ? "success"
+                    : item.winRate >= 0.4
+                      ? "warning"
+                      : "danger"
+                }
+              >
+                {formatPercent(item.winRate)}
+              </Badge>
+              <span className="text-[11px] text-slate-500">
+                {item.won}/{item.total}
+              </span>
+            </div>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+            <div
+              className="h-full rounded-full bg-emerald-500/80"
+              style={{ width: `${Math.round(item.winRate * 100)}%` }}
+            />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -383,42 +841,8 @@ function BreakdownCard({
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3">
-        {items.length === 0 ? (
-          <p className="text-sm text-slate-500">
-            Sin legs evaluadas todavía. Actualiza resultados tras el FT.
-          </p>
-        ) : (
-          items.map((item) => (
-            <div key={item.key} className="space-y-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm text-slate-200">{item.label}</span>
-                <div className="flex items-center gap-2">
-                  <Badge
-                    variant={
-                      item.winRate >= 0.55
-                        ? "success"
-                        : item.winRate >= 0.4
-                          ? "warning"
-                          : "danger"
-                    }
-                  >
-                    {formatPercent(item.winRate)}
-                  </Badge>
-                  <span className="text-[11px] text-slate-500">
-                    {item.won}/{item.total}
-                  </span>
-                </div>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
-                <div
-                  className="h-full rounded-full bg-emerald-500/80"
-                  style={{ width: `${Math.round(item.winRate * 100)}%` }}
-                />
-              </div>
-            </div>
-          ))
-        )}
+      <CardContent>
+        <MarketBars items={items} />
       </CardContent>
     </Card>
   );
@@ -477,9 +901,7 @@ function LegResultIcon({ status }: { status: LegStatus }) {
 function LegDetailRow({ leg }: { leg: HistoryBetLeg }) {
   const home = leg.homeTeam || leg.matchLabel.split(/\s+vs\.?\s+/i)[0] || "—";
   const away =
-    leg.awayTeam ||
-    leg.matchLabel.split(/\s+vs\.?\s+/i)[1] ||
-    "";
+    leg.awayTeam || leg.matchLabel.split(/\s+vs\.?\s+/i)[1] || "";
   const matchName = away ? `${home} vs ${away}` : home;
   const statusLine = formatLegMatchStatus(leg);
 

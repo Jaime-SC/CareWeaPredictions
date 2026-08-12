@@ -35,17 +35,19 @@ export const STRATEGY_PRESETS: Record<StrategyMode, StrategyPreset> = {
   "daily-fun": {
     strategyMode: "daily-fun",
     title: "🎰 Combinada Diversión (Alta Cuota)",
-    subtitle: "Objetivo ~200x · Stake $200 CLP → ~$40.000 · lotería del día",
+    subtitle: "Objetivo ~200x · exactamente 15 legs · Stake $200 CLP → ~$40.000",
     badgeLabel: "Alta Varianza",
     daysAhead: 0,
     riskTier: "fun",
     stake: 200,
     targetMultiplier: 200,
-    minLegs: 12,
-    maxLegs: 18,
+    minLegs: 15,
+    maxLegs: 15,
+    targetLegCount: 15,
     minOdds: 1.12,
     maxOdds: 1.55,
-    minProbability: 0.73,
+    /** Strict filter; backfill fills to targetLegCount if fewer qualify */
+    minProbability: 0.78,
   },
 };
 

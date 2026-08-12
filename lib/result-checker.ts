@@ -337,6 +337,17 @@ export async function updatePendingBets(): Promise<UpdatePendingResult> {
     );
     saveBets(updated);
 
+    // Mirror outcomes into SQLite for /stats analytics
+    try {
+      await fetch("/api/bets/sync-outcomes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bets: updated }),
+      });
+    } catch {
+      // Non-fatal: local history still updated
+    }
+
     return {
       ok: true,
       checkedFixtures: fixtures.length,

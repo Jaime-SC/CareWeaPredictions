@@ -59,7 +59,7 @@ async function buildAutoParlayResponse(
       await fetchUpcomingMatches({
         date,
         poolMode: "expanded",
-        expandIfFewerThan: 12,
+        expandIfFewerThan: 15,
       });
     const parlay = generateParlay(matches, config);
     const clipboard = formatParlayClipboard(parlay);

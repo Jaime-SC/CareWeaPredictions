@@ -1,7 +1,19 @@
 import type { MarketPrediction, MarketType, Match, MatchOdds } from "./types";
+import {
+  getLeagueWeight,
+  getMarketWeight,
+  loadModelWeights,
+  resolveMinProbability,
+} from "./model-weights";
 
-const LEAGUE_AVG_GOALS = 1.35;
-const HOME_ADVANTAGE = 1.08;
+function leagueAvgGoals(): number {
+  return loadModelWeights().global.leagueAvgGoals;
+}
+
+function homeAdvantage(): number {
+  return loadModelWeights().global.homeAdvantage;
+}
+
 const MAX_GOALS = 8;
 
 /** Factorial with memoization for Poisson PMF */
@@ -31,16 +43,16 @@ export function estimateExpectedGoals(match: Match): {
 } {
   const homeAttack =
     match.home.homeAttackStrength ??
-    match.home.goalsScoredAvg / LEAGUE_AVG_GOALS;
+    match.home.goalsScoredAvg / leagueAvgGoals();
   const homeDefense =
     match.home.homeDefenseStrength ??
-    match.home.goalsConcededAvg / LEAGUE_AVG_GOALS;
+    match.home.goalsConcededAvg / leagueAvgGoals();
   const awayAttack =
     match.away.awayAttackStrength ??
-    match.away.goalsScoredAvg / LEAGUE_AVG_GOALS;
+    match.away.goalsScoredAvg / leagueAvgGoals();
   const awayDefense =
     match.away.awayDefenseStrength ??
-    match.away.goalsConcededAvg / LEAGUE_AVG_GOALS;
+    match.away.goalsConcededAvg / leagueAvgGoals();
 
   // Form factor: recent results nudge λ slightly
   const formBoost = (form: ("W" | "D" | "L")[]) => {
@@ -58,10 +70,13 @@ export function estimateExpectedGoals(match: Match): {
         (match.h2h.homeWins + match.h2h.draws + match.h2h.awayWins)
       : 0.5;
 
+  const avgGoals = leagueAvgGoals();
+  const homeAdv = homeAdvantage();
+
   let lambdaHome =
-    LEAGUE_AVG_GOALS * homeAttack * awayDefense * HOME_ADVANTAGE * formBoost(match.home.form);
+    avgGoals * homeAttack * awayDefense * homeAdv * formBoost(match.home.form);
   let lambdaAway =
-    LEAGUE_AVG_GOALS * awayAttack * homeDefense * formBoost(match.away.form);
+    avgGoals * awayAttack * homeDefense * formBoost(match.away.form);
 
   // Blend with H2H goal average
   const h2hShare = Math.min(0.15, match.h2h.avgGoals / 20);
@@ -258,8 +273,13 @@ export function predictMatchMarkets(
   expectedGoals: { home: number; away: number };
   markets: MarketPrediction[];
 } {
-  const minProb = options?.minSafeProbability ?? 0.8;
-  const minOdds = options?.minSafeOdds ?? 1.15;
+  const weights = loadModelWeights();
+  const leagueCfg = getLeagueWeight(match.leagueName, weights);
+  const baseMinProb = options?.minSafeProbability ?? 0.8;
+  const minOdds = Math.max(
+    options?.minSafeOdds ?? weights.global.defaultMinOdds,
+    leagueCfg.minOdds || weights.global.defaultMinOdds
+  );
   const maxOdds = options?.maxSafeOdds ?? 1.35;
 
   const xg = estimateExpectedGoals(match);
@@ -291,9 +311,21 @@ export function predictMatchMarkets(
     Object.keys(probs) as MarketType[]
   ).map((market) => {
     const odds = oddsForMarket(match.odds, market);
-    const modelProbability = probs[market];
+    const mktCfg = getMarketWeight(market, weights);
+    // Apply league probability scale (risk penalty → more conservative)
+    const rawProb = probs[market];
+    const modelProbability = Math.min(
+      0.99,
+      Math.max(0, rawProb * leagueCfg.probabilityScale)
+    );
     const implied = impliedProbability(odds);
     const edge = modelProbability - implied;
+    const effectiveMin = resolveMinProbability(
+      baseMinProb,
+      market,
+      match.leagueName,
+      weights
+    );
 
     return {
       market,
@@ -303,7 +335,8 @@ export function predictMatchMarkets(
       impliedProbability: implied,
       edge,
       isSafePick:
-        modelProbability >= minProb &&
+        !mktCfg.disabled &&
+        modelProbability >= effectiveMin &&
         odds >= minOdds &&
         odds <= maxOdds,
       expectedGoals: xg,
