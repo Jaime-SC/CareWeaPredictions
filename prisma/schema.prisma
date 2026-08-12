@@ -65,3 +65,26 @@ model AccumulatorTicket {
   @@index([mode])
   @@index([status])
 }
+
+/// Persistent HTTP cache for API-Football responses (quota saver)
+model CachedApiResponse {
+  /// Stable key e.g. fixtures_date_2026-08-12 or fixtures_ids_123-456
+  id        String   @id
+  endpoint  String
+  payload   String
+  /// Far-future date = permanent (finished fixtures)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([endpoint])
+  @@index([expiresAt])
+}
+
+/// Daily count of live API-Football HTTP calls (Chile calendar day)
+model ApiQuotaDaily {
+  /// YYYY-MM-DD (Chile)
+  date      String   @id
+  callCount Int      @default(0)
+  updatedAt DateTime @updatedAt
+}

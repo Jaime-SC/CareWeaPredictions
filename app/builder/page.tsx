@@ -35,7 +35,6 @@ import {
   chileDateOffset,
   chileDateString,
   cn,
-  formatCLP,
 } from "@/lib/utils";
 import { CalendarDays, Loader2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -286,7 +285,7 @@ export default function BuilderPage() {
     [isSafe, loadSafePicks, generateFun]
   );
 
-  const projected = formatCLP(preset.stake * preset.targetMultiplier);
+  const projected = `~${preset.targetMultiplier}x`;
   const showGenerateCard =
     !generated || (!!error && (isSafe ? safePicks.length === 0 : !parlay.legs.length));
 
@@ -377,8 +376,8 @@ export default function BuilderPage() {
         <div className="rounded-xl border border-emerald-500/15 bg-emerald-500/5 px-4 py-3 text-center text-sm text-emerald-200/90">
           {STRATEGY_LABELS[strategyMode]} ·{" "}
           {isSafe
-            ? `Picks individuales · stake sugerido ${formatCLP(preset.stake)}`
-            : `Stake ${formatCLP(preset.stake)} → objetivo ~${preset.targetMultiplier}x (≈ ${projected})`}
+            ? "Picks individuales · referencia 1U · sin acumulador"
+            : `Objetivo ~${preset.targetMultiplier}x (${projected}) · ${preset.minLegs} legs · 1U`}
         </div>
 
         <Card className="border-slate-700/80 bg-slate-900/70 shadow-xl shadow-emerald-950/20">
@@ -427,12 +426,12 @@ export default function BuilderPage() {
                   )}
                   {isSafe
                     ? `Buscar Picks Seguros (${selectedDate})`
-                    : `Generar Combinada (${formatCLP(preset.stake)})`}
+                    : `Generar Combinada (~${preset.targetMultiplier}x)`}
                 </Button>
                 <p className="max-w-md text-center text-xs text-slate-500">
                   {isSafe
                     ? "Lista de apuestas individuales: Doble oportunidad, DNB y Over 1.5 con prob. modelo ≥ 85%."
-                    : "Modo alta varianza: muchas legs hacia ~200x con stake $200 CLP en la fecha elegida."}
+                    : "Modo Seguro / Alta Probabilidad: piso 80% por leg · cuotas 1.18–1.28 · objetivo ~20x–35x · métricas en unidades (1U)."}
                 </p>
               </div>
             )}
@@ -469,7 +468,6 @@ export default function BuilderPage() {
             date={selectedDate}
             loading={loading}
             fromCache={fromCache}
-            stakeCLP={preset.stake}
             onRefresh={() => loadSafePicks({ force: true })}
           />
         )}

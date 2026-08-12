@@ -19,7 +19,7 @@ import type {
   TrainingFeatureRow,
 } from "./bet-types";
 import type { GeneratedParlay, MarketType, StrategyMode } from "./types";
-import { chileDateString } from "./utils";
+import { chileDateString, UNIT_STAKE } from "./utils";
 
 export type {
   DateMarketStatsRow,
@@ -179,9 +179,10 @@ export async function recordBet(input: RecordBetInput) {
       data: {
         date,
         mode: String(mode),
-        stakeCLP: input.stakeCLP,
+        // Always persist 1 Unit (1U) for analytics — ignore monetary stake
+        stakeCLP: UNIT_STAKE,
         totalOdds: input.totalOdds,
-        payoutCLP: input.payoutCLP,
+        payoutCLP: UNIT_STAKE * input.totalOdds,
         status: "PENDING",
       },
     });
@@ -216,9 +217,9 @@ export async function recordBetFromParlay(
     date,
     strategyMode,
     mode: modeFromStrategy(strategyMode),
-    stakeCLP: parlay.stake,
+    stakeCLP: UNIT_STAKE,
     totalOdds: parlay.totalOdds,
-    payoutCLP: parlay.potentialPayout,
+    payoutCLP: UNIT_STAKE * parlay.totalOdds,
     legs: parlay.legs.map((leg) => ({
       matchId: leg.matchId,
       matchLabel: leg.matchLabel,
@@ -404,6 +405,20 @@ export async function syncOutcomesFromHistory(
 export async function clearAllBets(): Promise<void> {
   await prisma.prediction.deleteMany();
   await prisma.accumulatorTicket.deleteMany();
+}
+
+/** Delete a single accumulator ticket (predictions cascade via Prisma). */
+export async function deleteTicketById(ticketId: string): Promise<boolean> {
+  const existing = await prisma.accumulatorTicket.findUnique({
+    where: { id: ticketId },
+    select: { id: true },
+  });
+  if (!existing) return false;
+
+  await prisma.accumulatorTicket.delete({
+    where: { id: ticketId },
+  });
+  return true;
 }
 
 /** Build analytics payload for /stats and AI training export. */

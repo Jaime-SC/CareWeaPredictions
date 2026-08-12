@@ -186,7 +186,7 @@ export function calibrateModelParameters(
       marketsAdjusted += 1;
     } else if (marketRoi > 0.15 && wr >= 0.8) {
       weight = 1.15;
-      minProbability = Math.max(0.72, previous.global.strictMinProbability - 0.02);
+      minProbability = Math.max(0.8, previous.global.strictMinProbability - 0.02);
       marketsAdjusted += 1;
     } else {
       weight = 1;

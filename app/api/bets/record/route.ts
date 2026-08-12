@@ -22,27 +22,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (
-      typeof body.stakeCLP !== "number" ||
-      typeof body.totalOdds !== "number" ||
-      typeof body.payoutCLP !== "number"
-    ) {
+    if (typeof body.totalOdds !== "number") {
       return NextResponse.json(
         {
           success: false,
-          error: "Body inválido: stakeCLP, totalOdds y payoutCLP son requeridos.",
+          error: "Body inválido: totalOdds es requerido.",
         },
         { status: 400 }
       );
     }
 
+    const unitStake = 1;
     const result = await recordBet({
       date: typeof body.date === "string" ? body.date : undefined,
       mode: body.mode,
       strategyMode: body.strategyMode as StrategyMode | undefined,
-      stakeCLP: body.stakeCLP,
+      stakeCLP: unitStake,
       totalOdds: body.totalOdds,
-      payoutCLP: body.payoutCLP,
+      payoutCLP: unitStake * body.totalOdds,
       legs: body.legs.map((leg) => ({
         matchId: String(leg.matchId ?? ""),
         matchLabel: String(leg.matchLabel ?? ""),

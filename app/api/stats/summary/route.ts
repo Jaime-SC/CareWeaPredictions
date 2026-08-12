@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   buildStatsSummary,
   clearAllBets,
+  deleteTicketById,
   updateTicketStatusInDb,
 } from "@/lib/bet-db";
 import type { BetStatus } from "@/lib/history-tracker";
@@ -34,8 +35,11 @@ export async function GET() {
 
 /**
  * PATCH /api/stats/summary
- * Manual ticket status override or clear-all.
- * Body: { action: "status", ticketId, status } | { action: "clear" }
+ * Manual ticket status override, single delete, or clear-all.
+ * Body:
+ *   { action: "status", ticketId, status }
+ *   | { action: "delete", ticketId }
+ *   | { action: "clear" }
  */
 export async function PATCH(request: NextRequest) {
   try {
@@ -44,6 +48,16 @@ export async function PATCH(request: NextRequest) {
     if (body?.action === "clear") {
       await clearAllBets();
       return NextResponse.json({ success: true, cleared: true });
+    }
+
+    if (body?.action === "delete" && body.ticketId) {
+      const deleted = await deleteTicketById(String(body.ticketId));
+      const payload = await buildStatsSummary();
+      return NextResponse.json({
+        success: true,
+        deleted,
+        ...payload,
+      });
     }
 
     if (body?.action === "status" && body.ticketId && body.status) {

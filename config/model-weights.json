@@ -3,12 +3,14 @@
   "calibratedAt": null,
   "sampleSize": 0,
   "global": {
-    "strictMinProbability": 0.78,
-    "backfillMinProbability": 0.55,
-    "over15MinProbability": 0.78,
+    "strictMinProbability": 0.8,
+    "backfillMinProbability": 0.8,
+    "over15MinProbability": 0.8,
     "defaultMinOdds": 1.12,
-    "homeAdvantage": 1.08,
-    "leagueAvgGoals": 1.35
+    "homeAdvantage": 1.12,
+    "leagueAvgGoals": 1.35,
+    "leagueAvgHomeGoals": 1.45,
+    "leagueAvgAwayGoals": 1.15
   },
   "leagues": {},
   "markets": {},

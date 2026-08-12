@@ -1,17 +1,46 @@
-import type { LeagueId, Match } from "./types";
+import type { LeagueId, Match, MatchOdds } from "./types";
 import {
   API_CONNECTION_ERROR_MESSAGE,
   EMPTY_MATCHES_MESSAGE,
 } from "./api-messages";
-import { CHILE_TIMEZONE, chileDateRange } from "./utils";
+import {
+  CACHE_TTL_MINUTES,
+  fetchWithCache,
+  ttlMinutesForFixtureDate,
+} from "./api-cache";
+import {
+  applyOddsImpliedStats,
+  fixtureIdFromMatchId,
+  parseFixtureOdds,
+  type ApiOddsFixture,
+} from "./odds-mapper";
+import {
+  ALLOWED_LEAGUE_IDS,
+  CLUB_FRIENDLY_LEAGUE_IDS,
+  ELITE_DOMESTIC_LEAGUE_IDS,
+  isAllowedLeagueId,
+  isClubFriendlyLeagueId,
+} from "../config/allowed-leagues";
+import { CHILE_TIMEZONE, chileDateApiWindow, chileDateRange, chileDateString } from "./utils";
 
 export {
   API_CONNECTION_ERROR_MESSAGE,
   EMPTY_MATCHES_MESSAGE,
 } from "./api-messages";
 
-/** Direct API-Football (api-sports) — not RapidAPI */
-const BASE_URL = "https://v3.football.api-sports.io";
+export {
+  fetchWithCache,
+  buildCacheKey,
+  getApiQuota,
+  CACHE_TTL_MINUTES,
+  API_DAILY_QUOTA_LIMIT,
+} from "./api-cache";
+
+export {
+  ALLOWED_LEAGUE_IDS,
+  isAllowedLeagueId,
+  isClubFriendlyLeagueId,
+} from "../config/allowed-leagues";
 
 /** @deprecated Prefer EMPTY_MATCHES_MESSAGE */
 export const EMPTY_ELITE_MESSAGE = EMPTY_MATCHES_MESSAGE;
@@ -36,64 +65,6 @@ export class FootballApiError extends Error {
   }
 }
 
-/** National-team / FIFA-style friendlies */
-const INTERNATIONAL_FRIENDLY_IDS = new Set([10]);
-
-/**
- * Club friendlies / pre-season cups — kept ONLY when both clubs
- * belong to a verified top-tier domestic league.
- * API-Football league 667 = Friendlies Clubs.
- */
-const CLUB_FRIENDLY_IDS = new Set([667]);
-
-/** Core elite competitions (always allowed) */
-const CORE_COMPETITION_IDS = new Set([
-  2, // UCL
-  3, // UEL
-  848, // UECL
-  11, // Sudamericana
-  13, // Libertadores
-  71, // Brasileirão
-  128, // Argentina
-  253, // MLS
-]);
-
-/**
- * Expanded pool for Fun modes when the elite day is thin:
- * Big-5 + South America + Chile/Colombia + MX.
- */
-const EXPANDED_COMPETITION_IDS = new Set([
-  ...CORE_COMPETITION_IDS,
-  39, // Premier League
-  140, // La Liga
-  135, // Serie A
-  78, // Bundesliga
-  61, // Ligue 1
-  265, // Primera División Chile
-  239, // Primera A Colombia
-  262, // Liga MX
-  10, // International friendlies
-  667, // Club friendlies (elite-filtered)
-]);
-
-const ALLOWED_LEAGUE_IDS = new Set([
-  ...INTERNATIONAL_FRIENDLY_IDS,
-  ...CLUB_FRIENDLY_IDS,
-  ...CORE_COMPETITION_IDS,
-]);
-
-const TOP_TIER_LEAGUE_IDS = [
-  39, // Premier League
-  140, // La Liga
-  135, // Serie A
-  78, // Bundesliga
-  61, // Ligue 1
-  71, // Brasileirão Serie A
-  128, // Liga Profesional Argentina
-  265, // Chile
-  239, // Colombia
-] as const;
-
 /** Free-plan roster seasons to try (newest first) */
 const ROSTER_SEASON_CANDIDATES = [2024, 2023, 2022];
 
@@ -103,22 +74,38 @@ const YOUTH_OR_RESERVE_RE =
 const LEAGUE_ID_TO_SLUG: Record<number, LeagueId> = {
   2: "champions-league",
   3: "europa-league",
-  10: "international-friendlies",
   11: "copa-sudamericana",
   13: "copa-libertadores",
+  16: "concacaf-champions-cup",
   39: "premier-league",
+  45: "premier-league",
+  48: "premier-league",
   61: "ligue-1",
+  66: "ligue-1",
   71: "brasileirao",
+  73: "brasileirao",
   78: "bundesliga",
+  81: "bundesliga",
   128: "liga-profesional",
+  130: "liga-profesional",
   135: "serie-a",
+  137: "serie-a",
   140: "laliga",
+  143: "laliga",
   239: "primera-colombia",
+  240: "primera-colombia",
+  242: "liga-pro-ecuador",
   253: "mls",
+  254: "mls",
   262: "liga-mx",
+  263: "liga-mx",
   265: "primera-chile",
+  266: "primera-chile",
+  666: "club-friendlies",
   667: "club-friendlies",
+  779: "leagues-cup",
   848: "conference-league",
+  1050: "liga-pro-ecuador",
 };
 
 export interface FetchMatchesOptions {
@@ -128,12 +115,14 @@ export interface FetchMatchesOptions {
   /** Fetch a single civil date YYYY-MM-DD (Chile calendar). Overrides daysAhead. */
   date?: string;
   /**
-   * Fun modes: start with expanded South America / Big-5 / cups pool.
-   * Safe modes: keep core elite competitions only.
+   * All modes resolve to the same elite whitelist.
+   * Kept for API compatibility (`core` | `expanded` | `wide` → elite only).
    */
-  poolMode?: "core" | "expanded";
-  /** If core pool is thinner than this, auto-upgrade to expanded. */
+  poolMode?: "core" | "expanded" | "wide";
+  /** Ignored — elite whitelist is always applied. */
   expandIfFewerThan?: number;
+  includeOdds?: boolean;
+  requireOdds?: boolean;
 }
 
 export interface FetchMatchesResult {
@@ -141,11 +130,11 @@ export interface FetchMatchesResult {
   source: "live";
   message?: string;
   daysFetched?: number;
-  poolMode?: "core" | "expanded";
+  poolMode?: "core" | "expanded" | "wide";
 }
 
 type ApiFixture = {
-  fixture: { id: number; date: string };
+  fixture: { id: number; date: string; timestamp?: number };
   league: { id: number; name: string; season?: number };
   teams: {
     home: { id: number; name: string };
@@ -177,7 +166,7 @@ function isYouthOrReserve(name: string): boolean {
 }
 
 function mapLeagueSlug(apiLeagueId: number): LeagueId {
-  return LEAGUE_ID_TO_SLUG[apiLeagueId] ?? "international-friendlies";
+  return LEAGUE_ID_TO_SLUG[apiLeagueId] ?? "club-friendlies";
 }
 
 function shortName(name: string): string {
@@ -203,38 +192,68 @@ function formatApiErrors(errors: ApiEnvelope<unknown>["errors"]): string {
   return Object.values(errors).join("; ");
 }
 
+/** Free-plan / date-window rejections — not a connectivity outage. */
+function isPlanOrDateRestriction(
+  errors: ApiEnvelope<unknown>["errors"]
+): boolean {
+  const detail = formatApiErrors(errors).toLowerCase();
+  return (
+    detail.includes("plan") ||
+    detail.includes("date") ||
+    detail.includes("subscription") ||
+    detail.includes("not available") ||
+    detail.includes("your subscription")
+  );
+}
+
 async function apiGet<T>(
   path: string,
   apiKey: string,
-  opts?: { noStore?: boolean }
+  opts?: {
+    /** @deprecated Prefer explicit ttlMinutes — kept for callers that forced no Next cache */
+    noStore?: boolean;
+    ttlMinutes?: number | null;
+    cacheKey?: string;
+    resolveTtl?: (data: ApiEnvelope<T>) => number | null;
+  }
 ): Promise<ApiEnvelope<T>> {
-  let res: Response;
+  const [endpointPart, query = ""] = path.split("?");
+  const endpoint = endpointPart.startsWith("/")
+    ? endpointPart
+    : `/${endpointPart}`;
+  const params: Record<string, string> = {};
+  for (const [k, v] of new URLSearchParams(query).entries()) {
+    params[k] = v;
+  }
+
   try {
-    res = await fetch(`${BASE_URL}${path}`, {
-      headers: {
-        "x-apisports-key": apiKey,
-      },
-      ...(opts?.noStore
-        ? { cache: "no-store" as const }
-        : { next: { revalidate: 300 } }),
-    });
-  } catch {
+    return await fetchWithCache<ApiEnvelope<T>>(
+      endpoint,
+      params,
+      opts?.ttlMinutes ?? CACHE_TTL_MINUTES.TODAY_PENDING,
+      {
+        apiKey,
+        cacheKey: opts?.cacheKey,
+        resolveTtl: opts?.resolveTtl,
+      }
+    );
+  } catch (err) {
+    const status =
+      typeof err === "object" &&
+      err !== null &&
+      "status" in err &&
+      typeof (err as { status?: unknown }).status === "number"
+        ? (err as { status: number }).status
+        : undefined;
+
+    if (status === 401 || status === 403) {
+      throw new FootballApiError(API_CONNECTION_ERROR_MESSAGE, "AUTH", 401);
+    }
+    if (status === 429) {
+      throw new FootballApiError(API_CONNECTION_ERROR_MESSAGE, "API_ERROR", 429);
+    }
     throw new FootballApiError(API_CONNECTION_ERROR_MESSAGE, "API_ERROR", 502);
   }
-
-  if (res.status === 401 || res.status === 403) {
-    throw new FootballApiError(API_CONNECTION_ERROR_MESSAGE, "AUTH", 401);
-  }
-
-  if (res.status === 429) {
-    throw new FootballApiError(API_CONNECTION_ERROR_MESSAGE, "API_ERROR", 429);
-  }
-
-  if (!res.ok) {
-    throw new FootballApiError(API_CONNECTION_ERROR_MESSAGE, "API_ERROR", 502);
-  }
-
-  return (await res.json()) as ApiEnvelope<T>;
 }
 
 /**
@@ -250,11 +269,12 @@ async function getEliteTeamIds(apiKey: string): Promise<Set<number>> {
     let seasonHadData = false;
 
     await Promise.all(
-      TOP_TIER_LEAGUE_IDS.map(async (leagueId) => {
+      ELITE_DOMESTIC_LEAGUE_IDS.map(async (leagueId) => {
         try {
           const json = await apiGet<Array<{ team: { id: number } }>>(
             `/teams?league=${leagueId}&season=${season}`,
-            apiKey
+            apiKey,
+            { ttlMinutes: CACHE_TTL_MINUTES.ROSTER }
           );
           if (hasApiErrors(json.errors)) return;
           const rows = json.response ?? [];
@@ -281,70 +301,119 @@ async function getEliteTeamIds(apiKey: string): Promise<Set<number>> {
 
 function shouldKeepFixture(
   item: ApiFixture,
-  eliteTeamIds: Set<number>,
-  allowedLeagueIds: Set<number>
+  eliteTeamIds: Set<number>
 ): boolean {
   const leagueId = item.league.id;
-  if (!allowedLeagueIds.has(leagueId)) return false;
-
   const home = item.teams.home;
   const away = item.teams.away;
+
+  if (!isAllowedLeagueId(leagueId)) return false;
 
   if (isYouthOrReserve(home.name) || isYouthOrReserve(away.name)) {
     return false;
   }
 
-  if (CLUB_FRIENDLY_IDS.has(leagueId)) {
+  // Elite club friendlies: keep if AT LEAST ONE side is from a whitelisted domestic league
+  if (isClubFriendlyLeagueId(leagueId)) {
     if (eliteTeamIds.size === 0) return false;
-    return eliteTeamIds.has(home.id) && eliteTeamIds.has(away.id);
+    return eliteTeamIds.has(home.id) || eliteTeamIds.has(away.id);
   }
 
   return true;
 }
 
+/** Chile civil YYYY-MM-DD for a fixture kickoff (ISO or unix seconds). */
+export function chileCivilDateFromKickoff(
+  isoOrUnix: string | number | null | undefined
+): string | null {
+  if (isoOrUnix == null || isoOrUnix === "") return null;
+  const ms =
+    typeof isoOrUnix === "number"
+      ? isoOrUnix < 1e12
+        ? isoOrUnix * 1000
+        : isoOrUnix
+      : Date.parse(isoOrUnix);
+  if (!Number.isFinite(ms)) return null;
+  return chileDateString(new Date(ms));
+}
+
+/** Keep only fixtures whose kickoff falls on Chile civil date `ymd`. */
+export function filterMatchesOnChileDate(
+  matches: Match[],
+  ymd: string
+): Match[] {
+  return matches.filter((m) => chileCivilDateFromKickoff(m.kickoff) === ymd);
+}
+
+function fixtureBelongsToChileDate(
+  item: ApiFixture,
+  ymd: string
+): boolean {
+  const fromTs = chileCivilDateFromKickoff(item.fixture.timestamp ?? null);
+  if (fromTs) return fromTs === ymd;
+  return chileCivilDateFromKickoff(item.fixture.date) === ymd;
+}
+
 /**
  * Maps a live fixture into the Match shape.
- * Attack/defense averages and odds are provisional league baselines until
- * dedicated stats/odds endpoints are wired — teams/kickoff come from API only.
+ * Odds/stats are filled later via /odds + local enrichment — placeholders
+ * here are only structural and MUST be replaced before prediction.
  */
 function toMatch(item: ApiFixture): Match {
+  const kickoff =
+    item.fixture.date ||
+    (item.fixture.timestamp
+      ? new Date(
+          item.fixture.timestamp < 1e12
+            ? item.fixture.timestamp * 1000
+            : item.fixture.timestamp
+        ).toISOString()
+      : new Date().toISOString());
+
   return {
     id: `live-${item.fixture.id}`,
     league: mapLeagueSlug(item.league.id),
     leagueName: item.league.name,
-    kickoff: item.fixture.date,
+    kickoff,
     home: {
       name: item.teams.home.name,
       shortName: shortName(item.teams.home.name),
       form: [],
-      goalsScoredAvg: 1.35,
-      goalsConcededAvg: 1.15,
+      goalsScoredAvg: 0,
+      goalsConcededAvg: 0,
     },
     away: {
       name: item.teams.away.name,
       shortName: shortName(item.teams.away.name),
       form: [],
-      goalsScoredAvg: 1.2,
-      goalsConcededAvg: 1.25,
+      goalsScoredAvg: 0,
+      goalsConcededAvg: 0,
     },
     h2h: { homeWins: 0, draws: 0, awayWins: 0, avgGoals: 2.4 },
-    odds: {
-      home: 2.1,
-      draw: 3.2,
-      away: 3.5,
-      doubleChance1X: 1.28,
-      doubleChanceX2: 1.45,
-      over05: 1.18,
-      over15: 1.32,
-      over25: 1.55,
-      under35: 1.3,
-      under45: 1.18,
-      homeScores: 1.25,
-      awayScores: 1.33,
-      dnbHome: 1.28,
-      dnbAway: 1.4,
-    },
+    odds: EMPTY_ODDS,
   };
+}
+
+/** Sentinel odds — never used for ranking once includeOdds is applied. */
+const EMPTY_ODDS: MatchOdds = {
+  home: 0,
+  draw: 0,
+  away: 0,
+  doubleChance1X: 0,
+  doubleChanceX2: 0,
+  over05: 0,
+  over15: 0,
+  over25: 0,
+  under35: 0,
+  under45: 0,
+  homeScores: 0,
+  awayScores: 0,
+  dnbHome: 0,
+  dnbAway: 0,
+};
+
+function hasLiveOdds(odds: MatchOdds): boolean {
+  return odds.home > 1 && odds.draw > 1 && odds.away > 1 && odds.doubleChance1X > 1;
 }
 
 /**
@@ -354,26 +423,24 @@ function toMatch(item: ApiFixture): Match {
 export async function fetchUpcomingMatches(
   options: FetchMatchesOptions = {}
 ): Promise<FetchMatchesResult> {
-  const preferredPool = options.poolMode ?? "core";
-  const expandIfFewerThan = options.expandIfFewerThan ?? 10;
+  const preferredPool = options.poolMode ?? "expanded";
+  const includeOdds = options.includeOdds ?? true;
+  const requireOdds = options.requireOdds ?? false;
 
+  // Every poolMode resolves to the same elite whitelist
   let result = await fetchFromApiFootball({
     ...options,
     poolMode: preferredPool,
+    includeOdds,
+    requireOdds,
   });
 
-  // Fun / thin days: widen league criteria automatically
-  if (
-    preferredPool === "core" &&
-    result.matches.length < expandIfFewerThan
-  ) {
-    const expanded = await fetchFromApiFootball({
-      ...options,
-      poolMode: "expanded",
-    });
-    if (expanded.matches.length > result.matches.length) {
-      result = expanded;
-    }
+  // Strict Chile civil-date clamp when a single date was requested
+  if (options.date) {
+    result = {
+      ...result,
+      matches: filterMatchesOnChileDate(result.matches, options.date),
+    };
   }
 
   if (result.matches.length === 0) {
@@ -388,20 +455,96 @@ export async function fetchUpcomingMatches(
   };
 }
 
+type OddsPageEnvelope = {
+  response?: ApiOddsFixture[];
+  errors?: ApiEnvelope<unknown>["errors"];
+  paging?: { current: number; total: number };
+};
+
+/**
+ * Prefetch bookmaker odds for a civil date (paginated, cached).
+ * Follows all pages (soft cap) so whitelist matchdays are not truncated.
+ */
+async function fetchOddsMapForDate(
+  date: string,
+  apiKey: string,
+  maxPages = 25
+): Promise<Map<number, MatchOdds>> {
+  const map = new Map<number, MatchOdds>();
+  let page = 1;
+  let totalPages = 1;
+
+  while (page <= totalPages && page <= maxPages) {
+    try {
+      const json = await apiGet<ApiOddsFixture[]>(
+        `/odds?date=${date}&page=${page}`,
+        apiKey,
+        {
+          ttlMinutes: ttlMinutesForFixtureDate(date) ?? CACHE_TTL_MINUTES.FUTURE,
+          cacheKey: `odds_date_${date}_p${page}`,
+        }
+      );
+
+      if (hasApiErrors(json.errors)) {
+        break;
+      }
+
+      const envelope = json as OddsPageEnvelope;
+      totalPages = Math.max(1, envelope.paging?.total ?? 1);
+
+      for (const row of envelope.response ?? []) {
+        const parsed = parseFixtureOdds(row);
+        if (!parsed) continue;
+        map.set(row.fixture.id, parsed);
+      }
+    } catch (err) {
+      if (err instanceof FootballApiError && err.code === "AUTH") throw err;
+      console.warn(`[api-football] odds fetch failed date=${date} page=${page}:`, err);
+      break;
+    }
+    page += 1;
+  }
+
+  return map;
+}
+
+function attachOddsToMatches(
+  matches: Match[],
+  oddsByFixture: Map<number, MatchOdds>,
+  requireOdds: boolean
+): Match[] {
+  const out: Match[] = [];
+  for (const match of matches) {
+    const fixtureId = fixtureIdFromMatchId(match.id);
+    const odds = fixtureId != null ? oddsByFixture.get(fixtureId) : undefined;
+    if (!odds) {
+      // Keep fixture — Poisson fair odds fill gaps at prediction time
+      if (!requireOdds) out.push(match);
+      continue;
+    }
+    out.push(applyOddsImpliedStats(match, odds));
+  }
+  return out;
+}
+
 async function fetchFromApiFootball(
   options: FetchMatchesOptions
 ): Promise<{
   matches: Match[];
   daysFetched: number;
-  poolMode: "core" | "expanded";
+  poolMode: "core" | "expanded" | "wide";
 }> {
   const apiKey = resolveApiKey();
+  // Chile civil day → fetch ±1 API dates so UTC-shifted evening kickoffs are not missed
   const dates = options.date
-    ? [options.date]
+    ? chileDateApiWindow(options.date)
     : dateStrings(options.daysAhead ?? 3);
-  const poolMode = options.poolMode ?? "core";
-  const allowedLeagueIds =
-    poolMode === "expanded" ? EXPANDED_COMPETITION_IDS : ALLOWED_LEAGUE_IDS;
+  const targetChileDate = options.date ?? null;
+  const poolMode = options.poolMode ?? "expanded";
+  // Always the strict elite whitelist — poolMode is cosmetic for callers
+  const includeOdds = options.includeOdds ?? true;
+  // Never hard-drop whitelist fixtures solely for missing book lines
+  const requireOdds = options.requireOdds ?? false;
 
   const raw: ApiFixture[] = [];
   const seen = new Set<number>();
@@ -414,12 +557,18 @@ async function fetchFromApiFootball(
     try {
       const json = await apiGet<ApiFixture[]>(
         `/fixtures?date=${date}&timezone=${encodeURIComponent(CHILE_TIMEZONE)}`,
-        apiKey
+        apiKey,
+        {
+          ttlMinutes: ttlMinutesForFixtureDate(date),
+          cacheKey: `fixtures_date_${date}`,
+        }
       );
 
       if (hasApiErrors(json.errors)) {
-        const detail = formatApiErrors(json.errors).toLowerCase();
-        if (detail.includes("plan") || detail.includes("date")) {
+        if (isPlanOrDateRestriction(json.errors)) {
+          console.warn(
+            `[api-football] date ${date} no disponible en el plan actual — omitida`
+          );
           continue;
         }
         fatalError = new FootballApiError(
@@ -450,23 +599,46 @@ async function fetchFromApiFootball(
     }
   }
 
+  // All dates blocked by plan/window → empty pool (caller may treat as EMPTY).
+  // Only throw 502 when we had a real upstream failure.
   if (successfulDays === 0) {
-    throw (
-      fatalError ??
-      new FootballApiError(API_CONNECTION_ERROR_MESSAGE, "API_ERROR", 502)
-    );
+    if (fatalError) throw fatalError;
+    return { matches: [], daysFetched: 0, poolMode };
   }
 
-  const needsEliteRoster = raw.some((f) => CLUB_FRIENDLY_IDS.has(f.league.id));
+  const needsEliteRoster = raw.some((f) =>
+    CLUB_FRIENDLY_LEAGUE_IDS.has(f.league.id)
+  );
   const eliteTeamIds = needsEliteRoster
     ? await getEliteTeamIds(apiKey)
     : new Set<number>();
 
   let results = raw
-    .filter((item) =>
-      shouldKeepFixture(item, eliteTeamIds, allowedLeagueIds)
-    )
+    .filter((item) => {
+      if (!shouldKeepFixture(item, eliteTeamIds)) return false;
+      // Prefer Chile TZ civil-day membership over raw API date bucket
+      if (targetChileDate && !fixtureBelongsToChileDate(item, targetChileDate)) {
+        return false;
+      }
+      return true;
+    })
     .map(toMatch);
+
+  // Belt-and-suspenders: never leak another Chile civil day when date= is set
+  if (targetChileDate) {
+    results = filterMatchesOnChileDate(results, targetChileDate);
+  }
+
+  if (includeOdds) {
+    const oddsMaps = await Promise.all(
+      dates.map((d) => fetchOddsMapForDate(d, apiKey))
+    );
+    const merged = new Map<number, MatchOdds>();
+    for (const m of oddsMaps) {
+      for (const [id, odds] of m) merged.set(id, odds);
+    }
+    results = attachOddsToMatches(results, merged, requireOdds);
+  }
 
   results.sort(
     (a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime()
@@ -475,6 +647,17 @@ async function fetchFromApiFootball(
   if (options.leagues && options.leagues.length > 0) {
     results = results.filter((m) => options.leagues!.includes(m.league));
   }
+
+  // Optional strict mode only — default keeps fixtures and lets Poisson fill odds
+  if (requireOdds) {
+    results = results.filter((m) => hasLiveOdds(m.odds));
+  }
+
+  console.log(
+    `[api-football] elite fixtures kept=${results.length}` +
+      (targetChileDate ? ` chileDate=${targetChileDate}` : "") +
+      ` apiDates=${dates.join(",")}`
+  );
 
   return {
     matches: results,
@@ -548,7 +731,21 @@ export async function fetchFixturesByIds(
     const json = await apiGet<ApiFixtureResult[]>(
       `/fixtures?ids=${idsParam}`,
       apiKey,
-      { noStore: true }
+      {
+        ttlMinutes: CACHE_TTL_MINUTES.TODAY_PENDING,
+        cacheKey: `fixtures_ids_${idsParam}`,
+        resolveTtl: (envelope) => {
+          const rows = envelope.response ?? [];
+          if (rows.length === 0) return CACHE_TTL_MINUTES.TODAY_PENDING;
+          const allFinished = rows.every((item) =>
+            FINISHED_SHORT.has(
+              (item.fixture.status?.short ?? "").toUpperCase()
+            )
+          );
+          // Finished matches → permanent cache (never burn quota again)
+          return allFinished ? null : CACHE_TTL_MINUTES.TODAY_PENDING;
+        },
+      }
     );
 
     if (hasApiErrors(json.errors)) {
@@ -622,19 +819,28 @@ export async function pingApiFootball(): Promise<{
 }> {
   try {
     const apiKey = resolveApiKey();
-    const res = await fetch(`${BASE_URL}/status`, {
-      headers: { "x-apisports-key": apiKey },
-      cache: "no-store",
-    });
-    const json = await res.json();
+    const json = await fetchWithCache<{ response?: unknown }>(
+      "/status",
+      {},
+      CACHE_TTL_MINUTES.STATUS,
+      { apiKey, cacheKey: "status_account" }
+    );
     return {
-      ok: res.ok,
-      status: res.status,
+      ok: true,
+      status: 200,
       account: json?.response ?? json,
     };
   } catch (error) {
+    const status =
+      typeof error === "object" &&
+      error !== null &&
+      "status" in error &&
+      typeof (error as { status?: unknown }).status === "number"
+        ? (error as { status: number }).status
+        : undefined;
     return {
       ok: false,
+      status,
       error: error instanceof Error ? error.message : String(error),
     };
   }

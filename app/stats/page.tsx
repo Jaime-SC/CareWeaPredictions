@@ -29,14 +29,15 @@ import {
   computeStrategyBreakdown,
   computeSummary,
   countLegHits,
-  formatSignedCLP,
+  deleteBetById,
+  formatSignedUnits,
   loadBets,
   purgeFakeHistory,
   replaceBets,
   updateBetStatus,
 } from "@/lib/history-tracker";
 import { formatLegMatchStatus, updatePendingBets } from "@/lib/result-checker";
-import { cn, formatCLP, formatOdds, formatPercent } from "@/lib/utils";
+import { cn, formatOdds, formatPercent } from "@/lib/utils";
 import {
   Check,
   CheckCircle2,
@@ -124,6 +125,7 @@ export default function StatsPage() {
   const [calibrateMsg, setCalibrateMsg] = useState<string | null>(null);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
 
   const refreshFromDb = useCallback(async () => {
     purgeFakeHistory();
@@ -289,6 +291,54 @@ export default function StatsPage() {
     setUpdateError(null);
   }
 
+  async function handleDeleteBet(betId: string) {
+    if (
+      !window.confirm(
+        "¿Seguro que deseas eliminar esta combinada del historial?"
+      )
+    ) {
+      return;
+    }
+
+    setRemovingIds((prev) => new Set(prev).add(betId));
+
+    // Smooth exit, then drop from state so KPIs recompute immediately
+    window.setTimeout(async () => {
+      deleteBetById(betId);
+
+      setBets((prev) => prev.filter((b) => b.id !== betId));
+      setApiSummary(undefined);
+      setRemovingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(betId);
+        return next;
+      });
+
+      try {
+        const res = await fetch("/api/stats/summary", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "delete", ticketId: betId }),
+        });
+        const data = (await res.json().catch(() => null)) as StatsApiPayload | null;
+        if (res.ok && data?.success) {
+          const tickets = data.tickets ?? [];
+          setBets(tickets);
+          replaceBets(tickets);
+          setByLeague(data.byLeague ?? []);
+          setByDateMarket(data.byDateMarket ?? []);
+          setTrainingExport(data.trainingExport ?? []);
+          setApiSummary(data.summary);
+          if (tickets.length === 0) {
+            setUpdateMsg(null);
+          }
+        }
+      } catch {
+        // local already removed; keep optimistic UI
+      }
+    }, 220);
+  }
+
   function handleExportTraining() {
     const payload = {
       exportedAt: new Date().toISOString(),
@@ -390,8 +440,8 @@ export default function StatsPage() {
             Analytics de entrenamiento
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-400">
-            Rendimiento agrupado por competición, fecha y mercado — datos
-            persistidos para afinar el modelo Poisson / ML.
+            Win rate, ROI en unidades (1U) y conteo de tickets — sin montos en
+            CLP. Datos persistidos para afinar el modelo Poisson / ML.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -664,9 +714,9 @@ export default function StatsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Crecimiento de bankroll</CardTitle>
+              <CardTitle>Rendimiento acumulado (unidades)</CardTitle>
               <CardDescription>
-                Beneficio acumulado en CLP (tickets resueltos)
+                P&amp;L en unidades (1U por ticket resuelto)
               </CardDescription>
             </CardHeader>
             <CardContent className="h-72 pt-2 sm:h-80">
@@ -682,7 +732,7 @@ export default function StatsPage() {
                   >
                     <defs>
                       <linearGradient
-                        id="bankrollFill"
+                        id="unitsFill"
                         x1="0"
                         y1="0"
                         x2="0"
@@ -715,7 +765,7 @@ export default function StatsPage() {
                     <YAxis
                       tick={{ fill: "#64748b", fontSize: 11 }}
                       tickFormatter={(v: number) =>
-                        `${v >= 0 ? "" : "-"}$${Math.abs(Math.round(v / 1000))}k`
+                        `${v >= 0 ? "" : "−"}${Math.abs(Number(v.toFixed(1)))}U`
                       }
                       axisLine={false}
                       tickLine={false}
@@ -730,8 +780,8 @@ export default function StatsPage() {
                       }}
                       labelStyle={{ color: "#94a3b8" }}
                       formatter={(value) => [
-                        formatSignedCLP(Number(value ?? 0)),
-                        "Bankroll",
+                        formatSignedUnits(Number(value ?? 0)),
+                        "Unidades",
                       ]}
                     />
                     <Area
@@ -739,7 +789,7 @@ export default function StatsPage() {
                       dataKey="bankroll"
                       stroke="#34d399"
                       strokeWidth={2}
-                      fill="url(#bankrollFill)"
+                      fill="url(#unitsFill)"
                     />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -772,7 +822,9 @@ export default function StatsPage() {
                 <BetRow
                   key={bet.id}
                   bet={bet}
+                  removing={removingIds.has(bet.id)}
                   onStatus={(status) => handleStatus(bet.id, status)}
+                  onDelete={() => handleDeleteBet(bet.id)}
                 />
               ))}
             </CardContent>
@@ -940,10 +992,14 @@ function LegDetailRow({ leg }: { leg: HistoryBetLeg }) {
 
 function BetRow({
   bet,
+  removing = false,
   onStatus,
+  onDelete,
 }: {
   bet: HistoryBet;
+  removing?: boolean;
   onStatus: (status: BetStatus) => void;
+  onDelete: () => void;
 }) {
   const [expanded, setExpanded] = useState(
     () => bet.status === "pending" || bet.status === "lost"
@@ -961,7 +1017,7 @@ function BetRow({
           ? { variant: "warning" as const, label: "Cancelada" }
           : { variant: "info" as const, label: "Pendiente" };
 
-  const pnl =
+  const unitPnl =
     bet.status === "won"
       ? bet.potentialReturn - bet.stakeCLP
       : bet.status === "lost"
@@ -969,11 +1025,28 @@ function BetRow({
         : 0;
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-950/50">
+    <div
+      className={cn(
+        "overflow-hidden rounded-xl border border-slate-800 bg-slate-950/50 transition-all duration-200 ease-out",
+        removing
+          ? "max-h-0 -translate-y-1 scale-[0.98] border-transparent opacity-0"
+          : "max-h-[2000px] translate-y-0 scale-100 opacity-100"
+      )}
+    >
       <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
+            <button
+              type="button"
+              aria-label="Eliminar esta combinada del historial"
+              title="Eliminar del historial"
+              onClick={onDelete}
+              disabled={removing}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-rose-500/15 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/50 disabled:opacity-40"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
             <Badge
               variant={hitsVariant}
               className="font-semibold tracking-tight"
@@ -986,16 +1059,16 @@ function BetRow({
             <span className="text-xs text-slate-500">{bet.date}</span>
           </div>
           <p className="text-sm text-slate-200">
-            {bet.legs.length} legs · @{formatOdds(bet.totalOdds)} · Stake{" "}
-            {formatCLP(bet.stakeCLP)} → {formatCLP(bet.potentialReturn)}
+            {bet.legs.length} legs · Multiplicador{" "}
+            {formatOdds(bet.totalOdds)}x · 1U
           </p>
           {(bet.status === "won" || bet.status === "lost") && (
             <p
               className={`text-xs font-medium ${
-                pnl >= 0 ? "text-emerald-400" : "text-rose-400"
+                unitPnl >= 0 ? "text-emerald-400" : "text-rose-400"
               }`}
             >
-              P&L {formatSignedCLP(pnl)}
+              Resultado {formatSignedUnits(unitPnl)}
             </p>
           )}
         </div>
@@ -1005,6 +1078,7 @@ function BetRow({
             size="sm"
             variant={bet.status === "won" ? "default" : "outline"}
             onClick={() => onStatus("won")}
+            disabled={removing}
           >
             <CheckCircle2 className="h-3.5 w-3.5" />
             Ganada
@@ -1013,6 +1087,7 @@ function BetRow({
             size="sm"
             variant={bet.status === "lost" ? "danger" : "outline"}
             onClick={() => onStatus("lost")}
+            disabled={removing}
           >
             <XCircle className="h-3.5 w-3.5" />
             Perdida
@@ -1021,6 +1096,7 @@ function BetRow({
             size="sm"
             variant={bet.status === "void" ? "secondary" : "ghost"}
             onClick={() => onStatus("void")}
+            disabled={removing}
           >
             <CircleSlash className="h-3.5 w-3.5" />
             Cancelada
@@ -1034,6 +1110,7 @@ function BetRow({
           onClick={() => setExpanded((v) => !v)}
           className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2.5 text-left text-sm text-slate-300 transition hover:bg-slate-900/80 hover:text-slate-100"
           aria-expanded={expanded}
+          disabled={removing}
         >
           <span>
             Desglose de legs

@@ -293,12 +293,16 @@ export function addBetFromParlay(
   const strategyMode = parlay.strategyMode ?? "daily-fun";
   const existing = loadBets();
 
+  // Same day + strategy is only a duplicate when odds and leg count match
+  // (allows registering a manually filtered ticket vs. the full generated one).
   const duplicate = existing.find(
     (b) =>
       b.date === date &&
       b.strategyMode === strategyMode &&
       b.timeframe === "Combinada" &&
-      b.status === "pending"
+      b.status === "pending" &&
+      b.legs.length === parlay.legs.length &&
+      Math.abs(b.totalOdds - parlay.totalOdds) < 0.001
   );
   if (duplicate) return duplicate;
 
@@ -309,15 +313,17 @@ export function addBetFromParlay(
     );
   }
 
+  // Analytics use a fixed 1 Unit (1U) stake — ignore monetary parlay.stake
+  const unitStake = 1;
   const bet: HistoryBet = {
     id: createId(),
     date,
     mode: modeFromStrategy(strategyMode),
     timeframe: "Combinada",
     strategyMode,
-    stakeCLP: parlay.stake,
+    stakeCLP: unitStake,
     totalOdds: parlay.totalOdds,
-    potentialReturn: parlay.potentialPayout,
+    potentialReturn: unitStake * parlay.totalOdds,
     legs,
     status: "pending",
     createdAt: new Date().toISOString(),
@@ -337,10 +343,10 @@ export interface SinglePickInput {
   odds: number;
 }
 
-/** Register one individual safe pick as its own history ticket. */
+/** Register one individual safe pick as its own history ticket (1U stake). */
 export function addBetFromSinglePick(
   pick: SinglePickInput,
-  stakeCLP = 1000,
+  _stakeCLP = 1,
   date = chileDateString()
 ): HistoryBet | null {
   purgeFakeHistory();
@@ -359,15 +365,16 @@ export function addBetFromSinglePick(
 
   const { homeTeam, awayTeam } = splitMatchLabel(pick.matchLabel);
   const odds = pick.odds > 0 ? pick.odds : 1;
+  const unitStake = 1;
   const bet: HistoryBet = {
     id: createId(),
     date,
     mode: "Segura",
     timeframe: "Individual",
     strategyMode: "daily-safe",
-    stakeCLP,
+    stakeCLP: unitStake,
     totalOdds: odds,
-    potentialReturn: Math.round(stakeCLP * odds),
+    potentialReturn: unitStake * odds,
     legs: [
       {
         fixtureId,
@@ -415,6 +422,16 @@ export function updateBetStatus(
 
 export function replaceBets(bets: HistoryBet[]): void {
   saveBets(bets);
+}
+
+/** Remove one ticket from localStorage history. Stats recompute from remaining bets. */
+export function deleteBetById(betId: string): boolean {
+  if (!betId || !canUseStorage()) return false;
+  const bets = loadBets();
+  const next = bets.filter((b) => b.id !== betId);
+  if (next.length === bets.length) return false;
+  saveBets(next);
+  return true;
 }
 
 export function clearHistory(): void {
@@ -616,11 +633,20 @@ export function computeLeagueBreakdown(bets: HistoryBet[]): BreakdownItem[] {
     .slice(0, 8);
 }
 
+/** @deprecated Prefer formatSignedUnits — monetary UI is temporarily disabled */
 export function formatSignedCLP(value: number): string {
   const abs = Math.round(Math.abs(value)).toLocaleString("es-CL");
   if (value > 0) return `+$${abs} CLP`;
   if (value < 0) return `-$${abs} CLP`;
   return `$0 CLP`;
+}
+
+/** Signed unit P&L (1U stake reference). */
+export function formatSignedUnits(value: number, digits = 2): string {
+  const abs = Math.abs(value).toFixed(digits);
+  if (value > 0) return `+${abs}U`;
+  if (value < 0) return `−${abs}U`;
+  return `0.00U`;
 }
 
 /** Count won vs total legs for the "X / Y Acertadas" badge. */

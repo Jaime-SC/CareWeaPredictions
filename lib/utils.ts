@@ -20,6 +20,9 @@ export function formatCLP(value: number): string {
   return `$${Math.round(value).toLocaleString("es-CL")} CLP`;
 }
 
+/** Standardized unit stake for analytics (1U per ticket). */
+export const UNIT_STAKE = 1;
+
 /** Fecha civil YYYY-MM-DD en hora Chile. */
 export function chileDateString(date: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -38,6 +41,15 @@ export function chileDateOffset(
   const [y, m, d] = from.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d + days));
   return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * API query window for a Chile civil day.
+ * Evening CONMEBOL kickoffs often sit on the next UTC calendar day when the
+ * upstream date filter ignores timezone — fetch ±1 day then filter locally.
+ */
+export function chileDateApiWindow(ymd: string): string[] {
+  return [chileDateOffset(-1, ymd), ymd, chileDateOffset(1, ymd)];
 }
 
 /**
@@ -82,6 +94,33 @@ export function formatKickoffTime(iso: string): string {
     }).format(new Date(iso));
   } catch {
     return "";
+  }
+}
+
+/**
+ * Relative day label for multi-day parlays:
+ * [Hoy 18:00] / [Mañana 20:30] / [Viernes 19:00].
+ */
+export function formatKickoffDayLabel(
+  iso: string,
+  referenceYmd: string = chileDateString()
+): string {
+  const kickoffYmd = chileDateString(new Date(iso));
+  const time = formatKickoffTime(iso) || "--:--";
+  if (kickoffYmd === referenceYmd) return `Hoy ${time}`;
+  if (kickoffYmd === chileDateOffset(1, referenceYmd)) return `Mañana ${time}`;
+  if (kickoffYmd === chileDateOffset(-1, referenceYmd)) return `Ayer ${time}`;
+
+  try {
+    const weekday = new Intl.DateTimeFormat("es-CL", {
+      timeZone: CHILE_TIMEZONE,
+      weekday: "long",
+    }).format(new Date(iso));
+    const capped =
+      weekday.charAt(0).toUpperCase() + weekday.slice(1).replace(/\./g, "");
+    return `${capped} ${time}`;
+  } catch {
+    return `${kickoffYmd.slice(5)} ${time}`;
   }
 }
 

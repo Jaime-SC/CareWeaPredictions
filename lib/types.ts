@@ -11,8 +11,11 @@ export type LeagueId =
   | "ligue-1"
   | "brasileirao"
   | "liga-profesional"
+  | "liga-pro-ecuador"
   | "mls"
   | "liga-mx"
+  | "concacaf-champions-cup"
+  | "leagues-cup"
   | "primera-chile"
   | "primera-colombia"
   | "international-friendlies"
@@ -42,13 +45,22 @@ export type RiskTier = "safe" | "fun";
 export interface TeamStats {
   name: string;
   shortName: string;
+  /** Most recent first (max ~5). Built from local fixture history when available. */
   form: ("W" | "D" | "L")[];
   goalsScoredAvg: number;
   goalsConcededAvg: number;
+  /** Venue-specific scoring averages (preferred over overall for Poisson λ). */
+  homeGoalsScoredAvg?: number;
+  homeGoalsConcededAvg?: number;
+  awayGoalsScoredAvg?: number;
+  awayGoalsConcededAvg?: number;
+  /** Pre-normalized strengths; when set they override raw averages. */
   homeAttackStrength?: number;
   homeDefenseStrength?: number;
   awayAttackStrength?: number;
   awayDefenseStrength?: number;
+  /** ISO kickoff of the team's previous finished match (fatigue rule). */
+  lastMatchAt?: string | null;
 }
 
 export interface MatchOdds {

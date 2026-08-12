@@ -3,15 +3,14 @@
 import type { ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import type { HistorySummary } from "@/lib/history-tracker";
-import { formatSignedCLP } from "@/lib/history-tracker";
-import { formatCLP, formatPercent } from "@/lib/utils";
+import { formatPercent } from "@/lib/utils";
 import {
   Activity,
   Crosshair,
   Percent,
-  PiggyBank,
   Target,
   Ticket,
+  TrendingUp,
 } from "lucide-react";
 
 interface StatsOverviewProps {
@@ -19,37 +18,41 @@ interface StatsOverviewProps {
 }
 
 export function StatsOverview({ summary }: StatsOverviewProps) {
-  const profitPositive = summary.netProfit >= 0;
+  const roiPositive = summary.roi >= 0;
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Metric
-        icon={<PiggyBank className="h-4 w-4 text-emerald-400" />}
-        label="Net Profit real"
-        value={formatSignedCLP(summary.netProfit)}
-        hint={`Stake total ${formatCLP(summary.totalStaked)} · incl. pendientes`}
-        valueClass={profitPositive ? "text-emerald-300" : "text-rose-300"}
-      />
-      <Metric
-        icon={<Percent className="h-4 w-4 text-sky-400" />}
-        label="Hit Rate"
-        value={formatPercent(summary.winRate)}
-        hint={`${summary.won} ganadas · ${summary.lost} perdidas`}
-      />
-      <Metric
-        icon={<Crosshair className="h-4 w-4 text-amber-400" />}
-        label="Acierto por leg"
-        value={formatPercent(summary.legAccuracy)}
-        hint={`${summary.legsWon}/${summary.legsEvaluated} predicciones correctas`}
-      />
-      <Metric
         icon={<Ticket className="h-4 w-4 text-violet-300" />}
-        label="Tickets registrados"
+        label="Total combinadas / apuestas"
         value={String(summary.totalBets)}
         hint={
           summary.pending > 0
-            ? `${summary.pending} pendientes de resultado`
+            ? `${summary.pending} pendientes · ${summary.completed} resueltos`
             : `${summary.completed} resueltos`
+        }
+      />
+      <Metric
+        icon={<Percent className="h-4 w-4 text-sky-400" />}
+        label="Tasa de acierto (Win Rate)"
+        value={formatPercent(summary.winRate)}
+        hint={`${summary.won} ganadas / ${summary.won + summary.lost} totales`}
+      />
+      <Metric
+        icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
+        label="ROI % / Rendimiento"
+        value={`${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}
+        hint="1U por ticket · unidades"
+        valueClass={roiPositive ? "text-emerald-300" : "text-rose-300"}
+      />
+      <Metric
+        icon={<Crosshair className="h-4 w-4 text-amber-400" />}
+        label="Historial de marcadores"
+        value={`${summary.won}G · ${summary.lost}P`}
+        hint={
+          summary.legsEvaluated > 0
+            ? `Legs: ${formatPercent(summary.legAccuracy)} (${summary.legsWon}/${summary.legsEvaluated})`
+            : "Sin legs evaluadas aún"
         }
       />
     </div>
@@ -81,7 +84,7 @@ export function LivePicksOverview({
         hint="Modelo − implícita"
       />
       <Metric
-        icon={<PiggyBank className="h-4 w-4 text-amber-400" />}
+        icon={<Ticket className="h-4 w-4 text-amber-400" />}
         label="Fuente"
         value="API-Football"
         hint="Solo datos en vivo"

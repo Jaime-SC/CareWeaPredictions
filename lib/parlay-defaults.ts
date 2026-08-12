@@ -12,7 +12,7 @@ export interface StrategyPreset extends ParlayConfig {
 
 export const STRATEGY_LABELS: Record<StrategyMode, string> = {
   "daily-safe": "Picks Seguros Individuales",
-  "daily-fun": "Combinada Diversión",
+  "daily-fun": "Modo Seguro / Alta Probabilidad (Piso 80% por leg)",
 };
 
 export const STRATEGY_PRESETS: Record<StrategyMode, StrategyPreset> = {
@@ -20,11 +20,12 @@ export const STRATEGY_PRESETS: Record<StrategyMode, StrategyPreset> = {
     strategyMode: "daily-safe",
     title: "🎯 Selección de Picks Seguros (Individuales)",
     subtitle:
-      "Apuestas sueltas · modelo ≥ 85% · sin acumulador · stake sugerido $1.000 CLP",
+      "Apuestas sueltas · modelo ≥ 85% · sin acumulador · referencia 1U",
     badgeLabel: "Individuales",
     daysAhead: 0,
     riskTier: "safe",
-    stake: 1000,
+    /** Unit stake reference (1U) — no monetary display */
+    stake: 1,
     targetMultiplier: 1,
     minLegs: 1,
     maxLegs: 1,
@@ -34,20 +35,23 @@ export const STRATEGY_PRESETS: Record<StrategyMode, StrategyPreset> = {
   },
   "daily-fun": {
     strategyMode: "daily-fun",
-    title: "🎰 Combinada Diversión (Alta Cuota)",
-    subtitle: "Objetivo ~200x · exactamente 15 legs · Stake $200 CLP → ~$40.000",
-    badgeLabel: "Alta Varianza",
+    title: "🛡️ Modo Seguro / Alta Probabilidad (Piso 80% por leg)",
+    subtitle:
+      "Piso 80% por leg · 15 legs · cuotas 1.18–1.28 · objetivo ~20x–35x · 1U",
+    badgeLabel: "Modo Seguro / Alta Probabilidad (Piso 80% por leg)",
     daysAhead: 0,
     riskTier: "fun",
-    stake: 200,
-    targetMultiplier: 200,
+    /** Unit stake reference (1U) — no monetary display */
+    stake: 1,
+    /** 1.22^15 ≈ 21x · 1.25^15 ≈ 28x · 1.28^15 ≈ 38x */
+    targetMultiplier: 25,
     minLegs: 15,
     maxLegs: 15,
     targetLegCount: 15,
-    minOdds: 1.12,
-    maxOdds: 1.55,
-    /** Strict filter; backfill fills to targetLegCount if fewer qualify */
-    minProbability: 0.78,
+    minOdds: 1.18,
+    maxOdds: 1.28,
+    /** Hard floor for every accumulator leg */
+    minProbability: 0.8,
   },
 };
 
@@ -55,6 +59,15 @@ export const STRATEGY_PRESETS: Record<StrategyMode, StrategyPreset> = {
 export const DEFAULT_AUTO_PARLAY_CONFIG: ParlayConfig = {
   ...STRATEGY_PRESETS["daily-fun"],
 };
+
+/**
+ * Optional multi-day expansion (opt-in via API `multiDay=true`).
+ * Single-date mode is the default and never auto-appends tomorrow.
+ */
+export const FUN_MAX_DAYS_AHEAD = 5;
+
+/** @deprecated Prefer single-date wide pool; kept for opt-in multi-day. */
+export const FUN_MIN_MATCH_POOL = 25;
 
 export const STRATEGY_DAYS_AHEAD: Record<StrategyMode, number> = {
   "daily-safe": 0,

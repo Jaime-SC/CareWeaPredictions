@@ -7,6 +7,7 @@ import {
   isFunStrategy,
   resolveStrategyMode,
 } from "@/lib/parlay-defaults";
+import { enrichMatchesFromLocalData } from "@/lib/fixture-context";
 import { buildMatchPredictions } from "@/lib/parlay-generator";
 import { chileDateString } from "@/lib/utils";
 
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
   );
 
   try {
-    const { matches, source, daysFetched, poolMode } =
+    const { matches: rawMatches, source, daysFetched, poolMode } =
       await fetchUpcomingMatches({
         date,
         poolMode:
@@ -41,6 +42,7 @@ export async function GET(request: NextRequest) {
             : "core",
         expandIfFewerThan: 8,
       });
+    const matches = await enrichMatchesFromLocalData(rawMatches);
 
     let predictions = buildMatchPredictions(matches, {
       minSafeProbability: minProb,
@@ -112,7 +114,10 @@ export async function POST(request: NextRequest) {
         ? body.minProb
         : 0.85;
 
-    const { matches, source } = await fetchUpcomingMatches({ date });
+    const { matches: rawMatches, source } = await fetchUpcomingMatches({
+      date,
+    });
+    const matches = await enrichMatchesFromLocalData(rawMatches);
     const filtered = matchIds
       ? matches.filter((m) => matchIds.includes(m.id))
       : matches;

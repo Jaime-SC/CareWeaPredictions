@@ -36,8 +36,14 @@ export interface ModelWeights {
     /** Calibrated cutoff for +1.5 goals market family */
     over15MinProbability: number;
     defaultMinOdds: number;
+    /** Multiplier applied to home λ (default 1.12). */
     homeAdvantage: number;
+    /** Fallback per-side league average when home/away splits missing. */
     leagueAvgGoals: number;
+    /** League average goals scored by home sides. */
+    leagueAvgHomeGoals: number;
+    /** League average goals scored by away sides. */
+    leagueAvgAwayGoals: number;
   };
   leagues: Record<string, LeagueWeightConfig>;
   markets: Record<string, MarketWeightConfig>;
@@ -53,12 +59,14 @@ export const DEFAULT_MODEL_WEIGHTS: ModelWeights = {
   calibratedAt: null,
   sampleSize: 0,
   global: {
-    strictMinProbability: 0.78,
-    backfillMinProbability: 0.55,
-    over15MinProbability: 0.78,
+    strictMinProbability: 0.8,
+    backfillMinProbability: 0.8,
+    over15MinProbability: 0.8,
     defaultMinOdds: 1.12,
-    homeAdvantage: 1.08,
+    homeAdvantage: 1.12,
     leagueAvgGoals: 1.35,
+    leagueAvgHomeGoals: 1.45,
+    leagueAvgAwayGoals: 1.15,
   },
   leagues: {},
   markets: {},

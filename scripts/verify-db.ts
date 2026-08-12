@@ -10,9 +10,9 @@ async function main() {
     date: "2026-08-12",
     mode: "Diversion",
     strategyMode: "daily-fun",
-    stakeCLP: 200,
+    stakeCLP: 1,
     totalOdds: 12.5,
-    payoutCLP: 2500,
+    payoutCLP: 12.5,
     legs: [
       {
         matchId: "live-999001",

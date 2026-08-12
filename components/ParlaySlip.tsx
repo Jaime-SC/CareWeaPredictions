@@ -10,18 +10,26 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { addBetFromParlay, loadBets, saveBets } from "@/lib/history-tracker";
+import { recalculateParlay } from "@/lib/parlay-recalc";
 import type { GeneratedParlay, ParlayLeg } from "@/lib/types";
 import {
   chileDateString,
-  formatCLP,
-  formatKickoffTime,
+  cn,
+  formatKickoffDayLabel,
   formatOdds,
   formatPercent,
   groupByKey,
+  UNIT_STAKE,
 } from "@/lib/utils";
-import { Check, Copy, Loader2, RefreshCw } from "lucide-react";
+import { Check, Copy, Loader2, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+const EXIT_MS = 220;
+
+function legKey(leg: ParlayLeg): string {
+  return `${leg.matchId}::${leg.market}`;
+}
 
 interface ParlaySlipProps {
   parlay: GeneratedParlay;
@@ -44,14 +52,45 @@ export function ParlaySlip({
   const [copied, setCopied] = useState(false);
   const [registered, setRegistered] = useState(false);
   const [registerMsg, setRegisterMsg] = useState<string | null>(null);
+  const [activeLegs, setActiveLegs] = useState<ParlayLeg[]>(parlay.legs);
+  const [exitingKeys, setExitingKeys] = useState<Set<string>>(new Set());
+  const exitTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map()
+  );
 
+  // Sync when a new ticket is generated / restored from cache
   useEffect(() => {
+    for (const timer of exitTimers.current.values()) clearTimeout(timer);
+    exitTimers.current.clear();
+    setExitingKeys(new Set());
+    setActiveLegs(parlay.legs);
     setRegistered(false);
     setRegisterMsg(null);
-  }, [parlay.strategyMode, parlay.totalOdds, parlay.legs.length, historyDate]);
+  }, [parlay]);
+
+  useEffect(() => {
+    return () => {
+      for (const timer of exitTimers.current.values()) clearTimeout(timer);
+      exitTimers.current.clear();
+    };
+  }, []);
+
+  // Exclude legs mid-exit so odds / payout / joint prob update instantly
+  const keptLegs = useMemo(
+    () => activeLegs.filter((leg) => !exitingKeys.has(legKey(leg))),
+    [activeLegs, exitingKeys]
+  );
+
+  const activeParlay = useMemo(
+    () => recalculateParlay(keptLegs, parlay),
+    [keptLegs, parlay]
+  );
+
+  const isEdited = keptLegs.length !== parlay.legs.length;
+  const originalCount = parlay.legs.length;
 
   const groupedLegs = useMemo(() => {
-    const groups = groupByKey(parlay.legs, (leg) => leg.leagueName);
+    const groups = groupByKey(activeLegs, (leg) => leg.leagueName);
     return groups.map((group) => ({
       ...group,
       items: [...group.items].sort(
@@ -59,35 +98,94 @@ export function ParlaySlip({
           new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime()
       ),
     }));
-  }, [parlay.legs]);
+  }, [activeLegs]);
 
   const riskVariant =
-    parlay.riskLevel === "low"
+    activeParlay.riskLevel === "low"
       ? "success"
-      : parlay.riskLevel === "medium"
+      : activeParlay.riskLevel === "medium"
         ? "info"
-        : parlay.riskLevel === "high"
+        : activeParlay.riskLevel === "high"
           ? "warning"
           : "danger";
 
+  function handleRemoveLeg(leg: ParlayLeg) {
+    const key = legKey(leg);
+    if (exitingKeys.has(key)) return;
+
+    setExitingKeys((prev) => new Set(prev).add(key));
+
+    const existing = exitTimers.current.get(key);
+    if (existing) clearTimeout(existing);
+
+    setRegistered(false);
+    setRegisterMsg(null);
+
+    const timer = setTimeout(() => {
+      setActiveLegs((prev) => prev.filter((l) => legKey(l) !== key));
+      setExitingKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+      exitTimers.current.delete(key);
+    }, EXIT_MS);
+
+    exitTimers.current.set(key, timer);
+  }
+
+  function handleRestore() {
+    for (const timer of exitTimers.current.values()) clearTimeout(timer);
+    exitTimers.current.clear();
+    setExitingKeys(new Set());
+    setActiveLegs(parlay.legs);
+    setRegistered(false);
+    setRegisterMsg(null);
+  }
+
   async function handleCopy() {
     const text =
-      clipboardText ??
-      parlay.legs
-        .map(
-          (l, i) =>
-            `${i + 1}. ${l.matchLabel} — ${l.marketLabel} @ ${l.odds.toFixed(2)} (${(l.modelProbability * 100).toFixed(1)}%)`
-        )
-        .join("\n");
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+      !isEdited && clipboardText
+        ? clipboardText
+        : [
+            ...activeParlay.legs.map(
+              (l, i) =>
+                `${i + 1}. [${formatKickoffDayLabel(l.kickoff)}] ${l.matchLabel} — ${l.marketLabel} @ ${l.odds.toFixed(2)} (${(l.modelProbability * 100).toFixed(1)}%)`
+            ),
+            "",
+            `Cuota total / Multiplicador: ${activeParlay.totalOdds.toFixed(2)}x`,
+            `Prob. conjunta: ${(activeParlay.jointProbability * 100).toFixed(2)}%`,
+            `Legs: ${activeParlay.legs.length} partidos`,
+          ].join("\n");
+
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // Fallback: insecure context / embedded browser without Clipboard API
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.warn("[ParlaySlip] copy failed:", err);
+    }
   }
 
   async function handleRegister() {
+    if (activeParlay.legs.length === 0) return;
+
     const date = historyDate ?? chileDateString();
     // Keep localStorage for result-checker UX; primary persistence is SQLite
-    const local = addBetFromParlay(parlay, date);
+    const local = addBetFromParlay(activeParlay, date);
 
     try {
       const res = await fetch("/api/bets/record", {
@@ -95,11 +193,11 @@ export function ParlaySlip({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           date,
-          strategyMode: parlay.strategyMode ?? "daily-fun",
-          stakeCLP: parlay.stake,
-          totalOdds: parlay.totalOdds,
-          payoutCLP: parlay.potentialPayout,
-          legs: parlay.legs.map((l) => ({
+          strategyMode: activeParlay.strategyMode ?? "daily-fun",
+          stakeCLP: UNIT_STAKE,
+          totalOdds: activeParlay.totalOdds,
+          payoutCLP: UNIT_STAKE * activeParlay.totalOdds,
+          legs: activeParlay.legs.map((l) => ({
             matchId: l.matchId,
             matchLabel: l.matchLabel,
             leagueName: l.leagueName,
@@ -156,45 +254,58 @@ export function ParlaySlip({
           <div>
             <CardTitle className="text-lg">Tu Combinada</CardTitle>
             <CardDescription>
-              {parlay.legs.length} selecciones ·{" "}
+              {activeParlay.legs.length} selecciones
+              {isEdited ? ` de ${originalCount}` : ""} ·{" "}
               {groupedLegs.length} competición
               {groupedLegs.length === 1 ? "" : "es"}
             </CardDescription>
-            {parlay.strategyLabel && (
+            {activeParlay.strategyLabel && (
               <div className="mt-2 flex flex-wrap gap-2">
                 <Badge
                   variant={
-                    parlay.riskTier === "fun" ? "warning" : "success"
+                    activeParlay.riskTier === "fun" ? "warning" : "success"
                   }
                 >
-                  {parlay.strategyLabel}
+                  {activeParlay.strategyLabel}
                 </Badge>
-                {parlay.riskTier === "fun" && (
-                  <Badge variant="warning">
-                    Modo Alta Varianza / Cuota Alta ($200 CLP)
-                  </Badge>
-                )}
               </div>
             )}
-            {parlay.successProbabilityLabel && (
-              <p className="mt-2 text-sm font-medium text-emerald-300/90">
-                {parlay.successProbabilityLabel}
+            {activeParlay.legs.length > 0 && (
+              <p className="mt-2 inline-flex items-center rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-200">
+                {activeParlay.legs.length} partidos seleccionados para la
+                apuesta real
               </p>
             )}
-            {parlay.fillNotice && (
+            {activeParlay.successProbabilityLabel && (
+              <p className="mt-2 text-sm font-medium text-emerald-300/90">
+                {activeParlay.successProbabilityLabel}
+              </p>
+            )}
+            {activeParlay.fillNotice && (
               <p className="mt-2 text-xs text-amber-200/90">
-                {parlay.fillNotice}
+                {activeParlay.fillNotice}
               </p>
             )}
           </div>
-          <Badge variant={riskVariant}>{parlay.riskLevel.toUpperCase()}</Badge>
+          <Badge variant={riskVariant}>
+            {activeParlay.riskLevel.toUpperCase()}
+          </Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {parlay.legs.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500">
-            Pulsa Generar Combinada para armar tu apuesta automática.
-          </p>
+        {activeLegs.length === 0 ? (
+          <div className="space-y-3 rounded-lg border border-dashed border-slate-700 p-6 text-center">
+            <p className="text-sm text-slate-500">
+              No quedan selecciones. Restablece el ticket o regenera la
+              combinada.
+            </p>
+            {originalCount > 0 && (
+              <Button variant="outline" size="sm" onClick={handleRestore}>
+                <RotateCcw className="h-3.5 w-3.5" />
+                Restablecer Ticket
+              </Button>
+            )}
+          </div>
         ) : (
           <div className="max-h-[28rem] space-y-4 overflow-y-auto pr-1">
             {groupedLegs.map((group) => (
@@ -211,11 +322,14 @@ export function ParlaySlip({
                 <ul className="space-y-2">
                   {group.items.map((leg) => {
                     legNumber += 1;
+                    const key = legKey(leg);
                     return (
                       <LegRow
-                        key={`${leg.matchId}-${leg.market}`}
+                        key={key}
                         leg={leg}
                         index={legNumber}
+                        exiting={exitingKeys.has(key)}
+                        onRemove={() => handleRemoveLeg(leg)}
                       />
                     );
                   })}
@@ -225,31 +339,33 @@ export function ParlaySlip({
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-3 rounded-xl bg-slate-950/70 p-4">
+        <div className="grid grid-cols-1 gap-3 rounded-xl bg-slate-950/70 p-4 transition-all duration-200 sm:grid-cols-3">
           <Stat
-            label="Multiplicador"
-            value={`${formatOdds(parlay.totalOdds)}x`}
-          />
-          <Stat label="Stake" value={formatCLP(parlay.stake)} />
-          <Stat
-            label="Retorno potencial"
-            value={formatCLP(parlay.potentialPayout)}
+            label="Cuota total / Multiplicador"
+            value={`${formatOdds(activeParlay.totalOdds)}x`}
             highlight
           />
           <Stat
-            label="Prob. conjunta"
-            value={formatPercent(parlay.jointProbability, 2)}
+            label="Probabilidad estimada"
+            value={formatPercent(activeParlay.jointProbability, 2)}
+          />
+          <Stat
+            label="Cantidad de legs"
+            value={`${activeParlay.legs.length} partidos`}
           />
         </div>
 
-        {parlay.legs.length > 0 && (
+        {activeParlay.legs.length > 0 && (
           <p className="text-xs leading-relaxed text-slate-400">
-            {parlay.riskLabel}
+            {activeParlay.riskLabel}
             {" · "}
-            Edge medio {formatPercent(parlay.averageEdge)}
-            {parlay.hitTarget
-              ? " · Objetivo ~200x alcanzado"
+            Edge medio {formatPercent(activeParlay.averageEdge)}
+            {activeParlay.hitTarget
+              ? " · Objetivo ~20x–35x alcanzado"
               : " · Cerca del objetivo"}
+            {isEdited
+              ? ` · Editado (−${originalCount - activeParlay.legs.length})`
+              : ""}
           </p>
         )}
 
@@ -257,7 +373,7 @@ export function ParlaySlip({
           <Button
             className="flex-1"
             variant="secondary"
-            disabled={parlay.legs.length === 0}
+            disabled={activeParlay.legs.length === 0}
             onClick={handleCopy}
           >
             {copied ? (
@@ -270,6 +386,16 @@ export function ParlaySlip({
               </>
             )}
           </Button>
+          {isEdited && (
+            <Button
+              className="flex-1"
+              variant="outline"
+              onClick={handleRestore}
+            >
+              <RotateCcw className="h-4 w-4" />
+              Restablecer Ticket
+            </Button>
+          )}
           {onRegenerate && (
             <Button
               className="flex-1"
@@ -289,7 +415,7 @@ export function ParlaySlip({
           )}
         </div>
 
-        {parlay.legs.length > 0 && (
+        {activeParlay.legs.length > 0 && (
           <div className="space-y-2">
             <Button
               className="w-full"
@@ -325,9 +451,26 @@ export function ParlaySlip({
   );
 }
 
-function LegRow({ leg, index }: { leg: ParlayLeg; index: number }) {
+function LegRow({
+  leg,
+  index,
+  exiting,
+  onRemove,
+}: {
+  leg: ParlayLeg;
+  index: number;
+  exiting: boolean;
+  onRemove: () => void;
+}) {
   return (
-    <li className="flex items-start gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2.5">
+    <li
+      className={cn(
+        "flex items-start gap-2 overflow-hidden rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2.5 transition-all duration-200 ease-out",
+        exiting
+          ? "max-h-0 -translate-x-2 scale-[0.98] border-transparent py-0 opacity-0"
+          : "max-h-24 translate-x-0 scale-100 opacity-100"
+      )}
+    >
       <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-slate-800 text-[10px] font-bold text-slate-400">
         {index}
       </span>
@@ -336,13 +479,23 @@ function LegRow({ leg, index }: { leg: ParlayLeg; index: number }) {
           {leg.matchLabel}
         </p>
         <p className="text-xs text-slate-400">
-          {formatKickoffTime(leg.kickoff)} CL · {leg.marketLabel} · modelo{" "}
+          {formatKickoffDayLabel(leg.kickoff)} CL · {leg.marketLabel} · modelo{" "}
           {formatPercent(leg.modelProbability)}
         </p>
       </div>
       <span className="font-mono text-sm font-semibold text-emerald-300">
         @{formatOdds(leg.odds)}
       </span>
+      <button
+        type="button"
+        aria-label={`Quitar ${leg.matchLabel}`}
+        title="Quitar de la apuesta"
+        onClick={onRemove}
+        disabled={exiting}
+        className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-rose-500/15 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/50 disabled:opacity-40"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
     </li>
   );
 }
@@ -362,7 +515,7 @@ function Stat({
         {label}
       </p>
       <p
-        className={`mt-0.5 font-semibold ${
+        className={`mt-0.5 font-semibold tabular-nums transition-colors duration-200 ${
           highlight ? "text-lg text-emerald-300" : "text-slate-100"
         }`}
       >

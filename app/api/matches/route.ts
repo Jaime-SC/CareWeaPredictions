@@ -3,6 +3,7 @@ import {
   fetchUpcomingMatches,
   toErrorResponse,
 } from "@/lib/api-football";
+import { enrichMatchesFromLocalData } from "@/lib/fixture-context";
 import { chileDateString } from "@/lib/utils";
 
 function isValidDate(value: string | null): value is string {
@@ -17,8 +18,8 @@ export async function GET(request: NextRequest) {
   const daysAhead = daysParam ? Number(daysParam) : 0;
   const poolModeParam = searchParams.get("pool");
   const poolMode =
-    poolModeParam === "expanded"
-      ? "expanded"
+    poolModeParam === "expanded" || poolModeParam === "wide"
+      ? poolModeParam
       : poolModeParam === "core"
         ? "core"
         : undefined;
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
   const date = isValidDate(dateParam) ? dateParam : undefined;
 
   try {
-    const { matches, source, daysFetched, poolMode: usedPool } =
+    const { matches: rawMatches, source, daysFetched, poolMode: usedPool } =
       await fetchUpcomingMatches({
         leagues,
         date,
@@ -38,6 +39,7 @@ export async function GET(request: NextRequest) {
         poolMode,
         expandIfFewerThan: poolMode === "expanded" ? 12 : 10,
       });
+    const matches = await enrichMatchesFromLocalData(rawMatches);
 
     return NextResponse.json({
       success: true,

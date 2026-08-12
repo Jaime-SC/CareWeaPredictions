@@ -30,7 +30,8 @@ export default function HomePage() {
         </p>
         <p className="mt-4 max-w-xl text-base leading-relaxed text-slate-400 sm:text-lg">
           Scrapea partidos, estima xG con Poisson, filtra cuotas seguras
-          (1.15–1.35) y arma parlays de alto multiplicador con stake pequeño.
+          (1.15–1.35) y arma parlays de alto multiplicador con métricas en
+          unidades.
         </p>
 
         <div className="mt-8 flex flex-wrap gap-3">
@@ -61,7 +62,7 @@ export default function HomePage() {
           <Feature
             icon={<Zap className="h-5 w-5 text-amber-400" />}
             title="Auto-parlay"
-            text="Genera acumuladores hacia 50x / 100x / 200x con stake desde $200 CLP."
+            text="Genera acumuladores de 15 legs (~20x–35x) con piso 80% por selección y foco en multiplicador / win rate."
           />
         </div>
       </section>

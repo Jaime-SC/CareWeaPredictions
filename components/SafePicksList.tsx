@@ -16,11 +16,11 @@ import {
 } from "@/lib/history-tracker";
 import type { SafePickItem } from "@/lib/parlay-storage";
 import {
-  formatCLP,
   formatKickoffTime,
   formatOdds,
   formatPercent,
   groupByKey,
+  UNIT_STAKE,
 } from "@/lib/utils";
 import { Check, Loader2, Pin } from "lucide-react";
 import Link from "next/link";
@@ -32,7 +32,6 @@ interface SafePicksListProps {
   loading?: boolean;
   fromCache?: boolean;
   onRefresh?: () => void;
-  stakeCLP?: number;
 }
 
 export function SafePicksList({
@@ -41,7 +40,6 @@ export function SafePicksList({
   loading = false,
   fromCache = false,
   onRefresh,
-  stakeCLP = 1000,
 }: SafePicksListProps) {
   const [registeredKeys, setRegisteredKeys] = useState<Set<string>>(
     () => new Set()
@@ -62,7 +60,7 @@ export function SafePicksList({
   }
 
   async function handleRegister(pick: SafePickItem) {
-    const local = addBetFromSinglePick(pick, stakeCLP, date);
+    const local = addBetFromSinglePick(pick, UNIT_STAKE, date);
     if (!local) return;
     setRegisteredKeys((prev) => new Set(prev).add(pickKey(pick)));
 
@@ -74,9 +72,9 @@ export function SafePicksList({
           date,
           strategyMode: "daily-safe",
           mode: "Segura",
-          stakeCLP,
+          stakeCLP: UNIT_STAKE,
           totalOdds: pick.odds,
-          payoutCLP: Math.round(stakeCLP * pick.odds),
+          payoutCLP: UNIT_STAKE * pick.odds,
           legs: [
             {
               matchId: pick.matchId,
@@ -113,8 +111,7 @@ export function SafePicksList({
             </CardTitle>
             <CardDescription>
               {date} · modelo ≥ 85% · {picks.length} selección
-              {picks.length === 1 ? "" : "es"} · stake sugerido{" "}
-              {formatCLP(stakeCLP)}
+              {picks.length === 1 ? "" : "es"} · referencia 1U
             </CardDescription>
             {fromCache && (
               <p className="mt-2 text-xs text-sky-300/90">
