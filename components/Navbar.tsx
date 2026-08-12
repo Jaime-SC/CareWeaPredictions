@@ -4,12 +4,21 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ApiQuotaBadge } from "@/components/ApiQuotaBadge";
 import { cn } from "@/lib/utils";
-import { BarChart3, FlaskConical, LayoutDashboard, Layers } from "lucide-react";
+import {
+  Activity,
+  BarChart3,
+  FlaskConical,
+  History,
+  LayoutDashboard,
+  Layers,
+} from "lucide-react";
 
 const links = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/builder", label: "Generador", icon: Layers },
   { href: "/stats", label: "Estadísticas", icon: BarChart3 },
+  { href: "/backtest", label: "Backtest", icon: History },
+  { href: "/health", label: "Salud", icon: Activity },
 ];
 
 export function Navbar() {

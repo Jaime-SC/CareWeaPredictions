@@ -101,6 +101,7 @@ const LEAGUE_ID_TO_SLUG: Record<number, LeagueId> = {
   263: "liga-mx",
   265: "primera-chile",
   266: "primera-chile",
+  267: "primera-chile",
   666: "club-friendlies",
   667: "club-friendlies",
   779: "leagues-cup",

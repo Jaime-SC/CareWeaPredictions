@@ -21,9 +21,18 @@ import {
   groupByKey,
   UNIT_STAKE,
 } from "@/lib/utils";
-import { Check, Copy, Loader2, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { Check, Loader2, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  formatSlipExportText,
+  SlipExporter,
+} from "@/components/slip-exporter";
+import {
+  formatExplicitBetLine,
+  getExplicitPickFromLeg,
+} from "@/lib/formatters";
+import { formatValueBadge } from "@/lib/value-finder";
 
 const EXIT_MS = 220;
 
@@ -49,7 +58,6 @@ export function ParlaySlip({
   historyDate,
   onRegenerate,
 }: ParlaySlipProps) {
-  const [copied, setCopied] = useState(false);
   const [registered, setRegistered] = useState(false);
   const [registerMsg, setRegisterMsg] = useState<string | null>(null);
   const [activeLegs, setActiveLegs] = useState<ParlayLeg[]>(parlay.legs);
@@ -141,43 +149,6 @@ export function ParlaySlip({
     setActiveLegs(parlay.legs);
     setRegistered(false);
     setRegisterMsg(null);
-  }
-
-  async function handleCopy() {
-    const text =
-      !isEdited && clipboardText
-        ? clipboardText
-        : [
-            ...activeParlay.legs.map(
-              (l, i) =>
-                `${i + 1}. [${formatKickoffDayLabel(l.kickoff)}] ${l.matchLabel} — ${l.marketLabel} @ ${l.odds.toFixed(2)} (${(l.modelProbability * 100).toFixed(1)}%)`
-            ),
-            "",
-            `Cuota total / Multiplicador: ${activeParlay.totalOdds.toFixed(2)}x`,
-            `Prob. conjunta: ${(activeParlay.jointProbability * 100).toFixed(2)}%`,
-            `Legs: ${activeParlay.legs.length} partidos`,
-          ].join("\n");
-
-    try {
-      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        // Fallback: insecure context / embedded browser without Clipboard API
-        const ta = document.createElement("textarea");
-        ta.value = text;
-        ta.setAttribute("readonly", "");
-        ta.style.position = "fixed";
-        ta.style.left = "-9999px";
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand("copy");
-        document.body.removeChild(ta);
-      }
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.warn("[ParlaySlip] copy failed:", err);
-    }
   }
 
   async function handleRegister() {
@@ -370,22 +341,15 @@ export function ParlaySlip({
         )}
 
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button
-            className="flex-1"
-            variant="secondary"
-            disabled={activeParlay.legs.length === 0}
-            onClick={handleCopy}
-          >
-            {copied ? (
-              <>
-                <Check className="h-4 w-4" /> Copiado
-              </>
-            ) : (
-              <>
-                <Copy className="h-4 w-4" /> Copiar Resumen
-              </>
-            )}
-          </Button>
+          <SlipExporter
+            parlay={activeParlay}
+            text={
+              !isEdited && clipboardText
+                ? clipboardText
+                : formatSlipExportText(activeParlay)
+            }
+            label="Copiar Boleto"
+          />
           {isEdited && (
             <Button
               className="flex-1"
@@ -462,13 +426,16 @@ function LegRow({
   exiting: boolean;
   onRemove: () => void;
 }) {
+  const valueBadge = formatValueBadge(leg.edge ?? 0);
+  const explicit = getExplicitPickFromLeg(leg);
+
   return (
     <li
       className={cn(
         "flex items-start gap-2 overflow-hidden rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2.5 transition-all duration-200 ease-out",
         exiting
           ? "max-h-0 -translate-x-2 scale-[0.98] border-transparent py-0 opacity-0"
-          : "max-h-24 translate-x-0 scale-100 opacity-100"
+          : "max-h-40 translate-x-0 scale-100 opacity-100"
       )}
     >
       <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-slate-800 text-[10px] font-bold text-slate-400">
@@ -478,8 +445,17 @@ function LegRow({
         <p className="text-sm font-medium leading-snug text-slate-100">
           {leg.matchLabel}
         </p>
-        <p className="text-xs text-slate-400">
-          {formatKickoffDayLabel(leg.kickoff)} CL · {leg.marketLabel} · modelo{" "}
+        <p className="text-xs text-slate-200">
+          Apuesta: {formatExplicitBetLine(explicit)}
+          {valueBadge ? (
+            <span className="ml-1 text-amber-300">{valueBadge}</span>
+          ) : null}
+        </p>
+        <p className="text-[11px] leading-snug text-slate-500" title={explicit.condition}>
+          Condición: {explicit.condition}
+        </p>
+        <p className="text-[11px] text-slate-500">
+          {formatKickoffDayLabel(leg.kickoff)} CL · modelo{" "}
           {formatPercent(leg.modelProbability)}
         </p>
       </div>

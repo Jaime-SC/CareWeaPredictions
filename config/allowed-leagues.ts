@@ -72,6 +72,7 @@ export const ALLOWED_LEAGUES: readonly AllowedLeagueEntry[] = [
   // Chile
   { id: 265, name: "Primera División Chile", region: "south-america-top5" },
   { id: 266, name: "Copa Chile", region: "south-america-top5" },
+  { id: 267, name: "Primera B Chile", region: "south-america-top5" },
 
   // CONMEBOL
   { id: 13, name: "Copa Libertadores", region: "conmebol" },
@@ -146,6 +147,7 @@ export function isAllowedLeagueName(leagueName: string): boolean {
   if (key.includes("copa do brasil") || key.includes("copa argentina"))
     return true;
   if (key.includes("copa chile") || key.includes("copa colombia")) return true;
+  if (key.includes("primera b")) return true;
   if (key.includes("liga mx") || key.includes("copa mx")) return true;
   if (key.includes("major league soccer") || /(^|\s)mls(\s|$)/.test(key))
     return true;

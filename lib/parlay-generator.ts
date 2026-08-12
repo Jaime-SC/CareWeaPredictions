@@ -31,6 +31,11 @@ import {
 } from "./model-weights";
 import { chileDateString, formatKickoffDayLabel } from "./utils";
 import { isAllowedLeagueName } from "../config/allowed-leagues";
+import { prioritizeValueLegs, valueRankBonus } from "./value-finder";
+import {
+  formatExplicitBetLine,
+  getExplicitPickFromLeg,
+} from "./formatters";
 
 export { DEFAULT_AUTO_PARLAY_CONFIG } from "./parlay-defaults";
 
@@ -326,6 +331,7 @@ export function collectSafePicks(
       const oddsFit = isFunStrategy(strategyMode)
         ? funOddsFit(pick.odds)
         : 0;
+      const valueBonus = valueRankBonus(pick.modelProbability, pick.odds);
       const base =
         mode === "probability"
           ? pick.modelProbability * 10 + pick.edge
@@ -337,7 +343,7 @@ export function collectSafePicks(
       return {
         match: resolved,
         pick,
-        rank: base + wa * 0.4 + bonus + oddsFit,
+        rank: base + wa * 0.4 + bonus + oddsFit + valueBonus,
       };
     });
 
@@ -598,22 +604,25 @@ export function generateParlay(
       bestBackfillMeta = { strictCount, backfilled };
     }
 
+    // Prefer positive-value legs (≥5% edge) when filling the accumulator
+    const rankedPool = prioritizeValueLegs(pool);
+
     const minLegs = isFunStrategy(strategyMode)
-      ? Math.min(effectiveTarget, pool.length)
+      ? Math.min(effectiveTarget, rankedPool.length)
       : preset.minLegs;
 
     candidates.push(
       enforceExactLegCount(
-        buildGreedy(pool, effective, minLegs),
-        pool,
+        buildGreedy(rankedPool, effective, minLegs),
+        rankedPool,
         effective,
         effectiveTarget
       )
     );
     candidates.push(
       enforceExactLegCount(
-        buildClosestToTarget(pool, effective, minLegs),
-        pool,
+        buildClosestToTarget(rankedPool, effective, minLegs),
+        rankedPool,
         effective,
         effectiveTarget
       )
@@ -969,27 +978,26 @@ export function formatParlayClipboard(
     for (const l of ordered) {
       n += 1;
       const dayLabel = formatKickoffDayLabel(l.kickoff, ref);
+      const explicit = getExplicitPickFromLeg(l);
       legLines.push(
-        `  ${n}. [${dayLabel} CL] ${l.matchLabel} | ${l.marketLabel} @ ${l.odds.toFixed(2)} (${(l.modelProbability * 100).toFixed(1)}%)`
+        `  ${n}. [${dayLabel} CL] ${l.matchLabel}`,
+        `     🎯 Apuesta: ${formatExplicitBetLine(explicit)} @ ${l.odds.toFixed(2)} (${(l.modelProbability * 100).toFixed(1)}%)`,
+        `     💡 Condición: ${explicit.condition}`
       );
     }
   }
 
   const lines = [
-    "⚽ ParleyLab — Acumulador",
+    `🎰 ParleyLab — Accumulator (${parlay.legs.length} Legs)`,
+    `📊 Multiplicador Total: ${parlay.totalOdds.toFixed(2)}x | Prob. Conjunta: ${(parlay.jointProbability * 100).toFixed(1)}%`,
     parlay.strategyLabel
       ? `Estrategia: ${parlay.strategyLabel}`
       : undefined,
     parlay.successProbabilityLabel,
     parlay.fillNotice,
-    parlay.riskTier === "fun"
-      ? "Modo Seguro / Alta Probabilidad (piso 80% por leg)"
-      : undefined,
     "────────────────────────",
     ...legLines,
     "────────────────────────",
-    `Cuota total / Multiplicador: ${parlay.totalOdds.toFixed(2)}x`,
-    `Prob. conjunta: ${(parlay.jointProbability * 100).toFixed(2)}%`,
     `Legs: ${parlay.legs.length} partidos`,
     `Riesgo: ${parlay.riskLabel}`,
   ].filter(Boolean) as string[];

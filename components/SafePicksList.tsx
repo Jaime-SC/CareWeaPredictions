@@ -16,12 +16,17 @@ import {
 } from "@/lib/history-tracker";
 import type { SafePickItem } from "@/lib/parlay-storage";
 import {
+  formatExplicitBetLine,
+  getExplicitPickFromLeg,
+} from "@/lib/formatters";
+import {
   formatKickoffTime,
   formatOdds,
   formatPercent,
   groupByKey,
   UNIT_STAKE,
 } from "@/lib/utils";
+import { formatValueBadge } from "@/lib/value-finder";
 import { Check, Loader2, Pin } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -157,6 +162,8 @@ export function SafePicksList({
                   {group.items.map((pick) => {
                     const key = pickKey(pick);
                     const registered = registeredKeys.has(key);
+                    const valueBadge = formatValueBadge(pick.edge);
+                    const explicit = getExplicitPickFromLeg(pick);
                     return (
                       <li
                         key={key}
@@ -170,12 +177,18 @@ export function SafePicksList({
                                 {formatKickoffTime(pick.kickoff)} CL
                               </span>
                             </p>
-                            <p className="text-xs text-slate-400">
-                              {pick.marketLabel}
+                            <p className="text-xs text-slate-200">
+                              Apuesta: {formatExplicitBetLine(explicit)}
                               <span className="mx-1.5 text-slate-600">·</span>
                               <span className="font-mono text-emerald-300">
                                 @{formatOdds(pick.odds)}
                               </span>
+                            </p>
+                            <p
+                              className="text-[11px] leading-snug text-slate-500"
+                              title={explicit.condition}
+                            >
+                              Condición: {explicit.condition}
                             </p>
                             <div className="flex flex-wrap gap-1.5 pt-0.5">
                               <Badge variant="success">
@@ -185,6 +198,9 @@ export function SafePicksList({
                               <Badge variant="info">
                                 Edge {formatPercent(pick.edge)}
                               </Badge>
+                              {valueBadge && (
+                                <Badge variant="warning">{valueBadge}</Badge>
+                              )}
                             </div>
                           </div>
                           <div className="flex flex-col items-stretch gap-1 sm:items-end">

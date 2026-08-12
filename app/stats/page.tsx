@@ -227,6 +227,14 @@ export default function StatsPage() {
     setUpdateMsg(null);
     setUpdateError(null);
     const result = await updatePendingBets();
+
+    // Also settle PENDING tickets directly in SQLite (cron path)
+    try {
+      await fetch("/api/cron/settle", { method: "POST" });
+    } catch {
+      // Non-fatal — local history already updated
+    }
+
     setUpdating(false);
 
     if (!result.ok) {
