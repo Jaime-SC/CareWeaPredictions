@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import {
   formatExplicitBetLine,
+  formatMarketGuideLines,
   getExplicitPickFromLeg,
 } from "@/lib/formatters";
 import type { GeneratedParlay, ParlayLeg } from "@/lib/types";
@@ -50,6 +51,7 @@ export function formatSlipLegLines(index: number, leg: ParlayLeg): string[] {
     `${index}. ${leg.matchLabel}`,
     `   🎯 Apuesta: ${betLine} (@${leg.odds.toFixed(2)})`,
     `   💡 Condición: ${explicit.condition}`,
+    ...formatMarketGuideLines(explicit),
   ];
 }
 

@@ -5,11 +5,12 @@ import {
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 /**
  * POST /api/results
- * Body: { fixtureIds: number[] }
- * Returns real API-Football fixture statuses and final scores.
+ * Body: { fixtureIds: number[], kickoffsById?: Record<string, string> }
+ * Free plan: resolves scores via /fixtures?date= (Ids parameter is Pro-only).
  */
 export async function POST(request: Request) {
   try {
@@ -23,9 +24,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, fixtures: [] });
     }
 
-    // Cap to protect free-plan rate limits
-    const capped = fixtureIds.slice(0, 40);
-    const fixtures = await fetchFixturesByIds(capped);
+    const kickoffsById: Record<number, string> = {};
+    const rawKickoffs = body.kickoffsById;
+    if (rawKickoffs && typeof rawKickoffs === "object") {
+      for (const [k, v] of Object.entries(rawKickoffs)) {
+        const id = Number(k);
+        if (Number.isFinite(id) && typeof v === "string" && v) {
+          kickoffsById[id] = v;
+        }
+      }
+    }
+
+    // Cap dates indirectly by limiting ids — one date query covers many fixtures
+    const capped = fixtureIds.slice(0, 80);
+    const fixtures = await fetchFixturesByIds(capped, {
+      forceRefresh: true,
+      kickoffsById,
+    });
 
     return NextResponse.json({
       success: true,

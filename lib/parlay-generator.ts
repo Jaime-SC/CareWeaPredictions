@@ -34,6 +34,7 @@ import { isAllowedLeagueName } from "../config/allowed-leagues";
 import { prioritizeValueLegs, valueRankBonus } from "./value-finder";
 import {
   formatExplicitBetLine,
+  formatMarketGuideLines,
   getExplicitPickFromLeg,
 } from "./formatters";
 
@@ -982,7 +983,10 @@ export function formatParlayClipboard(
       legLines.push(
         `  ${n}. [${dayLabel} CL] ${l.matchLabel}`,
         `     🎯 Apuesta: ${formatExplicitBetLine(explicit)} @ ${l.odds.toFixed(2)} (${(l.modelProbability * 100).toFixed(1)}%)`,
-        `     💡 Condición: ${explicit.condition}`
+        `     💡 Condición: ${explicit.condition}`,
+        ...formatMarketGuideLines(explicit).map((line) =>
+          line.replace(/^   /, "     ")
+        )
       );
     }
   }

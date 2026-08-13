@@ -19,30 +19,35 @@ interface StatsOverviewProps {
 
 export function StatsOverview({ summary }: StatsOverviewProps) {
   const roiPositive = summary.roi >= 0;
+  const settled = summary.completed;
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Metric
         icon={<Ticket className="h-4 w-4 text-violet-300" />}
-        label="Total combinadas / apuestas"
-        value={String(summary.totalBets)}
+        label="Boletos liquidados"
+        value={String(settled)}
         hint={
           summary.pending > 0
-            ? `${summary.pending} pendientes · ${summary.completed} resueltos`
-            : `${summary.completed} resueltos`
+            ? `${summary.won}G · ${summary.lost}P · ${summary.pending} en juego (no cuentan)`
+            : `${summary.won}G · ${summary.lost}P`
         }
       />
       <Metric
         icon={<Percent className="h-4 w-4 text-sky-400" />}
         label="Tasa de acierto (Win Rate)"
         value={formatPercent(summary.winRate)}
-        hint={`${summary.won} ganadas / ${summary.won + summary.lost} totales`}
+        hint={
+          settled > 0
+            ? `${summary.won} ganadas / ${settled} liquidados`
+            : "Sin boletos liquidados aún"
+        }
       />
       <Metric
         icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
         label="ROI % / Rendimiento"
         value={`${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}
-        hint="1U por ticket · unidades"
+        hint="1U por ticket liquidado · pendientes excluidos"
         valueClass={roiPositive ? "text-emerald-300" : "text-rose-300"}
       />
       <Metric

@@ -37,6 +37,8 @@ export interface TrainingFeatureRow {
 
 export interface StatsSummaryMeta {
   totalTickets: number;
+  /** WON + LOST — denominator for Win Rate / ROI */
+  settledTickets: number;
   pending: number;
   won: number;
   lost: number;

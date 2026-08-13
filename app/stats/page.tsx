@@ -37,7 +37,11 @@ import {
   updateBetStatus,
 } from "@/lib/history-tracker";
 import { formatLegMatchStatus, updatePendingBets } from "@/lib/result-checker";
-import { cn, formatOdds, formatPercent } from "@/lib/utils";
+import {
+  formatExplicitBetLine,
+  getExplicitPickLabel,
+} from "@/lib/formatters";
+import { cn, chileDateString, formatOdds, formatPercent } from "@/lib/utils";
 import {
   Check,
   CheckCircle2,
@@ -64,11 +68,38 @@ import {
   YAxis,
 } from "recharts";
 
+type SettlementDiagnostic = {
+  ticketId: string;
+  fixtureApiId: number;
+  match: string;
+  kickoff: string;
+  statusShort: string;
+  action: "settled" | "voided" | "skipped" | "unresolved";
+  reason: string;
+  outcome?: string;
+};
+
+type SettleApiPayload = {
+  success: boolean;
+  settledTicketsCount: number;
+  updatedLegsCount: number;
+  ticketsWon?: number;
+  ticketsLost?: number;
+  ticketsVoided?: number;
+  stillPending?: number;
+  overduePending?: number;
+  checkedFixtures?: number;
+  diagnostics?: SettlementDiagnostic[];
+  errors?: string[];
+  error?: string;
+};
+
 type StatsApiPayload = {
   success: boolean;
   tickets?: HistoryBet[];
   summary?: {
     totalTickets: number;
+    settledTickets?: number;
     pending: number;
     won: number;
     lost: number;
@@ -91,13 +122,13 @@ function summaryFromApi(
   bets: HistoryBet[]
 ): HistorySummary {
   if (!api) return computeSummary(bets);
+  const settled = api.settledTickets ?? api.won + api.lost;
   return {
     netProfit: api.netProfit,
     totalStaked: api.totalStaked,
     totalReturned: 0,
     roi: api.roi,
-    winRate:
-      api.won + api.lost > 0 ? api.won / (api.won + api.lost) : 0,
+    winRate: settled > 0 ? api.won / settled : 0,
     legAccuracy: api.legAccuracy,
     legsWon: api.legsWon,
     legsEvaluated: api.legsEvaluated,
@@ -106,8 +137,18 @@ function summaryFromApi(
     lost: api.lost,
     pending: api.pending,
     voided: api.voided,
-    completed: api.won + api.lost,
+    completed: settled,
   };
+}
+
+function ticketStatusBadge(status: BetStatus): {
+  variant: "success" | "danger" | "warning" | "info";
+  label: string;
+} {
+  if (status === "won") return { variant: "success", label: "🟢 Ganada" };
+  if (status === "lost") return { variant: "danger", label: "🔴 Perdida" };
+  if (status === "void") return { variant: "warning", label: "Cancelada" };
+  return { variant: "info", label: "⏳ En Juego" };
 }
 
 export default function StatsPage() {
@@ -127,11 +168,11 @@ export default function StatsPage() {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
 
-  const refreshFromDb = useCallback(async () => {
+  const refreshFromDb = useCallback(async (): Promise<StatsApiPayload | null> => {
     purgeFakeHistory();
     const local = loadBets();
     try {
-      const res = await fetch("/api/stats/summary");
+      const res = await fetch("/api/stats/summary", { cache: "no-store" });
       const data = (await res.json()) as StatsApiPayload;
       if (res.ok && data.success) {
         const tickets = data.tickets ?? [];
@@ -147,7 +188,7 @@ export default function StatsPage() {
         setTrainingExport(data.trainingExport ?? []);
         setApiSummary(data.summary);
         setHydrated(true);
-        return;
+        return data;
       }
     } catch {
       // fall through to local
@@ -159,38 +200,109 @@ export default function StatsPage() {
     setTrainingExport([]);
     setApiSummary(undefined);
     setHydrated(true);
+    return null;
   }, []);
 
-  useEffect(() => {
-    void refreshFromDb();
-  }, [refreshFromDb]);
+  const runSettle = useCallback(async (): Promise<SettleApiPayload | null> => {
+    try {
+      const res = await fetch("/api/settle", {
+        method: "POST",
+        cache: "no-store",
+      });
+      const data = (await res.json()) as SettleApiPayload;
+      return data;
+    } catch {
+      return {
+        success: false,
+        settledTicketsCount: 0,
+        updatedLegsCount: 0,
+        errors: ["Error de red al sincronizar marcadores."],
+        error: "Error de red al sincronizar marcadores.",
+      };
+    }
+  }, []);
+
+  const applySettleFeedback = useCallback(
+    (settle: SettleApiPayload | null, opts?: { silentIfIdle?: boolean }) => {
+      if (!settle) return;
+
+      const n = settle.settledTicketsCount ?? 0;
+      const won = settle.ticketsWon ?? 0;
+      const lost = settle.ticketsLost ?? 0;
+      const voided = settle.ticketsVoided ?? 0;
+      const unresolved =
+        settle.diagnostics?.filter((d) => d.action === "unresolved") ?? [];
+
+      console.info("[settle] Sincronización de marcadores", {
+        settledTicketsCount: n,
+        ticketsWon: won,
+        ticketsLost: lost,
+        ticketsVoided: voided,
+        stillPending: settle.stillPending,
+        overduePending: settle.overduePending,
+        checkedFixtures: settle.checkedFixtures,
+        diagnostics: settle.diagnostics,
+        errors: settle.errors,
+      });
+
+      if (n > 0) {
+        setUpdateMsg(
+          `Sincronización completada: ${n} boletos actualizados (${won} Ganados, ${lost} Perdidos).`
+        );
+        if (unresolved.length > 0) {
+          setUpdateError(
+            unresolved
+              .slice(0, 4)
+              .map((d) => `${d.match}: ${d.reason}`)
+              .join(" · ")
+          );
+        } else if (!settle.success && (settle.error || settle.errors?.length)) {
+          setUpdateError(settle.error ?? settle.errors?.[0] ?? null);
+        }
+        return;
+      }
+      if (!settle.success && (settle.error || settle.errors?.length)) {
+        setUpdateError(
+          settle.error ?? settle.errors?.[0] ?? "Error al sincronizar."
+        );
+        return;
+      }
+      if (unresolved.length > 0) {
+        setUpdateError(
+          unresolved
+            .slice(0, 4)
+            .map((d) => `${d.match}: ${d.reason}`)
+            .join(" · ")
+        );
+        return;
+      }
+      if (opts?.silentIfIdle) return;
+      if ((settle.stillPending ?? 0) > 0) {
+        setUpdateMsg(
+          "Hay boletos en juego; se consultaron marcadores pero aún no están FT / AET / PEN."
+        );
+        return;
+      }
+      setUpdateMsg("No hay boletos pendientes por liquidar.");
+    },
+    []
+  );
 
   useEffect(() => {
-    if (!hydrated) return;
-    const pending = bets.some(
-      (b) => b.status === "pending" || b.legs.some((l) => l.status === "pending")
-    );
-    if (!pending) return;
-
     let cancelled = false;
     (async () => {
       setUpdating(true);
-      const result = await updatePendingBets();
+      const settle = await runSettle();
       if (cancelled) return;
+      await refreshFromDb();
+      if (cancelled) return;
+      applySettleFeedback(settle, { silentIfIdle: true });
       setUpdating(false);
-      if (result.ok && result.updatedTickets > 0) {
-        setUpdateMsg(
-          `Auto-check: ${result.updatedTickets} ticket(s) actualizado(s) con API-Football.`
-        );
-        await refreshFromDb();
-      }
     })();
-
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once after hydrate
-  }, [hydrated]);
+  }, [runSettle, refreshFromDb, applySettleFeedback]);
 
   const summary = useMemo(
     () => summaryFromApi(apiSummary, bets),
@@ -209,6 +321,21 @@ export default function StatsPage() {
     () => computeLeagueBreakdown(bets),
     [bets]
   );
+  const pendingBets = useMemo(
+    () => bets.filter((b) => b.status === "pending"),
+    [bets]
+  );
+  const overduePendingCount = useMemo(() => {
+    const today = chileDateString();
+    return pendingBets.filter((b) => {
+      if (b.date && b.date < today) return true;
+      return b.legs.some((leg) => {
+        if (!leg.kickoff) return false;
+        const t = new Date(leg.kickoff);
+        return Number.isFinite(t.getTime()) && chileDateString(t) < today;
+      });
+    }).length;
+  }, [pendingBets]);
 
   const leagueRows =
     byLeague.length > 0
@@ -222,40 +349,38 @@ export default function StatsPage() {
           netRoi: 0,
         }));
 
-  async function handleUpdateFromApi() {
+  async function handleSyncScores() {
     setUpdating(true);
     setUpdateMsg(null);
     setUpdateError(null);
-    const result = await updatePendingBets();
 
-    // Also settle PENDING tickets directly in SQLite (cron path)
-    try {
-      await fetch("/api/cron/settle", { method: "POST" });
-    } catch {
-      // Non-fatal — local history already updated
-    }
-
-    setUpdating(false);
-
-    if (!result.ok) {
-      setUpdateError(result.error ?? "Error al actualizar.");
+    const settle = await runSettle();
+    if (!settle?.success) {
+      const alreadyHitLiveApi =
+        (settle.checkedFixtures ?? 0) > 0 ||
+        (settle.diagnostics?.length ?? 0) > 0;
+      if (!alreadyHitLiveApi) {
+        const fallback = await updatePendingBets();
+        if (fallback.ok && fallback.updatedTickets > 0) {
+          setBets(fallback.bets);
+          replaceBets(fallback.bets);
+          setUpdateMsg(
+            `Sincronización completada: ${fallback.updatedTickets} boletos actualizados.`
+          );
+          await refreshFromDb();
+          setUpdating(false);
+          return;
+        }
+      }
+      applySettleFeedback(settle);
+      await refreshFromDb();
+      setUpdating(false);
       return;
     }
 
     await refreshFromDb();
-
-    if (result.checkedFixtures === 0) {
-      setUpdateMsg(
-        result.stillPending > 0
-          ? "Hay tickets pendientes pero sin fixture_id válido para consultar."
-          : "No hay partidos pendientes por consultar."
-      );
-      return;
-    }
-
-    setUpdateMsg(
-      `API-Football: ${result.checkedFixtures} fixture(s) · ${result.updatedTickets} ticket(s) actualizado(s) · ${result.stillPending} pendiente(s).`
-    );
+    applySettleFeedback(settle);
+    setUpdating(false);
   }
 
   async function handleStatus(id: string, status: BetStatus) {
@@ -263,6 +388,7 @@ export default function StatsPage() {
     try {
       await fetch("/api/stats/summary", {
         method: "PATCH",
+        cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "status", ticketId: id, status }),
       });
@@ -284,6 +410,7 @@ export default function StatsPage() {
     try {
       await fetch("/api/stats/summary", {
         method: "PATCH",
+        cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "clear" }),
       });
@@ -325,6 +452,7 @@ export default function StatsPage() {
       try {
         const res = await fetch("/api/stats/summary", {
           method: "PATCH",
+          cache: "no-store",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "delete", ticketId: betId }),
         });
@@ -431,7 +559,7 @@ export default function StatsPage() {
   if (!hydrated) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-16 text-center text-sm text-slate-500">
-        Cargando analytics desde SQLite…
+        Cargando analytics y sincronizando marcadores…
       </div>
     );
   }
@@ -448,8 +576,10 @@ export default function StatsPage() {
             Analytics de entrenamiento
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-400">
-            Win rate, ROI en unidades (1U) y conteo de tickets — sin montos en
-            CLP. Datos persistidos para afinar el modelo Poisson / ML.
+            Win Rate y ROI se calculan solo con boletos liquidados (Ganada /
+            Perdida). Los pendientes en juego no distorsionan el rendimiento.
+            Al cargar el panel se sincronizan automáticamente los marcadores
+            de partidos con kickoff ya ocurrido (FT, AET, PEN, EXTRA).
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -465,15 +595,15 @@ export default function StatsPage() {
           <Button
             variant="default"
             size="sm"
-            onClick={handleUpdateFromApi}
-            disabled={updating || bets.length === 0}
+            onClick={handleSyncScores}
+            disabled={updating}
           >
             {updating ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <RefreshCw className="h-4 w-4" />
             )}
-            Actualizar Resultados
+            🔄 Sincronizar Marcadores
           </Button>
           {bets.length > 0 && (
             <Button variant="danger" size="sm" onClick={handleClear}>
@@ -484,17 +614,25 @@ export default function StatsPage() {
         </div>
       </div>
 
+      {overduePendingCount > 0 && (
+        <Card className="border-sky-500/40 bg-sky-950/20">
+          <CardContent className="p-4 text-sm text-sky-100">
+            ℹ️ Tienes {overduePendingCount} boletos pendientes de ayer. Haz
+            clic en Sincronizar para actualizar marcadores.
+          </CardContent>
+        </Card>
+      )}
+      {updateMsg && (
+        <Card className="border-emerald-500/20 bg-emerald-950/10">
+          <CardContent className="p-4 text-sm text-emerald-200/90">
+            {updateMsg}
+          </CardContent>
+        </Card>
+      )}
       {updateError && (
         <Card className="border-rose-500/40 bg-rose-950/20">
           <CardContent className="p-4 text-sm text-rose-300">
             {updateError}
-          </CardContent>
-        </Card>
-      )}
-      {updateMsg && !updateError && (
-        <Card className="border-emerald-500/20 bg-emerald-950/10">
-          <CardContent className="p-4 text-sm text-emerald-200/90">
-            {updateMsg}
           </CardContent>
         </Card>
       )}
@@ -522,6 +660,50 @@ export default function StatsPage() {
       ) : (
         <>
           <StatsOverview summary={summary} />
+
+          {pendingBets.length > 0 && (
+            <Card className="border-sky-500/30 bg-sky-950/15">
+              <CardHeader>
+                <div className="flex flex-wrap items-center gap-2">
+                  <CardTitle>Boletos En Juego / Pendientes</CardTitle>
+                  <Badge variant="info">⏳ {pendingBets.length} en curso</Badge>
+                </div>
+                <CardDescription>
+                  Combinadas cuyo resultado aún no está liquidado. No entran en
+                  Win Rate %, ROI ni precisión del algoritmo. Al abrir esta
+                  página se consultan marcadores de partidos con kickoff
+                  vencido (FT, AET, PEN, EXTRA).
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {pendingBets.map((bet) => {
+                  const hits = countLegHits(bet.legs);
+                  return (
+                    <div
+                      key={bet.id}
+                      className="flex flex-col gap-1 rounded-lg border border-sky-500/20 bg-slate-950/50 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0 space-y-0.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="info">⏳ En Juego</Badge>
+                          <Badge variant={bet.mode === "Segura" ? "success" : "warning"}>
+                            {bet.mode} · {bet.timeframe}
+                          </Badge>
+                          <span className="text-xs text-slate-500">{bet.date}</span>
+                        </div>
+                        <p className="text-sm text-slate-200">
+                          {bet.legs.length} legs · {formatOdds(bet.totalOdds)}x · 1U
+                          <span className="ml-2 text-xs text-slate-500">
+                            {hits.won}✔ · {hits.lost}✖ · {hits.pending}⏳
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          )}
 
           {/* 1. By competition */}
           <Card>
@@ -964,6 +1146,12 @@ function LegDetailRow({ leg }: { leg: HistoryBetLeg }) {
     leg.awayTeam || leg.matchLabel.split(/\s+vs\.?\s+/i)[1] || "";
   const matchName = away ? `${home} vs ${away}` : home;
   const statusLine = formatLegMatchStatus(leg);
+  const explicit = getExplicitPickLabel(
+    leg.market,
+    leg.marketLabel,
+    home,
+    away || "Visitante"
+  );
 
   return (
     <li
@@ -981,11 +1169,14 @@ function LegDetailRow({ leg }: { leg: HistoryBetLeg }) {
           {matchName}
         </p>
         <p className="text-xs text-slate-400">
-          {leg.marketLabel}
+          {formatExplicitBetLine(explicit)}
           <span className="mx-1.5 text-slate-600">·</span>
           <span className="font-mono text-emerald-300/90">
             @{formatOdds(leg.odds)}
           </span>
+        </p>
+        <p className="text-[11px] leading-snug text-sky-300/80">
+          {explicit.bookmakerTab}
         </p>
         <p className="text-xs text-slate-500">
           {statusLine}
@@ -1016,14 +1207,7 @@ function BetRow({
   const hits = countLegHits(bet.legs);
   const hitsVariant = legHitsBadgeVariant(bet.status);
 
-  const statusBadge =
-    bet.status === "won"
-      ? { variant: "success" as const, label: "Ganada" }
-      : bet.status === "lost"
-        ? { variant: "danger" as const, label: "Perdida" }
-        : bet.status === "void"
-          ? { variant: "warning" as const, label: "Cancelada" }
-          : { variant: "info" as const, label: "Pendiente" };
+  const statusBadge = ticketStatusBadge(bet.status);
 
   const unitPnl =
     bet.status === "won"

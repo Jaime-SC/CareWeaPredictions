@@ -190,6 +190,17 @@ export function SafePicksList({
                             >
                               Condición: {explicit.condition}
                             </p>
+                            <p className="text-[11px] leading-snug text-sky-300/90">
+                              {explicit.bookmakerTab}
+                            </p>
+                            <p className="text-[11px] leading-snug text-amber-300/90">
+                              {explicit.warningNote}
+                            </p>
+                            {explicit.cupEquivalent ? (
+                              <p className="text-[11px] leading-snug text-emerald-300/80">
+                                {explicit.cupEquivalent}
+                              </p>
+                            ) : null}
                             <div className="flex flex-wrap gap-1.5 pt-0.5">
                               <Badge variant="success">
                                 {formatPercent(pick.modelProbability)}{" "}

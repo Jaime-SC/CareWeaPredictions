@@ -7,17 +7,28 @@ import {
 } from "@/lib/bet-db";
 import type { BetStatus } from "@/lib/history-tracker";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 /**
  * GET /api/stats/summary
  * Aggregated analytics: by league, by date+market, training export vectors.
+ * Settlement runs separately via POST /api/settle (called on stats page load).
  */
 export async function GET() {
   try {
     const payload = await buildStatsSummary();
-    return NextResponse.json({
-      success: true,
-      ...payload,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        ...payload,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        },
+      }
+    );
   } catch (error) {
     console.error("[api/stats/summary]", error);
     return NextResponse.json(

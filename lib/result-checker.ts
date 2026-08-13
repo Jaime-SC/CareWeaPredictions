@@ -8,12 +8,19 @@ import {
   saveBets,
   purgeFakeHistory,
 } from "./history-tracker";
+import {
+  isFixtureFinished,
+  isFixtureLive,
+  isFixtureVoided,
+  isKickoffDueForSettlement,
+} from "./match-status";
 import { chileDateString, formatKickoffTime } from "./utils";
 
 export type FixtureResult = {
   fixtureId: number;
   statusShort: string;
   finished: boolean;
+  voided?: boolean;
   homeGoals: number | null;
   awayGoals: number | null;
   homeName?: string;
@@ -32,32 +39,11 @@ export type UpdatePendingResult = {
   bets: HistoryBet[];
 };
 
-const FINISHED_STATUSES = new Set([
-  "FT",
-  "AET",
-  "PEN",
-  "AWD",
-  "WO",
-]);
-
-const LIVE_STATUSES = new Set([
-  "1H",
-  "2H",
-  "HT",
-  "ET",
-  "BT",
-  "P",
-  "LIVE",
-  "INT",
-]);
-
-export function isFixtureFinished(statusShort: string): boolean {
-  return FINISHED_STATUSES.has(statusShort.toUpperCase());
-}
-
-export function isFixtureLive(statusShort: string): boolean {
-  return LIVE_STATUSES.has(statusShort.toUpperCase());
-}
+export {
+  isFixtureFinished,
+  isFixtureLive,
+  isFixtureVoided,
+} from "./match-status";
 
 /**
  * Evaluate a market against a final score.
@@ -132,6 +118,13 @@ export function formatLegMatchStatus(leg: HistoryBetLeg): string {
   const short = (leg.statusShort ?? "").toUpperCase();
   const score =
     leg.finalScore ?? scoreText(leg.homeGoals, leg.awayGoals);
+
+  if (isFixtureVoided(short)) {
+    if (short === "CANC" || short === "CAN") return "Cancelado (PUSH)";
+    if (short === "SUSP" || short === "INT") return "Suspendido (PUSH)";
+    if (short === "ABD") return "Abandonado (PUSH)";
+    return "Aplazado (PUSH)";
+  }
 
   if (isFixtureFinished(short) && score) {
     return `${score} (${short || "FT"})`;
@@ -217,8 +210,14 @@ export function applyFixtureToLeg(
     return enriched;
   }
 
+  if (fixture.voided || isFixtureVoided(fixture.statusShort)) {
+    return { ...enriched, status: "void" };
+  }
+
+  const finished =
+    fixture.finished || isFixtureFinished(fixture.statusShort);
   if (
-    !fixture.finished ||
+    !finished ||
     fixture.homeGoals == null ||
     fixture.awayGoals == null ||
     !leg.market
@@ -277,15 +276,34 @@ export function applyFixturesToBets(
 
 export function collectPendingFixtureIds(bets: HistoryBet[]): number[] {
   const ids = new Set<number>();
+  const now = Date.now();
   for (const bet of bets) {
     for (const leg of bet.legs) {
-      // Re-check pending legs; also refresh live metadata
-      if (leg.status === "pending" && leg.fixtureId > 0) {
-        ids.add(leg.fixtureId);
+      if (leg.status !== "pending" || leg.fixtureId <= 0) continue;
+      if (leg.kickoff && !isKickoffDueForSettlement(leg.kickoff, now)) {
+        continue;
       }
+      ids.add(leg.fixtureId);
     }
   }
   return Array.from(ids);
+}
+
+export function collectPendingKickoffsById(
+  bets: HistoryBet[]
+): Record<number, string> {
+  const map: Record<number, string> = {};
+  const now = Date.now();
+  for (const bet of bets) {
+    for (const leg of bet.legs) {
+      if (leg.status !== "pending" || leg.fixtureId <= 0 || !leg.kickoff) {
+        continue;
+      }
+      if (!isKickoffDueForSettlement(leg.kickoff, now)) continue;
+      map[leg.fixtureId] = leg.kickoff;
+    }
+  }
+  return map;
 }
 
 /**
@@ -296,6 +314,7 @@ export async function updatePendingBets(): Promise<UpdatePendingResult> {
   purgeFakeHistory();
   const bets = loadBets();
   const fixtureIds = collectPendingFixtureIds(bets);
+  const kickoffsById = collectPendingKickoffsById(bets);
 
   if (fixtureIds.length === 0) {
     const stillPending = bets.filter((b) => b.status === "pending").length;
@@ -311,8 +330,9 @@ export async function updatePendingBets(): Promise<UpdatePendingResult> {
   try {
     const res = await fetch("/api/results", {
       method: "POST",
+      cache: "no-store",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fixtureIds }),
+      body: JSON.stringify({ fixtureIds, kickoffsById }),
     });
     const data = await res.json().catch(() => ({}));
 

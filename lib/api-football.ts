@@ -1,6 +1,10 @@
 import type { LeagueId, Match, MatchOdds } from "./types";
 import {
+  API_AUTH_MESSAGE,
   API_CONNECTION_ERROR_MESSAGE,
+  API_IDS_UNSUPPORTED_MESSAGE,
+  API_KEY_MISSING_MESSAGE,
+  API_RATE_LIMIT_MESSAGE,
   EMPTY_MATCHES_MESSAGE,
 } from "./api-messages";
 import {
@@ -8,12 +12,17 @@ import {
   fetchWithCache,
   ttlMinutesForFixtureDate,
 } from "./api-cache";
+import { prisma } from "./db";
 import {
   applyOddsImpliedStats,
   fixtureIdFromMatchId,
   parseFixtureOdds,
   type ApiOddsFixture,
 } from "./odds-mapper";
+import {
+  isFixtureFinished,
+  isFixtureVoided,
+} from "./match-status";
 import {
   ALLOWED_LEAGUE_IDS,
   CLUB_FRIENDLY_LEAGUE_IDS,
@@ -153,7 +162,7 @@ let eliteTeamIdsCache: Set<number> | null = null;
 function resolveApiKey(): string {
   const key = process.env.FOOTBALL_API_KEY?.trim();
   if (!key) {
-    throw new FootballApiError(API_CONNECTION_ERROR_MESSAGE, "AUTH", 401);
+    throw new FootballApiError(API_KEY_MISSING_MESSAGE, "AUTH", 401);
   }
   return key;
 }
@@ -193,6 +202,39 @@ function formatApiErrors(errors: ApiEnvelope<unknown>["errors"]): string {
   return Object.values(errors).join("; ");
 }
 
+function messageFromApiErrors(
+  errors: ApiEnvelope<unknown>["errors"],
+  httpStatus?: number
+): string {
+  if (httpStatus === 401 || httpStatus === 403) return API_AUTH_MESSAGE;
+  if (httpStatus === 429) return API_RATE_LIMIT_MESSAGE;
+
+  const detail = formatApiErrors(errors).toLowerCase();
+  if (
+    detail.includes("rate") ||
+    detail.includes("too many") ||
+    detail.includes("per minute") ||
+    detail.includes("minuto")
+  ) {
+    return API_RATE_LIMIT_MESSAGE;
+  }
+  if (
+    (detail.includes("request") && detail.includes("limit")) ||
+    detail.includes("reached the request")
+  ) {
+    return `${API_RATE_LIMIT_MESSAGE} Detalle API: ${formatApiErrors(errors)}`;
+  }
+  if (
+    detail.includes("plan") ||
+    detail.includes("subscription") ||
+    detail.includes("not available")
+  ) {
+    return `Tu plan Free no permite esta consulta: ${formatApiErrors(errors)}`;
+  }
+  const formatted = formatApiErrors(errors);
+  return formatted || API_CONNECTION_ERROR_MESSAGE;
+}
+
 /** Free-plan / date-window rejections — not a connectivity outage. */
 function isPlanOrDateRestriction(
   errors: ApiEnvelope<unknown>["errors"]
@@ -215,6 +257,7 @@ async function apiGet<T>(
     noStore?: boolean;
     ttlMinutes?: number | null;
     cacheKey?: string;
+    forceRefresh?: boolean;
     resolveTtl?: (data: ApiEnvelope<T>) => number | null;
   }
 ): Promise<ApiEnvelope<T>> {
@@ -235,6 +278,7 @@ async function apiGet<T>(
       {
         apiKey,
         cacheKey: opts?.cacheKey,
+        forceRefresh: opts?.forceRefresh,
         resolveTtl: opts?.resolveTtl,
       }
     );
@@ -248,12 +292,20 @@ async function apiGet<T>(
         : undefined;
 
     if (status === 401 || status === 403) {
-      throw new FootballApiError(API_CONNECTION_ERROR_MESSAGE, "AUTH", 401);
+      throw new FootballApiError(API_AUTH_MESSAGE, "AUTH", 401);
     }
     if (status === 429) {
-      throw new FootballApiError(API_CONNECTION_ERROR_MESSAGE, "API_ERROR", 429);
+      throw new FootballApiError(API_RATE_LIMIT_MESSAGE, "API_ERROR", 429);
     }
-    throw new FootballApiError(API_CONNECTION_ERROR_MESSAGE, "API_ERROR", 502);
+    const detail =
+      err instanceof Error && err.message ? err.message : "";
+    throw new FootballApiError(
+      detail.startsWith("API-Football HTTP")
+        ? `Error al conectar con API-Football (${detail}).`
+        : API_CONNECTION_ERROR_MESSAGE,
+      "API_ERROR",
+      502
+    );
   }
 }
 
@@ -573,7 +625,7 @@ async function fetchFromApiFootball(
           continue;
         }
         fatalError = new FootballApiError(
-          API_CONNECTION_ERROR_MESSAGE,
+          messageFromApiErrors(json.errors),
           "API_ERROR",
           502
         );
@@ -694,6 +746,7 @@ export type FixtureScoreResult = {
   fixtureId: number;
   statusShort: string;
   finished: boolean;
+  voided: boolean;
   homeGoals: number | null;
   awayGoals: number | null;
   homeName: string;
@@ -702,84 +755,155 @@ export type FixtureScoreResult = {
   elapsed: number | null;
 };
 
-const FINISHED_SHORT = new Set(["FT", "AET", "PEN", "AWD", "WO"]);
-
-function chunkIds(ids: number[], size: number): number[][] {
-  const out: number[][] = [];
-  for (let i = 0; i < ids.length; i += size) {
-    out.push(ids.slice(i, i + size));
-  }
-  return out;
+function toFixtureScoreResult(item: ApiFixtureResult): FixtureScoreResult {
+  const statusShort = item.fixture.status?.short ?? "";
+  return {
+    fixtureId: item.fixture.id,
+    statusShort,
+    finished: isFixtureFinished(statusShort),
+    voided: isFixtureVoided(statusShort),
+    homeGoals: item.goals?.home ?? item.score?.fulltime?.home ?? null,
+    awayGoals: item.goals?.away ?? item.score?.fulltime?.away ?? null,
+    homeName: item.teams.home.name,
+    awayName: item.teams.away.name,
+    date: item.fixture.date,
+    elapsed: item.fixture.status?.elapsed ?? null,
+  };
 }
 
 /**
- * Fetch live fixture status/scores by API-Football fixture ids.
- * Uses `/fixtures?ids=id-id-id` in batches (no mock data).
+ * Free-plan friendly score fetch: `/fixtures?date=` (Ids parameter is Pro-only).
+ * One request covers the whole civil day — much cheaper than per-fixture calls.
+ */
+export async function fetchFixturesByChileDate(
+  dateYmd: string,
+  opts?: { forceRefresh?: boolean }
+): Promise<FixtureScoreResult[]> {
+  const apiKey = resolveApiKey();
+  const json = await apiGet<ApiFixtureResult[]>(
+    `/fixtures?date=${dateYmd}&timezone=${encodeURIComponent(CHILE_TIMEZONE)}`,
+    apiKey,
+    {
+      ttlMinutes: ttlMinutesForFixtureDate(dateYmd),
+      cacheKey: `fixtures_date_${dateYmd}`,
+      forceRefresh: opts?.forceRefresh,
+      resolveTtl: (envelope) => {
+        if (hasApiErrors(envelope.errors)) {
+          return CACHE_TTL_MINUTES.TODAY_PENDING;
+        }
+        const rows = envelope.response ?? [];
+        if (rows.length === 0) return ttlMinutesForFixtureDate(dateYmd);
+        const allTerminal = rows.every((item) => {
+          const short = item.fixture.status?.short ?? "";
+          return isFixtureFinished(short) || isFixtureVoided(short);
+        });
+        // Past days with all FT/void → permanent SQLite cache (0 live calls next time)
+        if (allTerminal && dateYmd < chileDateString()) return null;
+        return ttlMinutesForFixtureDate(dateYmd);
+      },
+    }
+  );
+
+  if (hasApiErrors(json.errors)) {
+    if (isPlanOrDateRestriction(json.errors)) {
+      console.warn(
+        `[api-football] date ${dateYmd} no disponible en el plan:`,
+        json.errors
+      );
+      return [];
+    }
+    throw new FootballApiError(
+      messageFromApiErrors(json.errors),
+      "API_ERROR",
+      502
+    );
+  }
+
+  return (json.response ?? []).map(toFixtureScoreResult);
+}
+
+/**
+ * Resolve scores for specific fixture ids using date queries (Free plan).
+ * Optional kickoff hints avoid extra DB lookups; otherwise reads MatchFixture.
  */
 export async function fetchFixturesByIds(
-  fixtureIds: number[]
+  fixtureIds: number[],
+  opts?: {
+    forceRefresh?: boolean;
+    /** ISO kickoffs or YYYY-MM-DD aligned with each id (same order not required) */
+    kickoffsById?: Record<number, string>;
+  }
 ): Promise<FixtureScoreResult[]> {
   const unique = Array.from(
     new Set(fixtureIds.filter((id) => Number.isFinite(id) && id > 0))
   );
   if (unique.length === 0) return [];
 
-  const apiKey = resolveApiKey();
-  const results: FixtureScoreResult[] = [];
+  const kickoffsById: Record<number, string> = {
+    ...(opts?.kickoffsById ?? {}),
+  };
 
-  for (const batch of chunkIds(unique, 20)) {
-    const idsParam = batch.join("-");
-    const json = await apiGet<ApiFixtureResult[]>(
-      `/fixtures?ids=${idsParam}`,
-      apiKey,
-      {
-        ttlMinutes: CACHE_TTL_MINUTES.TODAY_PENDING,
-        cacheKey: `fixtures_ids_${idsParam}`,
-        resolveTtl: (envelope) => {
-          const rows = envelope.response ?? [];
-          if (rows.length === 0) return CACHE_TTL_MINUTES.TODAY_PENDING;
-          const allFinished = rows.every((item) =>
-            FINISHED_SHORT.has(
-              (item.fixture.status?.short ?? "").toUpperCase()
-            )
-          );
-          // Finished matches → permanent cache (never burn quota again)
-          return allFinished ? null : CACHE_TTL_MINUTES.TODAY_PENDING;
-        },
-      }
-    );
-
-    if (hasApiErrors(json.errors)) {
-      throw new FootballApiError(
-        API_CONNECTION_ERROR_MESSAGE,
-        "API_ERROR",
-        502
-      );
-    }
-
-    for (const item of json.response ?? []) {
-      const statusShort = item.fixture.status?.short ?? "";
-      const finished = FINISHED_SHORT.has(statusShort.toUpperCase());
-      const homeGoals =
-        item.goals?.home ?? item.score?.fulltime?.home ?? null;
-      const awayGoals =
-        item.goals?.away ?? item.score?.fulltime?.away ?? null;
-
-      results.push({
-        fixtureId: item.fixture.id,
-        statusShort,
-        finished,
-        homeGoals,
-        awayGoals,
-        homeName: item.teams.home.name,
-        awayName: item.teams.away.name,
-        date: item.fixture.date,
-        elapsed: item.fixture.status?.elapsed ?? null,
-      });
+  const missing = unique.filter((id) => !kickoffsById[id]);
+  if (missing.length > 0) {
+    const rows = await prisma.matchFixture.findMany({
+      where: { apiFixtureId: { in: missing } },
+      select: { apiFixtureId: true, matchDate: true },
+    });
+    for (const row of rows) {
+      kickoffsById[row.apiFixtureId] = row.matchDate.toISOString();
     }
   }
 
-  return results;
+  const dates = new Set<string>();
+  for (const id of unique) {
+    const raw = kickoffsById[id];
+    if (!raw) continue;
+    const ymd = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+      ? raw
+      : chileCivilDateFromKickoff(raw);
+    if (!ymd) continue;
+    for (const d of chileDateApiWindow(ymd)) dates.add(d);
+  }
+
+  // No kickoff known → try today ±1 so settlement still has a chance
+  if (dates.size === 0) {
+    for (const d of chileDateApiWindow(chileDateString())) dates.add(d);
+  }
+
+  const byId = new Map<number, FixtureScoreResult>();
+  const wanted = new Set(unique);
+  let lastError: FootballApiError | null = null;
+
+  for (const date of Array.from(dates).sort()) {
+    try {
+      const rows = await fetchFixturesByChileDate(date, {
+        forceRefresh: opts?.forceRefresh,
+      });
+      for (const row of rows) {
+        if (wanted.has(row.fixtureId)) byId.set(row.fixtureId, row);
+      }
+    } catch (err) {
+      if (err instanceof FootballApiError && err.code === "AUTH") throw err;
+      if (err instanceof FootballApiError) lastError = err;
+      else {
+        lastError = new FootballApiError(
+          API_CONNECTION_ERROR_MESSAGE,
+          "API_ERROR",
+          502
+        );
+      }
+    }
+    if (byId.size === wanted.size) break;
+  }
+
+  if (byId.size === 0 && lastError) throw lastError;
+
+  // Free plan never supports ?ids= — keep message available for diagnostics
+  if (byId.size === 0) {
+    console.warn(`[api-football] ${API_IDS_UNSUPPORTED_MESSAGE}`);
+  }
+
+  return Array.from(byId.values());
 }
 
 export function toErrorResponse(error: unknown): {

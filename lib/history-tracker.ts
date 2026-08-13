@@ -1,4 +1,5 @@
 import type { GeneratedParlay, MarketType, ParlayLeg, StrategyMode } from "./types";
+import { computePerformanceMetrics } from "./stats";
 import { chileDateString } from "./utils";
 
 const STORAGE_KEY = "parleylab_bet_history";
@@ -441,42 +442,24 @@ export function clearHistory(): void {
 }
 
 /**
- * Real Net Profit:
- * sum(payouts WON) − sum(stakes LOST) − sum(stakes PENDING)
- * (payouts = potentialReturn; stakes of won tickets are already inside payout math
- *  via ROI denominator — net treats full return credit as user specified).
- *
- * Economically we credit (potentialReturn − stake) for wins so profit is real:
- * = Σ(won.potentialReturn − won.stake) − Σ(lost.stake) − Σ(pending.stake)
+ * Performance (Win Rate, ROI, P&L) uses only Liquidados (WON / LOST).
+ * Pending tickets are counted separately and never enter those formulas.
  */
 export function computeSummary(bets: HistoryBet[]): HistorySummary {
-  let totalStaked = 0;
+  const perf = computePerformanceMetrics(
+    bets.map((bet) => ({
+      status: bet.status,
+      stake: bet.stakeCLP,
+      payout: bet.potentialReturn,
+    }))
+  );
+
   let totalReturned = 0;
-  let netProfit = 0;
-  let won = 0;
-  let lost = 0;
-  let pending = 0;
-  let voided = 0;
   let legsWon = 0;
   let legsEvaluated = 0;
 
   for (const bet of bets) {
-    totalStaked += bet.stakeCLP;
-
-    if (bet.status === "won") {
-      won += 1;
-      totalReturned += bet.potentialReturn;
-      netProfit += bet.potentialReturn - bet.stakeCLP;
-    } else if (bet.status === "lost") {
-      lost += 1;
-      netProfit -= bet.stakeCLP;
-    } else if (bet.status === "pending") {
-      pending += 1;
-      netProfit -= bet.stakeCLP;
-    } else if (bet.status === "void") {
-      voided += 1;
-    }
-
+    if (bet.status === "won") totalReturned += bet.potentialReturn;
     for (const leg of bet.legs) {
       if (leg.status === "won") {
         legsWon += 1;
@@ -487,26 +470,23 @@ export function computeSummary(bets: HistoryBet[]): HistorySummary {
     }
   }
 
-  const completed = won + lost;
-  const roi = totalStaked > 0 ? (netProfit / totalStaked) * 100 : 0;
-  const winRate = completed > 0 ? won / completed : 0;
   const legAccuracy = legsEvaluated > 0 ? legsWon / legsEvaluated : 0;
 
   return {
-    netProfit,
-    totalStaked,
+    netProfit: perf.netProfit,
+    totalStaked: perf.totalStaked,
     totalReturned,
-    roi,
-    winRate,
+    roi: perf.roi,
+    winRate: perf.winRate,
     legAccuracy,
     legsWon,
     legsEvaluated,
     totalBets: bets.length,
-    won,
-    lost,
-    pending,
-    voided,
-    completed,
+    won: perf.won,
+    lost: perf.lost,
+    pending: perf.pending,
+    voided: perf.voided,
+    completed: perf.settled,
   };
 }
 

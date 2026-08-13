@@ -20,6 +20,7 @@ import type {
 } from "./bet-types";
 import type { GeneratedParlay, MarketType, StrategyMode } from "./types";
 import { chileDateString, UNIT_STAKE } from "./utils";
+import { computePerformanceMetrics } from "./stats";
 
 export type {
   DateMarketStatsRow,
@@ -425,30 +426,17 @@ export async function deleteTicketById(ticketId: string): Promise<boolean> {
 export async function buildStatsSummary(): Promise<StatsSummaryPayload> {
   const tickets = await listTicketsAsHistory();
 
-  let totalStaked = 0;
-  let netProfit = 0;
-  let won = 0;
-  let lost = 0;
-  let pending = 0;
-  let voided = 0;
+  const perf = computePerformanceMetrics(
+    tickets.map((bet) => ({
+      status: bet.status,
+      stake: bet.stakeCLP,
+      payout: bet.potentialReturn,
+    }))
+  );
+
   let legsWon = 0;
   let legsEvaluated = 0;
-
   for (const bet of tickets) {
-    totalStaked += bet.stakeCLP;
-    if (bet.status === "won") {
-      won += 1;
-      netProfit += bet.potentialReturn - bet.stakeCLP;
-    } else if (bet.status === "lost") {
-      lost += 1;
-      netProfit -= bet.stakeCLP;
-    } else if (bet.status === "pending") {
-      pending += 1;
-      netProfit -= bet.stakeCLP;
-    } else {
-      voided += 1;
-    }
-
     for (const leg of bet.legs) {
       if (leg.status === "won") {
         legsWon += 1;
@@ -568,13 +556,14 @@ export async function buildStatsSummary(): Promise<StatsSummaryPayload> {
     tickets,
     summary: {
       totalTickets: tickets.length,
-      pending,
-      won,
-      lost,
-      voided,
-      totalStaked,
-      netProfit,
-      roi: totalStaked > 0 ? (netProfit / totalStaked) * 100 : 0,
+      settledTickets: perf.settled,
+      pending: perf.pending,
+      won: perf.won,
+      lost: perf.lost,
+      voided: perf.voided,
+      totalStaked: perf.totalStaked,
+      netProfit: perf.netProfit,
+      roi: perf.roi,
       legsWon,
       legsEvaluated,
       legAccuracy: legsEvaluated > 0 ? legsWon / legsEvaluated : 0,

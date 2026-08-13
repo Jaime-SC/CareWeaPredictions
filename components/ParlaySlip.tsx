@@ -435,7 +435,7 @@ function LegRow({
         "flex items-start gap-2 overflow-hidden rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2.5 transition-all duration-200 ease-out",
         exiting
           ? "max-h-0 -translate-x-2 scale-[0.98] border-transparent py-0 opacity-0"
-          : "max-h-40 translate-x-0 scale-100 opacity-100"
+          : "max-h-[280px] translate-x-0 scale-100 opacity-100"
       )}
     >
       <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-slate-800 text-[10px] font-bold text-slate-400">
@@ -454,6 +454,17 @@ function LegRow({
         <p className="text-[11px] leading-snug text-slate-500" title={explicit.condition}>
           Condición: {explicit.condition}
         </p>
+        <p className="text-[11px] leading-snug text-sky-300/90">
+          {explicit.bookmakerTab}
+        </p>
+        <p className="text-[11px] leading-snug text-amber-300/90">
+          {explicit.warningNote}
+        </p>
+        {explicit.cupEquivalent ? (
+          <p className="text-[11px] leading-snug text-emerald-300/80">
+            {explicit.cupEquivalent}
+          </p>
+        ) : null}
         <p className="text-[11px] text-slate-500">
           {formatKickoffDayLabel(leg.kickoff)} CL · modelo{" "}
           {formatPercent(leg.modelProbability)}

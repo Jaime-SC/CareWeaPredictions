@@ -232,6 +232,27 @@ export async function fetchWithCache<T>(
 
   const data = (await res.json()) as T;
 
+  const envelopeErrors =
+    data &&
+    typeof data === "object" &&
+    "errors" in data &&
+    (data as { errors?: unknown }).errors;
+  const hasEnvelopeErrors = Array.isArray(envelopeErrors)
+    ? envelopeErrors.length > 0
+    : Boolean(
+        envelopeErrors &&
+          typeof envelopeErrors === "object" &&
+          Object.keys(envelopeErrors as object).length > 0
+      );
+
+  if (hasEnvelopeErrors) {
+    console.warn(
+      `[api-football] envelope errors key=${cacheKey}:`,
+      envelopeErrors
+    );
+    return data;
+  }
+
   const effectiveTtl =
     options.resolveTtl !== undefined ? options.resolveTtl(data) : ttlMinutes;
 

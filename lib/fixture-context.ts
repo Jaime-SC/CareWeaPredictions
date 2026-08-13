@@ -72,7 +72,7 @@ function parseScore(finalScore: string | null | undefined): {
 function isFinishedShort(status?: string | null): boolean {
   if (!status) return false;
   const s = status.toUpperCase();
-  return s === "FT" || s === "AET" || s === "PEN" || s === "AWD" || s === "WO";
+  return s === "FT" || s === "AET" || s === "PEN" || s === "ABD" || s === "AWD" || s === "WO";
 }
 
 async function loadFinishedFromMatchFixture(): Promise<LocalFixtureRow[]> {
