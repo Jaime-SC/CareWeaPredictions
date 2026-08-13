@@ -15,7 +15,7 @@ export type ValueFlag = {
   edge: number;
   edgePct: number;
   impliedProbability: number;
-  /** e.g. `[🔥 VALUE +7%]` */
+  /** e.g. `[VALUE +7%]` */
   badge: string | null;
 };
 
@@ -37,7 +37,7 @@ export function valueEdge(modelProbability: number, odds: number): number {
 export function formatValueBadge(edge: number): string | null {
   if (edge < VALUE_EDGE_THRESHOLD) return null;
   const pct = Math.round(edge * 100);
-  return `[🔥 VALUE +${pct}%]`;
+  return `[VALUE +${pct}%]`;
 }
 
 export function analyzeValueLeg(

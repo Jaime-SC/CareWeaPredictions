@@ -27,7 +27,15 @@ import {
   UNIT_STAKE,
 } from "@/lib/utils";
 import { formatValueBadge } from "@/lib/value-finder";
-import { Check, Loader2, Pin } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Flame,
+  Lightbulb,
+  Loader2,
+  Pin,
+  Target,
+} from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
@@ -111,8 +119,9 @@ export function SafePicksList({
       <CardHeader>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <CardTitle className="text-lg">
-              🎯 Picks Seguros Individuales
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Target className="h-5 w-5 text-emerald-400" />
+              Picks Seguros Individuales
             </CardTitle>
             <CardDescription>
               {date} · modelo ≥ 85% · {picks.length} selección
@@ -193,12 +202,14 @@ export function SafePicksList({
                             <p className="text-[11px] leading-snug text-sky-300/90">
                               {explicit.bookmakerTab}
                             </p>
-                            <p className="text-[11px] leading-snug text-amber-300/90">
-                              {explicit.warningNote}
+                            <p className="flex items-start gap-1.5 text-[11px] leading-snug text-amber-300/90">
+                              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-400" />
+                              <span>{explicit.warningNote}</span>
                             </p>
                             {explicit.cupEquivalent ? (
-                              <p className="text-[11px] leading-snug text-emerald-300/80">
-                                {explicit.cupEquivalent}
+                              <p className="flex items-start gap-1.5 text-[11px] leading-snug text-emerald-300/80">
+                                <Lightbulb className="mt-0.5 h-3 w-3 shrink-0 text-emerald-400" />
+                                <span>{explicit.cupEquivalent}</span>
                               </p>
                             ) : null}
                             <div className="flex flex-wrap gap-1.5 pt-0.5">
@@ -210,7 +221,10 @@ export function SafePicksList({
                                 Edge {formatPercent(pick.edge)}
                               </Badge>
                               {valueBadge && (
-                                <Badge variant="warning">{valueBadge}</Badge>
+                                <Badge variant="warning" className="gap-1">
+                                  <Flame className="h-3 w-3 text-amber-400" />
+                                  {valueBadge}
+                                </Badge>
                               )}
                             </div>
                           </div>
@@ -227,8 +241,8 @@ export function SafePicksList({
                                 </>
                               ) : (
                                 <>
-                                  <Pin className="h-3.5 w-3.5" /> 📌 Registrar
-                                  Pick en Historial
+                                  <Pin className="h-3.5 w-3.5 text-sky-400" />
+                                  Registrar Pick en Historial
                                 </>
                               )}
                             </Button>

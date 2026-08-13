@@ -81,10 +81,17 @@ model CachedApiResponse {
   @@index([expiresAt])
 }
 
-/// Daily count of live API-Football HTTP calls (Chile calendar day)
+/// Official API-Football daily quota mirrored from response headers
 model ApiQuotaDaily {
   /// YYYY-MM-DD (Chile)
-  date      String   @id
-  callCount Int      @default(0)
-  updatedAt DateTime @updatedAt
+  date       String   @id
+  /// Official used (= limit - remaining); kept as callCount for SQLite compat
+  callCount  Int      @default(0)
+  /// x-ratelimit-requests-limit
+  limit      Int      @default(100)
+  /// x-ratelimit-requests-remaining
+  remaining  Int      @default(100)
+  /// True only after values were written from live response headers
+  fromHeaders Boolean @default(false)
+  updatedAt  DateTime @updatedAt
 }

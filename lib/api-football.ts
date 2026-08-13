@@ -41,6 +41,9 @@ export {
   fetchWithCache,
   buildCacheKey,
   getApiQuota,
+  syncApiQuotaFromHeaders,
+  parseApiFootballQuotaHeaders,
+  refreshApiQuotaFromStatus,
   CACHE_TTL_MINUTES,
   API_DAILY_QUOTA_LIMIT,
 } from "./api-cache";

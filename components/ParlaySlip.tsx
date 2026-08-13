@@ -21,7 +21,17 @@ import {
   groupByKey,
   UNIT_STAKE,
 } from "@/lib/utils";
-import { Check, Loader2, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Flame,
+  Lightbulb,
+  Loader2,
+  Pin,
+  RefreshCw,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -370,10 +380,10 @@ export function ParlaySlip({
               {regenerating ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <RefreshCw className="h-4 w-4" />
+                <RefreshCw className="h-4 w-4 text-sky-400" />
               )}
               {fromCache
-                ? "🔄 Volver a generar para hoy"
+                ? "Volver a generar para hoy"
                 : "Regenerar Otra Combinada"}
             </Button>
           )}
@@ -389,10 +399,14 @@ export function ParlaySlip({
             >
               {registered ? (
                 <>
-                  <Check className="h-4 w-4" /> Registrada en historial
+                  <Check className="h-4 w-4 text-emerald-400" /> Registrada en
+                  historial
                 </>
               ) : (
-                <>📌 Registrar Apuesta en Historial</>
+                <>
+                  <Pin className="h-4 w-4 text-sky-300" />
+                  Registrar Apuesta en Historial
+                </>
               )}
             </Button>
             {registerMsg && (
@@ -448,7 +462,10 @@ function LegRow({
         <p className="text-xs text-slate-200">
           Apuesta: {formatExplicitBetLine(explicit)}
           {valueBadge ? (
-            <span className="ml-1 text-amber-300">{valueBadge}</span>
+            <span className="ml-1 inline-flex items-center gap-0.5 text-amber-300">
+              <Flame className="h-3 w-3 text-amber-400" />
+              {valueBadge}
+            </span>
           ) : null}
         </p>
         <p className="text-[11px] leading-snug text-slate-500" title={explicit.condition}>
@@ -457,12 +474,14 @@ function LegRow({
         <p className="text-[11px] leading-snug text-sky-300/90">
           {explicit.bookmakerTab}
         </p>
-        <p className="text-[11px] leading-snug text-amber-300/90">
-          {explicit.warningNote}
+        <p className="flex items-start gap-1.5 text-[11px] leading-snug text-amber-300/90">
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-400" />
+          <span>{explicit.warningNote}</span>
         </p>
         {explicit.cupEquivalent ? (
-          <p className="text-[11px] leading-snug text-emerald-300/80">
-            {explicit.cupEquivalent}
+          <p className="flex items-start gap-1.5 text-[11px] leading-snug text-emerald-300/80">
+            <Lightbulb className="mt-0.5 h-3 w-3 shrink-0 text-emerald-400" />
+            <span>{explicit.cupEquivalent}</span>
           </p>
         ) : null}
         <p className="text-[11px] text-slate-500">

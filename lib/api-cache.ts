@@ -120,34 +120,110 @@ export async function upsertCachedPayload(
   }
 }
 
-export async function incrementApiQuota(date = chileDateString()): Promise<number> {
-  try {
-    const row = await prisma.apiQuotaDaily.upsert({
-      where: { date },
-      create: { date, callCount: 1 },
-      update: { callCount: { increment: 1 } },
-    });
-    return row.callCount;
-  } catch (err) {
-    console.warn("[api-cache] Failed to increment quota:", err);
-    return -1;
-  }
-}
-
-export async function getApiQuota(date = chileDateString()): Promise<{
+export type ApiQuotaSnapshot = {
   date: string;
   used: number;
   limit: number;
   remaining: number;
-}> {
+};
+
+/** Parse official daily quota headers from an API-Football response. */
+export function parseApiFootballQuotaHeaders(headers: Headers): {
+  limit: number;
+  remaining: number;
+  used: number;
+} | null {
+  const limitRaw = headers.get("x-ratelimit-requests-limit");
+  const remainingRaw = headers.get("x-ratelimit-requests-remaining");
+  if (limitRaw == null && remainingRaw == null) return null;
+
+  const limit = Number.parseInt(limitRaw || String(API_DAILY_QUOTA_LIMIT), 10);
+  const remaining = Number.parseInt(remainingRaw || "0", 10);
+  if (!Number.isFinite(limit) || limit < 0) return null;
+  if (!Number.isFinite(remaining) || remaining < 0) return null;
+
+  return {
+    limit,
+    remaining,
+    used: Math.max(0, limit - remaining),
+  };
+}
+
+/**
+ * Persist official quota from response headers (replaces local ++ counters).
+ */
+export async function syncApiQuotaFromHeaders(
+  headers: Headers,
+  date = chileDateString()
+): Promise<ApiQuotaSnapshot | null> {
+  const parsed = parseApiFootballQuotaHeaders(headers);
+  if (!parsed) {
+    console.warn(
+      "[api-cache] Missing x-ratelimit-requests-* headers; quota not updated"
+    );
+    return null;
+  }
+
+  try {
+    const row = await prisma.apiQuotaDaily.upsert({
+      where: { date },
+      create: {
+        date,
+        callCount: parsed.used,
+        limit: parsed.limit,
+        remaining: parsed.remaining,
+        fromHeaders: true,
+      },
+      update: {
+        callCount: parsed.used,
+        limit: parsed.limit,
+        remaining: parsed.remaining,
+        fromHeaders: true,
+      },
+    });
+    return {
+      date: row.date,
+      used: row.callCount,
+      limit: row.limit,
+      remaining: row.remaining,
+    };
+  } catch (err) {
+    console.warn("[api-cache] Failed to sync quota from headers:", err);
+    return null;
+  }
+}
+
+export async function getApiQuota(
+  date = chileDateString()
+): Promise<ApiQuotaSnapshot & { fromHeaders: boolean }> {
   try {
     const row = await prisma.apiQuotaDaily.findUnique({ where: { date } });
-    const used = row?.callCount ?? 0;
+    if (!row) {
+      return {
+        date,
+        used: 0,
+        limit: API_DAILY_QUOTA_LIMIT,
+        remaining: API_DAILY_QUOTA_LIMIT,
+        fromHeaders: false,
+      };
+    }
+    const limit = row.limit > 0 ? row.limit : API_DAILY_QUOTA_LIMIT;
+    // Never invent metrics from the old local ++ counter
+    if (!row.fromHeaders) {
+      return {
+        date: row.date,
+        used: 0,
+        limit,
+        remaining: limit,
+        fromHeaders: false,
+      };
+    }
     return {
-      date,
-      used,
-      limit: API_DAILY_QUOTA_LIMIT,
-      remaining: Math.max(0, API_DAILY_QUOTA_LIMIT - used),
+      date: row.date,
+      used: row.callCount,
+      limit,
+      remaining: row.remaining,
+      fromHeaders: true,
     };
   } catch (err) {
     console.warn("[api-cache] Failed to read quota:", err);
@@ -156,8 +232,25 @@ export async function getApiQuota(date = chileDateString()): Promise<{
       used: 0,
       limit: API_DAILY_QUOTA_LIMIT,
       remaining: API_DAILY_QUOTA_LIMIT,
+      fromHeaders: false,
     };
   }
+}
+
+/**
+ * Force one live /status call so quota mirrors official dashboard headers.
+ * Uses forceRefresh to bypass SQLite cache.
+ */
+export async function refreshApiQuotaFromStatus(
+  apiKey: string
+): Promise<ApiQuotaSnapshot | null> {
+  await fetchWithCache("/status", {}, CACHE_TTL_MINUTES.STATUS, {
+    apiKey,
+    cacheKey: "status_account",
+    forceRefresh: true,
+  });
+  const quota = await getApiQuota();
+  return quota.fromHeaders ? quota : null;
 }
 
 const BASE_URL = "https://v3.football.api-sports.io";
@@ -166,7 +259,8 @@ const BASE_URL = "https://v3.football.api-sports.io";
  * Central API-Football request wrapper:
  * 1) SQLite cache lookup
  * 2) Live HTTP only on miss/expiry
- * 3) Upsert payload + increment daily quota counter
+ * 3) Sync official quota from x-ratelimit-requests-* headers
+ * 4) Upsert payload into SQLite cache
  */
 export async function fetchWithCache<T>(
   endpoint: string,
@@ -215,10 +309,13 @@ export async function fetchWithCache<T>(
     throw err;
   }
 
-  // Count ONLY live upstream calls (never cache hits), including error statuses
-  const used = await incrementApiQuota();
+  // Official dashboard metrics — never local ++; cache hits never reach here
+  const quota = await syncApiQuotaFromHeaders(res.headers);
   console.log(
-    `[CACHE MISS] Fetched key=${cacheKey} status=${res.status} · quota today=${used}/${API_DAILY_QUOTA_LIMIT}`
+    `[CACHE MISS] Fetched key=${cacheKey} status=${res.status}` +
+      (quota
+        ? ` · quota today=${quota.used}/${quota.limit} (remaining=${quota.remaining})`
+        : "")
   );
 
   if (!res.ok) {

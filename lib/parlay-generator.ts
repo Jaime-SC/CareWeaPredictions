@@ -982,8 +982,8 @@ export function formatParlayClipboard(
       const explicit = getExplicitPickFromLeg(l);
       legLines.push(
         `  ${n}. [${dayLabel} CL] ${l.matchLabel}`,
-        `     🎯 Apuesta: ${formatExplicitBetLine(explicit)} @ ${l.odds.toFixed(2)} (${(l.modelProbability * 100).toFixed(1)}%)`,
-        `     💡 Condición: ${explicit.condition}`,
+        `     Apuesta: ${formatExplicitBetLine(explicit)} @ ${l.odds.toFixed(2)} (${(l.modelProbability * 100).toFixed(1)}%)`,
+        `     Condición: ${explicit.condition}`,
         ...formatMarketGuideLines(explicit).map((line) =>
           line.replace(/^   /, "     ")
         )
@@ -992,8 +992,8 @@ export function formatParlayClipboard(
   }
 
   const lines = [
-    `🎰 CareWeaPredictions — Accumulator (${parlay.legs.length} Legs)`,
-    `📊 Multiplicador Total: ${parlay.totalOdds.toFixed(2)}x | Prob. Conjunta: ${(parlay.jointProbability * 100).toFixed(1)}%`,
+    `CareWeaPredictions — Accumulator (${parlay.legs.length} Legs)`,
+    `Multiplicador Total: ${parlay.totalOdds.toFixed(2)}x | Prob. Conjunta: ${(parlay.jointProbability * 100).toFixed(1)}%`,
     parlay.strategyLabel
       ? `Estrategia: ${parlay.strategyLabel}`
       : undefined,

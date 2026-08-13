@@ -18,8 +18,8 @@ import { useState } from "react";
 export function formatSlipExportText(parlay: GeneratedParlay): string {
   const n = parlay.legs.length;
   const lines: string[] = [
-    `🎰 CareWeaPredictions — Accumulator (${n} Legs)`,
-    `📊 Multiplicador Total: ${parlay.totalOdds.toFixed(2)}x | Prob. Conjunta: ${(parlay.jointProbability * 100).toFixed(1)}%`,
+    `CareWeaPredictions — Accumulator (${n} Legs)`,
+    `Multiplicador Total: ${parlay.totalOdds.toFixed(2)}x | Prob. Conjunta: ${(parlay.jointProbability * 100).toFixed(1)}%`,
     "────────────────────────",
   ];
 
@@ -49,8 +49,8 @@ export function formatSlipLegLines(index: number, leg: ParlayLeg): string[] {
 
   return [
     `${index}. ${leg.matchLabel}`,
-    `   🎯 Apuesta: ${betLine} (@${leg.odds.toFixed(2)})`,
-    `   💡 Condición: ${explicit.condition}`,
+    `   Apuesta: ${betLine} (@${leg.odds.toFixed(2)})`,
+    `   Condición: ${explicit.condition}`,
     ...formatMarketGuideLines(explicit),
   ];
 }

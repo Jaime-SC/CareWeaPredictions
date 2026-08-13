@@ -3,13 +3,15 @@
 import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useState } from "react";
 
-const STORAGE_KEY = "parleylab_api_quota_today";
+const STORAGE_KEY = "parleylab_api_quota_v2";
 const POLL_MS = 60_000;
 
 type QuotaState = {
   date: string;
   used: number;
   limit: number;
+  remaining: number;
+  fromHeaders?: boolean;
 };
 
 function readLocal(): QuotaState | null {
@@ -17,15 +19,26 @@ function readLocal(): QuotaState | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as QuotaState;
+    const parsed = JSON.parse(raw) as Partial<QuotaState>;
     if (
       typeof parsed?.date !== "string" ||
       typeof parsed?.used !== "number" ||
-      typeof parsed?.limit !== "number"
+      typeof parsed?.limit !== "number" ||
+      !parsed.fromHeaders
     ) {
       return null;
     }
-    return parsed;
+    const remaining =
+      typeof parsed.remaining === "number"
+        ? parsed.remaining
+        : Math.max(0, parsed.limit - parsed.used);
+    return {
+      date: parsed.date,
+      used: parsed.used,
+      limit: parsed.limit,
+      remaining,
+      fromHeaders: true,
+    };
   } catch {
     return null;
   }
@@ -39,22 +52,54 @@ function writeLocal(state: QuotaState) {
   }
 }
 
+function toneForRemaining(remaining: number) {
+  if (remaining <= 10) {
+    return {
+      className: "border-rose-500/40 bg-rose-500/10 text-rose-200",
+      dotClass: "bg-rose-400",
+      label: "Crítica",
+    };
+  }
+  if (remaining <= 20) {
+    return {
+      className: "border-amber-500/40 bg-amber-500/10 text-amber-200",
+      dotClass: "bg-amber-400",
+      label: "Baja",
+    };
+  }
+  return {
+    className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
+    dotClass: "bg-emerald-400",
+    label: "OK",
+  };
+}
+
 export function ApiQuotaBadge({ className }: { className?: string }) {
   // Always null on first render (SSR + client) to avoid hydration mismatch
   // from localStorage. Populate after mount.
   const [quota, setQuota] = useState<QuotaState | null>(null);
   const [mounted, setMounted] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (opts?: { sync?: boolean }) => {
     try {
-      const res = await fetch("/api/quota", { cache: "no-store" });
+      const qs = opts?.sync ? "?sync=1" : "";
+      const res = await fetch(`/api/quota${qs}`, { cache: "no-store" });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.success) return;
+      const limit = Number(data.limit) || 100;
+      const remaining =
+        typeof data.remaining === "number"
+          ? data.remaining
+          : Math.max(0, limit - (Number(data.used) || 0));
       const next: QuotaState = {
         date: String(data.date),
         used: Number(data.used) || 0,
-        limit: Number(data.limit) || 100,
+        limit,
+        remaining,
+        fromHeaders: Boolean(data.fromHeaders),
       };
+      // Ignore stale local ++ counter until headers sync lands
+      if (!next.fromHeaders) return;
       setQuota(next);
       writeLocal(next);
     } catch {
@@ -65,9 +110,9 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
   useEffect(() => {
     setMounted(true);
     const cached = readLocal();
-    if (cached) setQuota(cached);
+    if (cached?.fromHeaders) setQuota(cached);
 
-    void refresh();
+    void refresh({ sync: true });
     const id = window.setInterval(() => void refresh(), POLL_MS);
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
@@ -79,31 +124,29 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
 
   if (!mounted || !quota) return null;
 
-  const ratio = quota.limit > 0 ? quota.used / quota.limit : 0;
-  const tone =
-    ratio >= 0.95
-      ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
-      : ratio >= 0.8
-        ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
-        : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
-  const dot =
-    ratio >= 0.95 ? "🔴" : ratio >= 0.8 ? "🟡" : "🟢";
+  const { className: tone, dotClass, label } = toneForRemaining(
+    quota.remaining
+  );
 
   return (
     <span
-      title={`Cuota API-Football del ${quota.date} (solo llamadas reales; cache hits no cuentan)`}
+      title={`Cuota oficial API-Football del ${quota.date}: ${quota.used} usadas · ${quota.remaining} restantes (sync headers) · estado ${label}`}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-medium tabular-nums sm:text-[11px]",
         tone,
         className
       )}
     >
-      <span aria-hidden>{dot}</span>
+      <span
+        aria-hidden
+        className={cn("h-2 w-2 shrink-0 rounded-full", dotClass)}
+      />
       <span className="hidden sm:inline">
-        API Quota: {quota.used} / {quota.limit} llamadas hoy
+        API Quota: {quota.used} / {quota.limit} llamadas hoy · {quota.remaining}{" "}
+        restantes
       </span>
       <span className="sm:hidden">
-        API {quota.used}/{quota.limit}
+        API {quota.used}/{quota.limit} · {quota.remaining} left
       </span>
     </span>
   );

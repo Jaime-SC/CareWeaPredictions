@@ -36,8 +36,9 @@ import {
   chileDateString,
   cn,
 } from "@/lib/utils";
-import { CalendarDays, Loader2, Sparkles } from "lucide-react";
+import { CalendarDays, Loader2, Shield, Sparkles, Target } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 
 const DEFAULT_MODE: StrategyMode = "daily-safe";
 
@@ -399,6 +400,9 @@ export default function BuilderPage() {
                 active={strategyMode === "daily-safe"}
                 title={getStrategyPreset("daily-safe").title}
                 subtitle={getStrategyPreset("daily-safe").subtitle}
+                icon={
+                  <Target className="h-4 w-4 text-emerald-400" aria-hidden />
+                }
                 onClick={() => setStrategyMode("daily-safe")}
                 recommended
               />
@@ -406,6 +410,9 @@ export default function BuilderPage() {
                 active={strategyMode === "daily-fun"}
                 title={getStrategyPreset("daily-fun").title}
                 subtitle={getStrategyPreset("daily-fun").subtitle}
+                icon={
+                  <Shield className="h-4 w-4 text-emerald-400" aria-hidden />
+                }
                 onClick={() => setStrategyMode("daily-fun")}
                 fun
               />
@@ -511,6 +518,7 @@ function StrategyOption({
   active,
   title,
   subtitle,
+  icon,
   onClick,
   recommended,
   fun,
@@ -518,6 +526,7 @@ function StrategyOption({
   active: boolean;
   title: string;
   subtitle: string;
+  icon?: ReactNode;
   onClick: () => void;
   recommended?: boolean;
   fun?: boolean;
@@ -538,8 +547,9 @@ function StrategyOption({
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-semibold leading-snug text-slate-100">
-          {title}
+        <p className="flex items-start gap-2 text-sm font-semibold leading-snug text-slate-100">
+          {icon ? <span className="mt-0.5 shrink-0">{icon}</span> : null}
+          <span>{title}</span>
         </p>
         {recommended && (
           <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300">

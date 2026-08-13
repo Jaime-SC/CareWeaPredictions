@@ -121,9 +121,9 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa como: pestaña «Doble Oportunidad» → «1X» / «Local o Empate» (Betano, JugaBet, Coolbet).",
           warningNote:
-            "⚠️ NO apostar a «Resultado 1X2» ni a «Gana Local». Eso paga más, pero pierdes si empatan. Tampoco es «Empate No Válido».",
+            "NO apostar a «Resultado 1X2» ni a «Gana Local». Eso paga más, pero pierdes si empatan. Tampoco es «Empate No Válido».",
           cupEquivalent:
-            "💡 En copas/mano a mano esto sigue siendo Doble Oportunidad 1X a 90 min. No uses «Se clasifica».",
+            "En copas/mano a mano esto sigue siendo Doble Oportunidad 1X a 90 min. No uses «Se clasifica».",
         },
         `Ganas si ${home} gana o empatan. Pierdes solo si gana ${away}.`,
         "1X"
@@ -135,9 +135,9 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa como: pestaña «Doble Oportunidad» → «X2» / «Visitante o Empate» (Betano, JugaBet, Coolbet).",
           warningNote:
-            "⚠️ NO apostar a «Resultado 1X2» ni a «Gana Visitante». Eso paga más, pero pierdes si empatan. Tampoco es «Empate No Válido».",
+            "NO apostar a «Resultado 1X2» ni a «Gana Visitante». Eso paga más, pero pierdes si empatan. Tampoco es «Empate No Válido».",
           cupEquivalent:
-            "💡 En copas/mano a mano esto sigue siendo Doble Oportunidad X2 a 90 min. No uses «Se clasifica».",
+            "En copas/mano a mano esto sigue siendo Doble Oportunidad X2 a 90 min. No uses «Se clasifica».",
         },
         `Ganas si ${away} gana o empatan. Pierdes solo si gana ${home}.`,
         "X2"
@@ -149,9 +149,9 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa como: pestaña «Doble Oportunidad» → «12» / «Local o Visitante» (sin empate).",
           warningNote:
-            "⚠️ NO es 1X2 ni Empate No Válido. Aquí pierdes si empatan a 90 min.",
+            "NO es 1X2 ni Empate No Válido. Aquí pierdes si empatan a 90 min.",
           cupEquivalent:
-            "💡 En copas, si hay alargue, el empate a 90' igual pierde este mercado (se juega a tiempo reglamentario).",
+            "En copas, si hay alargue, el empate a 90' igual pierde este mercado (se juega a tiempo reglamentario).",
         },
         "Ganas si hay un ganador a 90 min. Pierdes si empatan.",
         "12"
@@ -163,9 +163,9 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa como: «Empate No Válido» o «Apuesta Sin Empate» / Draw No Bet — Local (Betano, JugaBet, Coolbet).",
           warningNote:
-            "⚠️ NO apostar a «Resultado 1X2» (esa paga más pero pierdes si empatan). Tampoco uses «Doble Oportunidad 1X»: esa gana con empate; aquí el empate se anula (cuota 1.00).",
+            "NO apostar a «Resultado 1X2» (esa paga más pero pierdes si empatan). Tampoco uses «Doble Oportunidad 1X»: esa gana con empate; aquí el empate se anula (cuota 1.00).",
           cupEquivalent:
-            "💡 En mano a mano/copas equivale a: «Se Clasifica» / «To Qualify» (pasa de ronda, incluye alargue y penales).",
+            "En mano a mano/copas equivale a: «Se Clasifica» / «To Qualify» (pasa de ronda, incluye alargue y penales).",
         },
         `Ganas si ${home} gana. Si empatan, se anula (PUSH) y no pierdes.`,
         "DNB 1"
@@ -177,9 +177,9 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa como: «Empate No Válido» o «Apuesta Sin Empate» / Draw No Bet — Visitante (Betano, JugaBet, Coolbet).",
           warningNote:
-            "⚠️ NO apostar a «Resultado 1X2» (esa paga más pero pierdes si empatan). Tampoco uses «Doble Oportunidad X2»: esa gana con empate; aquí el empate se anula (cuota 1.00).",
+            "NO apostar a «Resultado 1X2» (esa paga más pero pierdes si empatan). Tampoco uses «Doble Oportunidad X2»: esa gana con empate; aquí el empate se anula (cuota 1.00).",
           cupEquivalent:
-            "💡 En mano a mano/copas equivale a: «Se Clasifica» / «To Qualify» (pasa de ronda, incluye alargue y penales).",
+            "En mano a mano/copas equivale a: «Se Clasifica» / «To Qualify» (pasa de ronda, incluye alargue y penales).",
         },
         `Ganas si ${away} gana. Si empatan, se anula (PUSH) y no pierdes.`,
         "DNB 2"
@@ -191,7 +191,7 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa como: «Total de goles» / «Más/Menos» → Over 0.5 (partido completo, 90 min).",
           warningNote:
-            "⚠️ NO uses «Goles del local» ni «Goles 1er tiempo». Tiene que ser el total del partido a 90 min.",
+            "NO uses «Goles del local» ni «Goles 1er tiempo». Tiene que ser el total del partido a 90 min.",
         },
         "Se necesita mínimo 1 gol en el partido (90 min).",
         "O0.5"
@@ -203,7 +203,7 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa como: «Total de goles» / «Más/Menos» → Over 1.5 (partido completo, 90 min).",
           warningNote:
-            "⚠️ NO uses Over 1.5 del 1er tiempo ni goles de un solo equipo. Es el total del partido.",
+            "NO uses Over 1.5 del 1er tiempo ni goles de un solo equipo. Es el total del partido.",
         },
         "Se necesitan mínimo 2 goles en el partido (90 min).",
         "O1.5"
@@ -215,7 +215,7 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa como: «Total de goles» / «Más/Menos» → Over 2.5 (partido completo, 90 min).",
           warningNote:
-            "⚠️ NO confundir con Over 2.5 del 1er tiempo. El alargue en copas no cuenta para este mercado.",
+            "NO confundir con Over 2.5 del 1er tiempo. El alargue en copas no cuenta para este mercado.",
         },
         "Se necesitan mínimo 3 goles en el partido (90 min).",
         "O2.5"
@@ -227,7 +227,7 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa como: «Total de goles» / «Más/Menos» → Under 3.5 (partido completo, 90 min).",
           warningNote:
-            "⚠️ NO uses Under del 1er tiempo. Máximo 3 goles a 90 min; el 4º gol pierde.",
+            "NO uses Under del 1er tiempo. Máximo 3 goles a 90 min; el 4º gol pierde.",
         },
         "Máximo 3 goles en el partido (90 min).",
         "U3.5"
@@ -239,7 +239,7 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa como: «Total de goles» / «Más/Menos» → Under 4.5 (partido completo, 90 min).",
           warningNote:
-            "⚠️ NO uses Under del 1er tiempo. Máximo 4 goles a 90 min; el 5º gol pierde.",
+            "NO uses Under del 1er tiempo. Máximo 4 goles a 90 min; el 5º gol pierde.",
         },
         "Máximo 4 goles en el partido (90 min).",
         "U4.5"
@@ -251,7 +251,7 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa como: «Local marca» / «Goles del equipo» / «To Score» — Local (no es Ambos marcan).",
           warningNote:
-            `⚠️ NO es «Ambos equipos marcan» (BTTS) ni Over 0.5 del partido. Da igual si ${home} pierde, siempre que anote.`,
+            `NO es «Ambos equipos marcan» (BTTS) ni Over 0.5 del partido. Da igual si ${home} pierde, siempre que anote.`,
         },
         `Ganas si ${home} anota; no importa el resultado final.`,
         "BTTS-H"
@@ -263,7 +263,7 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa como: «Visitante marca» / «Goles del equipo» / «To Score» — Visitante (no es Ambos marcan).",
           warningNote:
-            `⚠️ NO es «Ambos equipos marcan» (BTTS) ni Over 0.5 del partido. Da igual si ${away} pierde, siempre que anote.`,
+            `NO es «Ambos equipos marcan» (BTTS) ni Over 0.5 del partido. Da igual si ${away} pierde, siempre que anote.`,
         },
         `Ganas si ${away} anota; no importa el resultado final.`,
         "BTTS-A"
@@ -275,9 +275,9 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa como: pestaña «Resultado 1X2» / «Ganador del partido» → 1 (Local). Tiempo reglamentario.",
           warningNote:
-            "⚠️ Si empatan, PIERDES. Si quieres proteger el empate usa «Empate No Válido» (DNB) o «Doble Oportunidad 1X».",
+            "Si empatan, PIERDES. Si quieres proteger el empate usa «Empate No Válido» (DNB) o «Doble Oportunidad 1X».",
           cupEquivalent:
-            "💡 En copas NO uses «Se clasifica»: esa incluye alargue y penales. Esto es solo 90 min.",
+            "En copas NO uses «Se clasifica»: esa incluye alargue y penales. Esto es solo 90 min.",
         },
         `Pierdes si empatan o gana ${away}.`,
         "1"
@@ -289,9 +289,9 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa como: pestaña «Resultado 1X2» / «Ganador del partido» → 2 (Visitante). Tiempo reglamentario.",
           warningNote:
-            "⚠️ Si empatan, PIERDES. Si quieres proteger el empate usa «Empate No Válido» (DNB) o «Doble Oportunidad X2».",
+            "Si empatan, PIERDES. Si quieres proteger el empate usa «Empate No Válido» (DNB) o «Doble Oportunidad X2».",
           cupEquivalent:
-            "💡 En copas NO uses «Se clasifica»: esa incluye alargue y penales. Esto es solo 90 min.",
+            "En copas NO uses «Se clasifica»: esa incluye alargue y penales. Esto es solo 90 min.",
         },
         `Pierdes si empatan o gana ${home}.`,
         "2"
@@ -303,9 +303,9 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa como: pestaña «Resultado 1X2» / «Ganador del partido» → X (Empate).",
           warningNote:
-            "⚠️ NO es Doble Oportunidad ni Empate No Válido. Ganas SOLO si empatan a 90 min.",
+            "NO es Doble Oportunidad ni Empate No Válido. Ganas SOLO si empatan a 90 min.",
           cupEquivalent:
-            "💡 En copas el empate a 90' puede ir a alargue: este mercado igual gana si empatan en tiempo reglamentario.",
+            "En copas el empate a 90' puede ir a alargue: este mercado igual gana si empatan en tiempo reglamentario.",
         },
         `Ganas solo si ${home} y ${away} empatan a 90 min.`,
         "X"
@@ -318,7 +318,7 @@ export function getExplicitPickLabel(
           bookmakerTab:
             "Buscar en la casa el nombre exacto del mercado (Betano, JugaBet, Coolbet).",
           warningNote:
-            "⚠️ Confirma que el mercado sea a 90 min y no un lookalike (1er tiempo, alargue o clasifica).",
+            "Confirma que el mercado sea a 90 min y no un lookalike (1er tiempo, alargue o clasifica).",
         },
         "Revisa las reglas del mercado en tu casa de apuestas."
       );
@@ -333,7 +333,7 @@ export function formatExplicitBetLine(pick: ExplicitPickLabel): string {
 
 /** Extra bookmaker-mapping lines for slips / WhatsApp export. */
 export function formatMarketGuideLines(pick: ExplicitPickLabel): string[] {
-  const lines = [`   📌 ${pick.bookmakerTab}`, `   ${pick.warningNote}`];
+  const lines = [`   Guía: ${pick.bookmakerTab}`, `   ${pick.warningNote}`];
   if (pick.cupEquivalent) lines.push(`   ${pick.cupEquivalent}`);
   return lines;
 }

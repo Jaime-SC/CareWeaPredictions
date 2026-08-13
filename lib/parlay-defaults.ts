@@ -18,7 +18,7 @@ export const STRATEGY_LABELS: Record<StrategyMode, string> = {
 export const STRATEGY_PRESETS: Record<StrategyMode, StrategyPreset> = {
   "daily-safe": {
     strategyMode: "daily-safe",
-    title: "🎯 Selección de Picks Seguros (Individuales)",
+    title: "Selección de Picks Seguros (Individuales)",
     subtitle:
       "Apuestas sueltas · modelo ≥ 85% · sin acumulador · referencia 1U",
     badgeLabel: "Individuales",
@@ -35,7 +35,7 @@ export const STRATEGY_PRESETS: Record<StrategyMode, StrategyPreset> = {
   },
   "daily-fun": {
     strategyMode: "daily-fun",
-    title: "🛡️ Modo Seguro / Alta Probabilidad (Piso 80% por leg)",
+    title: "Modo Seguro / Alta Probabilidad (Piso 80% por leg)",
     subtitle:
       "Piso 80% por leg · 15 legs · cuotas 1.18–1.28 · objetivo ~20x–35x · 1U",
     badgeLabel: "Modo Seguro / Alta Probabilidad (Piso 80% por leg)",

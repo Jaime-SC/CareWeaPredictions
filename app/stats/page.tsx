@@ -49,6 +49,7 @@ import {
   CircleSlash,
   Clock,
   Download,
+  Info,
   Loader2,
   RefreshCw,
   Settings2,
@@ -57,7 +58,13 @@ import {
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Area,
   AreaChart,
@@ -143,12 +150,86 @@ function summaryFromApi(
 
 function ticketStatusBadge(status: BetStatus): {
   variant: "success" | "danger" | "warning" | "info";
-  label: string;
+  label: ReactNode;
 } {
-  if (status === "won") return { variant: "success", label: "🟢 Ganada" };
-  if (status === "lost") return { variant: "danger", label: "🔴 Perdida" };
-  if (status === "void") return { variant: "warning", label: "Cancelada" };
-  return { variant: "info", label: "⏳ En Juego" };
+  if (status === "won") {
+    return {
+      variant: "success",
+      label: (
+        <span className="inline-flex items-center gap-1">
+          <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+          Ganada
+        </span>
+      ),
+    };
+  }
+  if (status === "lost") {
+    return {
+      variant: "danger",
+      label: (
+        <span className="inline-flex items-center gap-1">
+          <XCircle className="h-3 w-3 text-rose-400" />
+          Perdida
+        </span>
+      ),
+    };
+  }
+  if (status === "void") {
+    return {
+      variant: "warning",
+      label: (
+        <span className="inline-flex items-center gap-1">
+          <CircleSlash className="h-3 w-3 text-amber-300" />
+          Cancelada
+        </span>
+      ),
+    };
+  }
+  return {
+    variant: "info",
+    label: (
+      <span className="inline-flex items-center gap-1">
+        <Clock className="h-3 w-3 text-sky-400" />
+        En Juego
+      </span>
+    ),
+  };
+}
+
+function LegHitsInline({
+  hits,
+  className,
+}: {
+  hits: { won: number; lost: number; pending: number; voided?: number };
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs",
+        className
+      )}
+    >
+      <span className="inline-flex items-center gap-0.5 text-emerald-400">
+        <Check className="h-3 w-3" strokeWidth={2.5} />
+        {hits.won}
+      </span>
+      <span className="inline-flex items-center gap-0.5 text-rose-400">
+        <X className="h-3 w-3" strokeWidth={2.5} />
+        {hits.lost}
+      </span>
+      <span className="inline-flex items-center gap-0.5 text-sky-400">
+        <Clock className="h-3 w-3" />
+        {hits.pending}
+      </span>
+      {(hits.voided ?? 0) > 0 ? (
+        <span className="inline-flex items-center gap-0.5 text-amber-300">
+          <CircleSlash className="h-3 w-3" />
+          {hits.voided}
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 export default function StatsPage() {
@@ -589,8 +670,8 @@ export default function StatsPage() {
             onClick={handleExportTraining}
             disabled={bets.length === 0 && trainingExport.length === 0}
           >
-            <Download className="h-4 w-4" />
-            📥 Exportar Datos de Entrenamiento (JSON)
+            <Download className="h-4 w-4 text-slate-300" />
+            Exportar Datos de Entrenamiento (JSON)
           </Button>
           <Button
             variant="default"
@@ -601,9 +682,9 @@ export default function StatsPage() {
             {updating ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4 text-sky-300" />
             )}
-            🔄 Sincronizar Marcadores
+            Sincronizar Marcadores
           </Button>
           {bets.length > 0 && (
             <Button variant="danger" size="sm" onClick={handleClear}>
@@ -616,9 +697,12 @@ export default function StatsPage() {
 
       {overduePendingCount > 0 && (
         <Card className="border-sky-500/40 bg-sky-950/20">
-          <CardContent className="p-4 text-sm text-sky-100">
-            ℹ️ Tienes {overduePendingCount} boletos pendientes de ayer. Haz
-            clic en Sincronizar para actualizar marcadores.
+          <CardContent className="flex items-start gap-2 p-4 text-sm text-sky-100">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+            <span>
+              Tienes {overduePendingCount} boletos pendientes de ayer. Haz clic
+              en Sincronizar para actualizar marcadores.
+            </span>
           </CardContent>
         </Card>
       )}
@@ -638,8 +722,9 @@ export default function StatsPage() {
       )}
       {calibrateMsg && !updateError && (
         <Card className="border-sky-500/30 bg-sky-950/20">
-          <CardContent className="p-4 text-sm text-sky-100">
-            ⚙️ {calibrateMsg}
+          <CardContent className="flex items-start gap-2 p-4 text-sm text-sky-100">
+            <Settings2 className="mt-0.5 h-4 w-4 shrink-0 text-violet-300" />
+            <span>{calibrateMsg}</span>
           </CardContent>
         </Card>
       )}
@@ -666,7 +751,10 @@ export default function StatsPage() {
               <CardHeader>
                 <div className="flex flex-wrap items-center gap-2">
                   <CardTitle>Boletos En Juego / Pendientes</CardTitle>
-                  <Badge variant="info">⏳ {pendingBets.length} en curso</Badge>
+                  <Badge variant="info" className="gap-1">
+                    <Clock className="h-3 w-3 text-sky-400" />
+                    {pendingBets.length} en curso
+                  </Badge>
                 </div>
                 <CardDescription>
                   Combinadas cuyo resultado aún no está liquidado. No entran en
@@ -685,7 +773,10 @@ export default function StatsPage() {
                     >
                       <div className="min-w-0 space-y-0.5">
                         <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="info">⏳ En Juego</Badge>
+                          <Badge variant="info" className="gap-1">
+                            <Clock className="h-3 w-3 text-sky-400" />
+                            En Juego
+                          </Badge>
                           <Badge variant={bet.mode === "Segura" ? "success" : "warning"}>
                             {bet.mode} · {bet.timeframe}
                           </Badge>
@@ -693,9 +784,7 @@ export default function StatsPage() {
                         </div>
                         <p className="text-sm text-slate-200">
                           {bet.legs.length} legs · {formatOdds(bet.totalOdds)}x · 1U
-                          <span className="ml-2 text-xs text-slate-500">
-                            {hits.won}✔ · {hits.lost}✖ · {hits.pending}⏳
-                          </span>
+                          <LegHitsInline hits={hits} className="ml-2" />
                         </p>
                       </div>
                     </div>
@@ -866,8 +955,8 @@ export default function StatsPage() {
                 filas de entrenamiento disponibles en SQLite.
               </p>
               <Button variant="default" size="sm" onClick={handleExportTraining}>
-                <Download className="h-4 w-4" />
-                📥 Exportar Datos de Entrenamiento (JSON)
+                <Download className="h-4 w-4 text-slate-200" />
+                Exportar Datos de Entrenamiento (JSON)
               </Button>
             </CardContent>
           </Card>
@@ -895,9 +984,9 @@ export default function StatsPage() {
                 {calibrating ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Settings2 className="h-4 w-4" />
+                  <Settings2 className="h-4 w-4 text-violet-300" />
                 )}
-                ⚙️ Re-Calibrar Modelo con Datos Históricos
+                Re-Calibrar Modelo con Datos Históricos
               </Button>
             </CardContent>
           </Card>
@@ -1132,7 +1221,7 @@ function LegResultIcon({ status }: { status: LegStatus }) {
   }
   return (
     <span
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-700/60 text-slate-400"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-500/15 text-sky-400"
       title="Pendiente"
     >
       <Clock className="h-3.5 w-3.5" />
@@ -1241,9 +1330,10 @@ function BetRow({
             </button>
             <Badge
               variant={hitsVariant}
-              className="font-semibold tracking-tight"
+              className="gap-1 font-semibold tracking-tight"
             >
-              ✔ {hits.won} / {hits.total} Acertadas
+              <Check className="h-3 w-3 text-emerald-400" strokeWidth={2.5} />
+              {hits.won} / {hits.total} Acertadas
             </Badge>
             <Badge variant={bet.mode === "Segura" ? "success" : "warning"}>
               {bet.mode} · {bet.timeframe}
@@ -1304,12 +1394,9 @@ function BetRow({
           aria-expanded={expanded}
           disabled={removing}
         >
-          <span>
+          <span className="inline-flex flex-wrap items-center gap-2">
             Desglose de legs
-            <span className="ml-2 text-xs text-slate-500">
-              {hits.won}✔ · {hits.lost}✖ · {hits.pending}⏳
-              {hits.voided > 0 ? ` · ${hits.voided}⊘` : ""}
-            </span>
+            <LegHitsInline hits={hits} className="text-slate-500" />
           </span>
           <ChevronDown
             className={cn(
