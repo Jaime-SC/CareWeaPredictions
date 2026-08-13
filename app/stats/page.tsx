@@ -516,7 +516,7 @@ export default function StatsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `parleylab-training-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `careweapredictions-training-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }

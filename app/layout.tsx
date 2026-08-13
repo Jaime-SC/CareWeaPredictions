@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ParleyLab — Football Accumulator Lab",
+  title: "CareWeaPredictions — Football Accumulator Lab",
   description:
     "Poisson & Dixon-Coles football analytics. Safe picks (1.15–1.35) and automated high-odds parlays.",
 };
@@ -33,7 +33,7 @@ export default function RootLayout({
         <Navbar />
         <main className="flex-1">{children}</main>
         <footer className="border-t border-slate-800/80 py-4 text-center text-xs text-slate-600">
-          ParleyLab · Solo fines educativos. El juego puede ser adictivo. +18.
+          CareWeaPredictions · Solo fines educativos. El juego puede ser adictivo. +18.
         </footer>
       </body>
     </html>

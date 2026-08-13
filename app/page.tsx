@@ -23,7 +23,7 @@ export default function HomePage() {
         </Badge>
 
         <h1 className="max-w-3xl text-4xl font-bold tracking-tight text-slate-50 sm:text-6xl">
-          ParleyLab
+          CareWeaPredictions
         </h1>
         <p className="mt-2 text-lg font-medium text-emerald-300/90 sm:text-xl">
           Laboratorio de acumuladores de fútbol

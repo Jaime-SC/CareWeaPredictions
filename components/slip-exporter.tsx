@@ -18,7 +18,7 @@ import { useState } from "react";
 export function formatSlipExportText(parlay: GeneratedParlay): string {
   const n = parlay.legs.length;
   const lines: string[] = [
-    `🎰 ParleyLab — Accumulator (${n} Legs)`,
+    `🎰 CareWeaPredictions — Accumulator (${n} Legs)`,
     `📊 Multiplicador Total: ${parlay.totalOdds.toFixed(2)}x | Prob. Conjunta: ${(parlay.jointProbability * 100).toFixed(1)}%`,
     "────────────────────────",
   ];
@@ -31,7 +31,7 @@ export function formatSlipExportText(parlay: GeneratedParlay): string {
   if (parlay.strategyLabel) {
     lines.push(`Estrategia: ${parlay.strategyLabel}`);
   }
-  lines.push("ParleyLab · 1U referencia · No es consejo financiero");
+  lines.push("CareWeaPredictions · 1U referencia · No es consejo financiero");
 
   return lines.join("\n");
 }

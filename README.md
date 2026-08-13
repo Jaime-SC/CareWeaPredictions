@@ -1,11 +1,11 @@
-# ⚽ ParleyLab - Sports Analytics & Betting Prediction Engine
+# ⚽ CareWeaPredictions - Sports Analytics & Betting Prediction Engine
 
 ![Next.js](https://img.shields.io/badge/Next.js-App%20Router-black?style=flat-square&logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?style=flat-square&logo=typescript)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-4-38B2AC?style=flat-square&logo=tailwind-css)
 ![License](https://img.shields.io/badge/license-Private-lightgrey?style=flat-square)
 
-Motor de predicción basado en modelos de **Poisson** y análisis estadístico para fútbol. ParleyLab combina datos en vivo de API-Football con probabilidades modeladas para generar picks de alta confianza y combinadas de alta cuota.
+Motor de predicción basado en modelos de **Poisson** y análisis estadístico para fútbol. CareWeaPredictions combina datos en vivo de API-Football con probabilidades modeladas para generar picks de alta confianza y combinadas de alta cuota.
 
 > ⚠️ **Disclaimer:** Solo fines educativos. El juego puede ser adictivo. +18.
 
@@ -39,8 +39,8 @@ Motor de predicción basado en modelos de **Poisson** y análisis estadístico p
 ### 1. Clonar el repositorio
 
 ```bash
-git clone https://github.com/Jaime-SC/parleylab.git
-cd parleylab
+git clone https://github.com/Jaime-SC/CareWeaPredictions.git
+cd CareWeaPredictions
 ```
 
 ### 2. Instalar dependencias

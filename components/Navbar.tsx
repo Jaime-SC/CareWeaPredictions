@@ -33,7 +33,7 @@ export function Navbar() {
           </span>
           <div>
             <p className="text-sm font-bold tracking-tight text-slate-50">
-              ParleyLab
+              CareWeaPredictions
             </p>
             <p className="hidden text-[10px] text-slate-500 sm:block">
               Sports Analytics · Poisson · Accumulators

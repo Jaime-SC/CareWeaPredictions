@@ -1,5 +1,5 @@
 {
-  "name": "parleylab",
+  "name": "careweapredictions",
   "version": "1.0.0",
   "description": "Motor de predicción y analytics de fútbol basado en modelos Poisson, con picks seguros y generador de combinadas.",
   "author": "Jaime-SC <jaimeqsanchezc@gmail.com>",

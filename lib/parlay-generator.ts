@@ -956,7 +956,7 @@ export function formatParlayClipboard(
   referenceYmd?: string
 ): string {
   if (parlay.legs.length === 0) {
-    return "ParleyLab — Sin acumulador generado.";
+    return "CareWeaPredictions — Sin acumulador generado.";
   }
 
   const ref = referenceYmd ?? chileDateString();
@@ -992,7 +992,7 @@ export function formatParlayClipboard(
   }
 
   const lines = [
-    `🎰 ParleyLab — Accumulator (${parlay.legs.length} Legs)`,
+    `🎰 CareWeaPredictions — Accumulator (${parlay.legs.length} Legs)`,
     `📊 Multiplicador Total: ${parlay.totalOdds.toFixed(2)}x | Prob. Conjunta: ${(parlay.jointProbability * 100).toFixed(1)}%`,
     parlay.strategyLabel
       ? `Estrategia: ${parlay.strategyLabel}`
