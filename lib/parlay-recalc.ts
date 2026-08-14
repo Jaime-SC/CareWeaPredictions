@@ -31,6 +31,19 @@ function riskAssessment(
     };
   }
 
+  if (riskTier === "monopoly") {
+    if (jointProbability >= 0.2) {
+      return {
+        riskLevel: "low",
+        riskLabel: "Asimetría / monopolio doméstico — filtro anti-rotación",
+      };
+    }
+    return {
+      riskLevel: "medium",
+      riskLabel: "Asimetría / monopolio — probabilidad conjunta moderada",
+    };
+  }
+
   if (jointProbability >= 0.05) {
     return {
       riskLevel: "high",

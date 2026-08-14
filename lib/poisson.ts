@@ -1,57 +1,31 @@
 import type { MarketPrediction, MarketType, Match, MatchOdds } from "./types";
 import {
+  applyContextToMarkets,
+  injuryLambdaFactors,
+  isFatigued,
+  isHighRiskDerby,
+  isMarketBlockedByDerby,
+} from "./context-engine";
+import {
   getLeagueWeight,
   getMarketWeight,
   loadModelWeights,
   resolveMinProbability,
 } from "./model-weights";
+import { applyTuningToProbability } from "./tuning-config";
 
-const WIN_STREAK_PROB_BOOST = 1.05;
 const FATIGUE_XG_FACTOR = 0.9;
-const FATIGUE_MAX_DAYS = 4;
-const DERBY_OVER_BOOST = 1.05;
-const DERBY_BTTS_BOOST = 1.04;
 const MAX_GOALS = 8;
 
-/** Canonical high-risk derby / clássico pairs (normalized lowercase names). */
-const HIGH_RISK_DERBY_PAIRS: ReadonlyArray<readonly [string, string]> = [
-  ["real madrid", "barcelona"],
-  ["real madrid", "atletico madrid"],
-  ["barcelona", "espanyol"],
-  ["manchester united", "manchester city"],
-  ["manchester united", "liverpool"],
-  ["liverpool", "everton"],
-  ["arsenal", "tottenham"],
-  ["arsenal", "chelsea"],
-  ["chelsea", "tottenham"],
-  ["inter", "milan"],
-  ["ac milan", "inter"],
-  ["inter milan", "ac milan"],
-  ["roma", "lazio"],
-  ["juventus", "torino"],
-  ["juventus", "inter"],
-  ["napoli", "roma"],
-  ["boca juniors", "river plate"],
-  ["racing club", "independiente"],
-  ["flamengo", "fluminense"],
-  ["flamengo", "vasco"],
-  ["corinthians", "palmeiras"],
-  ["sao paulo", "corinthians"],
-  ["gremio", "internacional"],
-  ["colo colo", "universidad de chile"],
-  ["colo-colo", "universidad de chile"],
-  ["atletico nacional", "millonarios"],
-  ["america", "guadalajara"],
-  ["club america", "chivas"],
-  ["bayern munich", "borussia dortmund"],
-  ["bayern munchen", "borussia dortmund"],
-  ["psg", "marseille"],
-  ["paris saint germain", "olympique marseille"],
-  ["celtic", "rangers"],
-  ["ajax", "feyenoord"],
-  ["benfica", "porto"],
-  ["galatasaray", "fenerbahce"],
-];
+export {
+  applyContextModifiers,
+  daysSinceLastMatch,
+  derbyPreferredMarkets,
+  hasWinStreak,
+  isFatigued,
+  isHighRiskDerby,
+  isMarketBlockedByDerby,
+} from "./context-engine";
 
 function leagueAvgGoals(): number {
   return loadModelWeights().global.leagueAvgGoals;
@@ -93,64 +67,6 @@ function factorial(n: number): number {
 export function poissonPmf(k: number, lambda: number): number {
   if (lambda <= 0) return k === 0 ? 1 : 0;
   return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
-}
-
-function normalizeTeamKey(name: string): string {
-  return name
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\b(fc|cf|sc|ac|club|deportivo|de|the)\b/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function namesMatch(a: string, b: string): boolean {
-  if (!a || !b) return false;
-  if (a === b) return true;
-  return a.includes(b) || b.includes(a);
-}
-
-/** True when both clubs are a known high-risk derby / clássico. */
-export function isHighRiskDerby(match: Match): boolean {
-  const home = normalizeTeamKey(match.home.name);
-  const away = normalizeTeamKey(match.away.name);
-  return HIGH_RISK_DERBY_PAIRS.some(([a, b]) => {
-    const left = normalizeTeamKey(a);
-    const right = normalizeTeamKey(b);
-    return (
-      (namesMatch(home, left) && namesMatch(away, right)) ||
-      (namesMatch(home, right) && namesMatch(away, left))
-    );
-  });
-}
-
-/** ≥3 wins in the last 5 results → win-streak boost eligibility. */
-export function hasWinStreak(form: ("W" | "D" | "L")[]): boolean {
-  if (!form.length) return false;
-  const recent = form.slice(0, 5);
-  return recent.filter((r) => r === "W").length >= 3;
-}
-
-/** Days between previous kickoff and this fixture kickoff. */
-export function daysSinceLastMatch(
-  lastMatchAt: string | null | undefined,
-  kickoff: string
-): number | null {
-  if (!lastMatchAt) return null;
-  const prev = Date.parse(lastMatchAt);
-  const next = Date.parse(kickoff);
-  if (!Number.isFinite(prev) || !Number.isFinite(next)) return null;
-  return (next - prev) / (1000 * 60 * 60 * 24);
-}
-
-export function isFatigued(
-  lastMatchAt: string | null | undefined,
-  kickoff: string
-): boolean {
-  const days = daysSinceLastMatch(lastMatchAt, kickoff);
-  return days != null && days >= 0 && days < FATIGUE_MAX_DAYS;
 }
 
 /** Soft form factor from recent points (kept mild so streak rule stays primary). */
@@ -207,6 +123,11 @@ export function estimateExpectedGoals(match: Match): {
   let lambdaHome =
     homeAvg * homeAttackPower * awayDefenseWeakness * homeAdv;
   let lambdaAway = awayAvg * awayAttackPower * homeDefenseWeakness;
+
+  // Key absences: −5%…−8% on attack / defensive ratings
+  const inj = injuryLambdaFactors(match);
+  lambdaHome *= inj.homeAttack * inj.awayDefense;
+  lambdaAway *= inj.awayAttack * inj.homeDefense;
 
   lambdaHome *= formLambdaFactor(match.home.form);
   lambdaAway *= formLambdaFactor(match.away.form);
@@ -346,6 +267,21 @@ export function teamScoresProbability(
   return p;
 }
 
+/** P(team goals > line), e.g. team total over 1.5 → line=1.5 */
+export function teamOverProbability(
+  matrix: number[][],
+  side: "home" | "away",
+  line = 1.5
+): number {
+  let p = 0;
+  for (let h = 0; h <= MAX_GOALS; h++) {
+    for (let a = 0; a <= MAX_GOALS; a++) {
+      if (side === "home" ? h > line : a > line) p += matrix[h][a];
+    }
+  }
+  return p;
+}
+
 export function impliedProbability(odds: number): number {
   if (odds <= 1) return 1;
   return 1 / odds;
@@ -371,6 +307,8 @@ const MARKET_LABELS: Record<MarketType, string> = {
   under_4_5: "Menos de 4.5 goles",
   home_scores: "Local marca gol",
   away_scores: "Visitante marca gol",
+  home_over_1_5: "Local más de 1.5 goles",
+  away_over_1_5: "Visitante más de 1.5 goles",
   dnb_home: "Apuesta sin empate (1)",
   dnb_away: "Apuesta sin empate (2)",
 };
@@ -402,6 +340,10 @@ function oddsForMarket(odds: MatchOdds, market: MarketType): number {
         return odds.homeScores;
       case "away_scores":
         return odds.awayScores;
+      case "home_over_1_5":
+        return odds.homeOver15 ?? 0;
+      case "away_over_1_5":
+        return odds.awayOver15 ?? 0;
       case "dnb_home":
         return odds.dnbHome;
       case "dnb_away":
@@ -429,8 +371,8 @@ export function fairDecimalOdds(probability: number, margin = 1.03): number {
 }
 
 /**
- * Build a full MatchOdds board from Poisson probabilities when the book
- * feed is missing — keeps whitelist fixtures eligible for accumulators.
+ * Offline / backtest helper: Poisson-implied fair board.
+ * Production prediction must never call this — missing books discard the match.
  */
 export function buildFairMatchOdds(match: Match): MatchOdds {
   const xg = estimateExpectedGoals(match);
@@ -453,66 +395,27 @@ export function buildFairMatchOdds(match: Match): MatchOdds {
     under45: fairDecimalOdds(underProbability(matrix, 4.5)),
     homeScores: fairDecimalOdds(teamScoresProbability(matrix, "home")),
     awayScores: fairDecimalOdds(teamScoresProbability(matrix, "away")),
+    homeOver15: fairDecimalOdds(teamOverProbability(matrix, "home", 1.5)),
+    awayOver15: fairDecimalOdds(teamOverProbability(matrix, "away", 1.5)),
     dnbHome: fairDecimalOdds(dnbHome),
     dnbAway: fairDecimalOdds(dnbAway),
   };
 }
 
-/** Ensure every match has a usable odds board (book first, Poisson fair fallback). */
+/** Pass-through. Never invents a Poisson fair board for missing books. */
 export function ensureMatchOdds(match: Match): Match {
-  if (hasBookmakerOdds(match.odds)) return match;
-  return { ...match, odds: buildFairMatchOdds(match) };
-}
-
-function clampProb(p: number): number {
-  return Math.min(0.99, Math.max(0, p));
+  return match;
 }
 
 /**
- * Apply win-streak (+5% on win / DC) and high-risk derby market nudges
- * on top of the Poisson matrix probabilities.
+ * Apply Context Engine multipliers (venue, injuries, friendlies, H2H,
+ * win-streak and derby policy) on top of the Poisson matrix probabilities.
  */
 export function applyContextProbabilityRules(
   match: Match,
   probs: Record<MarketType, number>
 ): Record<MarketType, number> {
-  const next = { ...probs };
-
-  if (hasWinStreak(match.home.form)) {
-    next.home = clampProb(next.home * WIN_STREAK_PROB_BOOST);
-    next["1x"] = clampProb(next["1x"] * WIN_STREAK_PROB_BOOST);
-    next.dnb_home = clampProb(next.dnb_home * WIN_STREAK_PROB_BOOST);
-  }
-  if (hasWinStreak(match.away.form)) {
-    next.away = clampProb(next.away * WIN_STREAK_PROB_BOOST);
-    next.x2 = clampProb(next.x2 * WIN_STREAK_PROB_BOOST);
-    next.dnb_away = clampProb(next.dnb_away * WIN_STREAK_PROB_BOOST);
-  }
-
-  if (isHighRiskDerby(match)) {
-    next.over_1_5 = clampProb(next.over_1_5 * DERBY_OVER_BOOST);
-    next.over_0_5 = clampProb(next.over_0_5 * DERBY_OVER_BOOST);
-    next.home_scores = clampProb(next.home_scores * DERBY_BTTS_BOOST);
-    next.away_scores = clampProb(next.away_scores * DERBY_BTTS_BOOST);
-    // Soften under lines — selection is fully disabled for under_3_5 below
-    next.under_3_5 = clampProb(next.under_3_5 * 0.85);
-    next.under_4_5 = clampProb(next.under_4_5 * 0.92);
-  }
-
-  return next;
-}
-
-/** Markets preferred when the fixture is a tagged high-risk derby. */
-export function derbyPreferredMarkets(): Set<MarketType> {
-  return new Set<MarketType>(["over_1_5", "home_scores", "away_scores"]);
-}
-
-/** under_3_5 is never eligible on high-risk derbies. */
-export function isMarketBlockedByDerby(
-  match: Match,
-  market: MarketType
-): boolean {
-  return market === "under_3_5" && isHighRiskDerby(match);
+  return applyContextToMarkets(match, probs).probs;
 }
 
 export function predictMatchMarkets(
@@ -526,8 +429,23 @@ export function predictMatchMarkets(
   expectedGoals: { home: number; away: number };
   markets: MarketPrediction[];
   isDerby: boolean;
+  contextFlags: string[];
+  contextNotes: string[];
 } {
-  const resolved = ensureMatchOdds(match);
+  const derby = isHighRiskDerby(match);
+
+  if (!hasBookmakerOdds(match.odds)) {
+    const xg = estimateExpectedGoals(match);
+    return {
+      expectedGoals: xg,
+      markets: [],
+      isDerby: derby,
+      contextFlags: ["UNAVAILABLE_NO_REAL_ODDS"],
+      contextNotes: ["Sin cuotas reales de casa de apuestas"],
+    };
+  }
+
+  const resolved = match;
   const weights = loadModelWeights();
   const leagueCfg = getLeagueWeight(resolved.leagueName, weights);
   const baseMinProb = options?.minSafeProbability ?? 0.8;
@@ -536,7 +454,6 @@ export function predictMatchMarkets(
     leagueCfg.minOdds || weights.global.defaultMinOdds
   );
   const maxOdds = options?.maxSafeOdds ?? 1.28;
-  const derby = isHighRiskDerby(resolved);
 
   const xg = estimateExpectedGoals(resolved);
   const matrix = buildScoreMatrix(xg.home, xg.away);
@@ -559,25 +476,25 @@ export function predictMatchMarkets(
     under_4_5: underProbability(matrix, 4.5),
     home_scores: teamScoresProbability(matrix, "home"),
     away_scores: teamScoresProbability(matrix, "away"),
+    home_over_1_5: teamOverProbability(matrix, "home", 1.5),
+    away_over_1_5: teamOverProbability(matrix, "away", 1.5),
     dnb_home: dnbHome,
     dnb_away: dnbAway,
   };
 
-  const probs = applyContextProbabilityRules(resolved, baseProbs);
+  const ctx = applyContextToMarkets(resolved, baseProbs);
+  const probs = ctx.probs;
 
   const markets: MarketPrediction[] = (
     Object.keys(probs) as MarketType[]
   ).map((market) => {
-    let odds = oddsForMarket(resolved.odds, market);
+    const odds = oddsForMarket(resolved.odds, market);
     const rawProb = probs[market];
+    const tunedProb = applyTuningToProbability(rawProb, resolved, market);
     const modelProbability = Math.min(
       0.99,
-      Math.max(0, rawProb * leagueCfg.probabilityScale)
+      Math.max(0, tunedProb * leagueCfg.probabilityScale)
     );
-    // Per-market Poisson fair fallback if a single line is still missing
-    if (!(odds > 1)) {
-      odds = fairDecimalOdds(modelProbability);
-    }
     const mktCfg = getMarketWeight(market, weights);
     const blockedByDerby = isMarketBlockedByDerby(resolved, market);
     const implied = impliedProbability(odds);
@@ -588,6 +505,7 @@ export function predictMatchMarkets(
       resolved.leagueName,
       weights
     );
+    const marketCtx = ctx.perMarket[market];
 
     return {
       market,
@@ -604,10 +522,18 @@ export function predictMatchMarkets(
         odds >= minOdds &&
         odds <= maxOdds,
       expectedGoals: xg,
+      confidenceModifier: marketCtx?.confidenceModifier,
+      contextFlags: marketCtx?.contextFlags,
     };
   });
 
-  return { expectedGoals: xg, markets, isDerby: derby };
+  return {
+    expectedGoals: xg,
+    markets,
+    isDerby: derby,
+    contextFlags: ctx.contextFlags,
+    contextNotes: ctx.contextNotes,
+  };
 }
 
 export { MARKET_LABELS, leagueAvgGoals };

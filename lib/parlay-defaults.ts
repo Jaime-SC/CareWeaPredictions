@@ -1,3 +1,4 @@
+import { BUILDER_MODES } from "../config/builder-modes";
 import type { ParlayConfig, RiskTier, StrategyMode } from "./types";
 
 export interface StrategyPreset extends ParlayConfig {
@@ -13,6 +14,7 @@ export interface StrategyPreset extends ParlayConfig {
 export const STRATEGY_LABELS: Record<StrategyMode, string> = {
   "daily-safe": "Picks Seguros Individuales",
   "daily-fun": "Modo Seguro / Alta Probabilidad (Piso 80% por leg)",
+  "monopoly-asymmetry": BUILDER_MODES.MONOPOLY_ASYMMETRY.name,
 };
 
 export const STRATEGY_PRESETS: Record<StrategyMode, StrategyPreset> = {
@@ -53,6 +55,23 @@ export const STRATEGY_PRESETS: Record<StrategyMode, StrategyPreset> = {
     /** Hard floor for every accumulator leg */
     minProbability: 0.8,
   },
+  "monopoly-asymmetry": {
+    strategyMode: "monopoly-asymmetry",
+    title: BUILDER_MODES.MONOPOLY_ASYMMETRY.name,
+    subtitle: "Cartelera automática lun–dom · legs dinámicas · anti-rotación",
+    badgeLabel: "Asimetría",
+    daysAhead: 0,
+    riskTier: "monopoly",
+    stake: 1.5,
+    targetMultiplier: 1,
+    minLegs: BUILDER_MODES.MONOPOLY_ASYMMETRY.minLegs ?? 2,
+    /** Dynamic: generator never truncates; this is only a type-level ceiling. */
+    maxLegs: Number.MAX_SAFE_INTEGER,
+    minOdds: 1.01,
+    maxOdds: 12,
+    minProbability:
+      BUILDER_MODES.MONOPOLY_ASYMMETRY.minProbPerLeg ?? 0.82,
+  },
 };
 
 /** @deprecated Prefer getStrategyPreset(mode) */
@@ -72,13 +91,27 @@ export const FUN_MIN_MATCH_POOL = 25;
 export const STRATEGY_DAYS_AHEAD: Record<StrategyMode, number> = {
   "daily-safe": 0,
   "daily-fun": 0,
+  "monopoly-asymmetry": 0,
 };
 
 export function resolveStrategyMode(value: unknown): StrategyMode {
-  if (value === "daily-fun" || value === "diversified" || value === "weekly-fun") {
+  if (
+    value === "daily-fun" ||
+    value === "diversified" ||
+    value === "weekly-fun" ||
+    value === "LOTTERY"
+  ) {
     return "daily-fun";
   }
-  // Legacy weekly-safe / ultra-safe → daily-safe
+  if (
+    value === "monopoly-asymmetry" ||
+    value === "MONOPOLY_ASYMMETRY" ||
+    value === "MODE_MONOPOLY" ||
+    value === "monopoly"
+  ) {
+    return "monopoly-asymmetry";
+  }
+  // Legacy weekly-safe / ultra-safe / SINGLE_SAFE → daily-safe
   return "daily-safe";
 }
 
@@ -92,6 +125,10 @@ export function isSafeStrategy(mode: StrategyMode): boolean {
 
 export function isFunStrategy(mode: StrategyMode): boolean {
   return getStrategyPreset(mode).riskTier === "fun";
+}
+
+export function isMonopolyStrategy(mode: StrategyMode): boolean {
+  return resolveStrategyMode(mode) === "monopoly-asymmetry";
 }
 
 /** @deprecated Use isSafeStrategy */

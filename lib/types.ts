@@ -19,7 +19,8 @@ export type LeagueId =
   | "primera-chile"
   | "primera-colombia"
   | "international-friendlies"
-  | "club-friendlies";
+  | "club-friendlies"
+  | "other-domestic";
 
 
 export type MarketType =
@@ -35,14 +36,36 @@ export type MarketType =
   | "under_4_5"
   | "home_scores"
   | "away_scores"
+  | "home_over_1_5"
+  | "away_over_1_5"
   | "dnb_home"
   | "dnb_away";
 
-export type StrategyMode = "daily-safe" | "daily-fun";
+export type StrategyMode = "daily-safe" | "daily-fun" | "monopoly-asymmetry";
 
-export type RiskTier = "safe" | "fun";
+export type RiskTier = "safe" | "fun" | "monopoly";
+
+export type ParlayStatus = "OK" | "INSUFFICIENT_MATCHES";
+
+export type InjuryRole =
+  | "striker"
+  | "midfielder"
+  | "defender"
+  | "goalkeeper"
+  | "unknown";
+
+export interface TeamInjury {
+  player: string;
+  role: InjuryRole;
+  reason?: string;
+  status?: "out" | "doubtful";
+  /** True when the absence is a top scorer / starting GK (stronger λ penalty). */
+  keyAbsence?: boolean;
+}
 
 export interface TeamStats {
+  /** API-Football team id when known. */
+  id?: number;
   name: string;
   shortName: string;
   /** Most recent first (max ~5). Built from local fixture history when available. */
@@ -61,6 +84,8 @@ export interface TeamStats {
   awayDefenseStrength?: number;
   /** ISO kickoff of the team's previous finished match (fatigue rule). */
   lastMatchAt?: string | null;
+  /** Known absences (cache / optional feed). Empty when unknown. */
+  injuries?: TeamInjury[];
 }
 
 export interface MatchOdds {
@@ -76,24 +101,51 @@ export interface MatchOdds {
   under45: number;
   homeScores: number;
   awayScores: number;
+  /** Team total over 1.5 (home). Optional — exotic books often omit it. */
+  homeOver15?: number;
+  /** Team total over 1.5 (away). Optional — exotic books often omit it. */
+  awayOver15?: number;
   dnbHome: number;
   dnbAway: number;
+}
+
+/** Compact fixture card used by monopoly anti-rotation (±4 days). */
+export interface NearbyTeamFixture {
+  id: number;
+  date: string;
+  league: { id: number; name: string };
+  teams: {
+    home: { id: number; name: string };
+    away: { id: number; name: string };
+  };
 }
 
 export interface Match {
   id: string;
   league: LeagueId;
   leagueName: string;
+  /** API-Football league id when known (e.g. "39"). */
+  leagueId?: string;
   kickoff: string;
   home: TeamStats;
   away: TeamStats;
+  /** Monopoly mode: team's fixtures within ±4 days of kickoff. */
+  nearbyTeamFixtures?: NearbyTeamFixture[];
   h2h: {
     homeWins: number;
     draws: number;
     awayWins: number;
     avgGoals: number;
+    /** Wins for the listed home side in the last ≤4 direct meetings. */
+    last4HomeWins?: number;
+    last4AwayWins?: number;
+    last4Draws?: number;
   };
   odds: MatchOdds;
+  /** Fixture referee (API-Football), shown in match detail. */
+  referee?: string | null;
+  /** Venue name (API-Football). */
+  venue?: string | null;
 }
 
 export interface MarketPrediction {
@@ -105,6 +157,9 @@ export interface MarketPrediction {
   edge: number;
   isSafePick: boolean;
   expectedGoals?: { home: number; away: number };
+  /** Context-engine multiplier applied to the raw Poisson probability. */
+  confidenceModifier?: number;
+  contextFlags?: string[];
 }
 
 export interface MatchPrediction {
@@ -113,6 +168,8 @@ export interface MatchPrediction {
   expectedGoals: { home: number; away: number };
   markets: MarketPrediction[];
   bestSafePick: MarketPrediction | null;
+  contextFlags?: string[];
+  contextNotes?: string[];
 }
 
 export interface ParlayLeg {
@@ -125,6 +182,11 @@ export interface ParlayLeg {
   odds: number;
   modelProbability: number;
   edge: number;
+  /** Context-engine flags for UI badges (HOME_DOMINANT, KEY_INJURY_*, …). */
+  contextFlags?: string[];
+  contextNotes?: string[];
+  referee?: string | null;
+  venue?: string | null;
 }
 
 export interface ParlayConfig {
@@ -160,4 +222,6 @@ export interface GeneratedParlay {
   successProbabilityLabel?: string;
   /** Shown when fewer qualifying matches than requested were available */
   fillNotice?: string;
+  /** Structured builder status (monopoly mode uses INSUFFICIENT_MATCHES). */
+  status?: ParlayStatus;
 }

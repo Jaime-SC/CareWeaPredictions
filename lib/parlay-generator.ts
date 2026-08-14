@@ -13,6 +13,7 @@ import {
   STRATEGY_LABELS,
   getStrategyPreset,
   isFunStrategy,
+  isMonopolyStrategy,
   isSafeStrategy,
   resolveStrategyMode,
 } from "./parlay-defaults";
@@ -21,8 +22,13 @@ import {
   isHighRiskDerby,
   isMarketBlockedByDerby,
   predictMatchMarkets,
-  ensureMatchOdds,
+  hasBookmakerOdds,
 } from "./poisson";
+import {
+  notesForFlags,
+  resolveContextMinProbability,
+} from "./context-engine";
+import { rejectMatchesWithoutRealOdds } from "./filters";
 import {
   getLeagueWeight,
   getMarketWeight,
@@ -37,8 +43,10 @@ import {
   formatMarketGuideLines,
   getExplicitPickFromLeg,
 } from "./formatters";
+import { buildMonopolyParlay, getWeeklyDateRange } from "./monopoly-engine";
 
 export { DEFAULT_AUTO_PARLAY_CONFIG } from "./parlay-defaults";
+export { getWeeklyDateRange };
 
 /**
  * Defense-in-depth: drop any match whose league name is outside the elite whitelist.
@@ -138,6 +146,9 @@ function marketFamily(market: MarketType): MarketFamily {
     case "home_scores":
     case "away_scores":
       return "team_score";
+    case "home_over_1_5":
+    case "away_over_1_5":
+      return "over_1_5";
     case "dnb_home":
     case "dnb_away":
       return "dnb";
@@ -176,6 +187,19 @@ function riskAssessment(
     };
   }
 
+  if (riskTier === "monopoly") {
+    if (jointProbability >= 0.2) {
+      return {
+        riskLevel: "low",
+        riskLabel: "Asimetría / monopolio doméstico — filtro anti-rotación",
+      };
+    }
+    return {
+      riskLevel: "medium",
+      riskLabel: "Asimetría / monopolio — probabilidad conjunta moderada",
+    };
+  }
+
   if (jointProbability >= 0.05) {
     return {
       riskLevel: "high",
@@ -189,6 +213,7 @@ function riskAssessment(
 }
 
 function toLeg(match: Match, pick: MarketPrediction): ParlayLeg {
+  const flags = pick.contextFlags ?? [];
   return {
     matchId: match.id,
     matchLabel: `${match.home.name} vs ${match.away.name}`,
@@ -199,6 +224,10 @@ function toLeg(match: Match, pick: MarketPrediction): ParlayLeg {
     odds: pick.odds,
     modelProbability: pick.modelProbability,
     edge: pick.edge,
+    contextFlags: flags,
+    contextNotes: notesForFlags(flags),
+    referee: match.referee ?? null,
+    venue: match.venue ?? null,
   };
 }
 
@@ -288,7 +317,8 @@ export function collectSafePicks(
   const perMatch: Cand[][] = [];
 
   for (const match of matches) {
-    const resolved = ensureMatchOdds(match);
+    if (!hasBookmakerOdds(match.odds)) continue;
+    const resolved = match;
 
     const leagueCfg = getLeagueWeight(resolved.leagueName, weights);
     const leagueMinOdds = Math.max(
@@ -297,7 +327,7 @@ export function collectSafePicks(
     );
 
     const { markets, expectedGoals } = predictMatchMarkets(resolved, {
-      minSafeProbability: baseMinProb,
+      minSafeProbability: resolveContextMinProbability(baseMinProb, resolved),
       minSafeOdds: leagueMinOdds,
       maxSafeOdds: config.maxOdds,
     });
@@ -305,14 +335,17 @@ export function collectSafePicks(
     const eligible = markets.filter((m) => {
       if (!isMarketAllowed(m.market, strategyMode, resolved)) return false;
       if (!(m.odds > 1)) return false;
-      // Hard floor 80% — never relax below MIN_LEG_PROBABILITY
+      // Hard floor 80% — friendlies raise to 85% via context guardrail
       let minProb = Math.max(
         MIN_LEG_PROBABILITY,
-        resolveMinProbability(
-          baseMinProb,
-          m.market,
-          resolved.leagueName,
-          weights
+        resolveContextMinProbability(
+          resolveMinProbability(
+            baseMinProb,
+            m.market,
+            resolved.leagueName,
+            weights
+          ),
+          resolved
         )
       );
       return (
@@ -551,7 +584,18 @@ export function generateParlay(
 ): GeneratedParlay {
   const strategyMode = resolveMode(config);
   const preset = getStrategyPreset(strategyMode);
-  const eliteMatches = filterEliteWhitelistMatches(matches);
+
+  if (isMonopolyStrategy(strategyMode)) {
+    // FULL_WEEK_AUTO: match pool is Monday–Sunday from getWeeklyDateRange().
+    // Date-picker input is ignored upstream in /api/parlay.
+    return buildMonopolyParlay(matches, {
+      stake: config.stake ?? preset.stake,
+    });
+  }
+
+  const eliteMatches = rejectMatchesWithoutRealOdds(
+    filterEliteWhitelistMatches(matches)
+  );
   const targetLegCount = resolveTargetLegCount({
     ...preset,
     ...config,
@@ -768,6 +812,7 @@ function emptyParlay(
     strategyLabel: STRATEGY_LABELS[strategyMode],
     riskTier: preset.riskTier,
     successProbabilityLabel: undefined,
+    status: isMonopolyStrategy(strategyMode) ? "INSUFFICIENT_MATCHES" : "OK",
   };
 }
 
@@ -913,41 +958,49 @@ export function buildMatchPredictions(
     safeMarketsOnly?: boolean;
   }
 ): MatchPrediction[] {
-  return filterEliteWhitelistMatches(matches).map((match) => {
-    const { expectedGoals, markets: allMarkets } = predictMatchMarkets(match, {
-      minSafeProbability: options?.minSafeProbability ?? 0.85,
-      minSafeOdds: options?.minSafeOdds ?? 1.15,
-      maxSafeOdds: options?.maxSafeOdds ?? 1.4,
-    });
+  return rejectMatchesWithoutRealOdds(filterEliteWhitelistMatches(matches)).map(
+    (match) => {
+      const { expectedGoals, markets: allMarkets, contextFlags, contextNotes } =
+        predictMatchMarkets(match, {
+          minSafeProbability: resolveContextMinProbability(
+            options?.minSafeProbability ?? 0.85,
+            match
+          ),
+          minSafeOdds: options?.minSafeOdds ?? 1.15,
+          maxSafeOdds: options?.maxSafeOdds ?? 1.4,
+        });
 
-    const markets = options?.safeMarketsOnly
-      ? allMarkets.filter(
-          (m) =>
-            SAFE_MARKETS.has(m.market) &&
-            !isMarketBlockedByDerby(match, m.market)
-        )
-      : allMarkets.filter((m) => !isMarketBlockedByDerby(match, m.market));
+      const markets = options?.safeMarketsOnly
+        ? allMarkets.filter(
+            (m) =>
+              SAFE_MARKETS.has(m.market) &&
+              !isMarketBlockedByDerby(match, m.market)
+          )
+        : allMarkets.filter((m) => !isMarketBlockedByDerby(match, m.market));
 
-    const safe = markets
-      .filter((m) => m.isSafePick)
-      .sort((a, b) => {
-        const derbyDelta =
-          derbyMarketRankBonus(match, b.market) -
-          derbyMarketRankBonus(match, a.market);
-        if (Math.abs(derbyDelta) > 0.01) return derbyDelta;
-        return (
-          b.modelProbability - a.modelProbability || b.edge - a.edge
-        );
-      });
+      const safe = markets
+        .filter((m) => m.isSafePick)
+        .sort((a, b) => {
+          const derbyDelta =
+            derbyMarketRankBonus(match, b.market) -
+            derbyMarketRankBonus(match, a.market);
+          if (Math.abs(derbyDelta) > 0.01) return derbyDelta;
+          return (
+            b.modelProbability - a.modelProbability || b.edge - a.edge
+          );
+        });
 
-    return {
-      matchId: match.id,
-      match,
-      expectedGoals,
-      markets,
-      bestSafePick: safe[0] ?? null,
-    };
-  });
+      return {
+        matchId: match.id,
+        match,
+        expectedGoals,
+        markets,
+        bestSafePick: safe[0] ?? null,
+        contextFlags,
+        contextNotes,
+      };
+    }
+  );
 }
 
 export function formatParlayClipboard(

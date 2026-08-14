@@ -1,6 +1,6 @@
 import { chileDateApiWindow, chileDateString } from "../lib/utils";
 import { chileCivilDateFromKickoff } from "../lib/api-football";
-import { ensureMatchOdds, predictMatchMarkets } from "../lib/poisson";
+import { hasBookmakerOdds, predictMatchMarkets } from "../lib/poisson";
 import type { Match } from "../lib/types";
 
 const today = chileDateString();
@@ -44,8 +44,8 @@ const bare: Match = {
   },
 };
 
-const filled = ensureMatchOdds(bare);
-const { markets } = predictMatchMarkets(filled, {
+const filled = bare;
+const { markets, contextFlags } = predictMatchMarkets(filled, {
   minSafeProbability: 0.7,
   minSafeOdds: 1.35,
   maxSafeOdds: 1.55,
@@ -58,7 +58,8 @@ console.log(
       today,
       window: chileDateApiWindow(today),
       civilOfLateKickoff: chileCivilDateFromKickoff(lateConmebol),
-      fair1x: filled.odds.doubleChance1X,
+      hasBookOdds: hasBookmakerOdds(filled.odds),
+      rejectedNoRealOdds: contextFlags.includes("UNAVAILABLE_NO_REAL_ODDS"),
       marketsWithOdds: ok.length,
     },
     null,

@@ -65,6 +65,89 @@ export function chileDateRange(daysAhead = 3): string[] {
   return dates;
 }
 
+export type WeeklyDateRange = {
+  /** Monday 00:00:00 Chile, as UTC ISO. */
+  from: string;
+  /** Sunday 23:59:59 Chile, as UTC ISO. */
+  to: string;
+  fromYmd: string;
+  toYmd: string;
+  dates: string[];
+};
+
+function chileWeekdayMonday0(date: Date): number {
+  const wd = new Intl.DateTimeFormat("en-US", {
+    timeZone: CHILE_TIMEZONE,
+    weekday: "short",
+  }).format(date);
+  const map: Record<string, number> = {
+    Mon: 0,
+    Tue: 1,
+    Wed: 2,
+    Thu: 3,
+    Fri: 4,
+    Sat: 5,
+    Sun: 6,
+  };
+  return map[wd] ?? 0;
+}
+
+/** Convert a Chile civil wall-clock to UTC milliseconds. */
+function chileWallTimeToUtcMs(
+  ymd: string,
+  hour: number,
+  minute: number,
+  second: number
+): number {
+  const [y, m, d] = ymd.split("-").map(Number);
+  let ms = Date.UTC(y, m - 1, d, hour + 4, minute, second);
+  for (let i = 0; i < 8; i++) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: CHILE_TIMEZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(ms));
+    const get = (type: Intl.DateTimeFormatPartTypes) =>
+      Number(parts.find((p) => p.type === type)?.value);
+    const got = Date.UTC(
+      get("year"),
+      get("month") - 1,
+      get("day"),
+      get("hour"),
+      get("minute"),
+      get("second")
+    );
+    const want = Date.UTC(y, m - 1, d, hour, minute, second);
+    const delta = want - got;
+    if (delta === 0) break;
+    ms += delta;
+  }
+  return ms;
+}
+
+/**
+ * Current Chile week: Monday 00:00:00 → Sunday 23:59:59.
+ * Monopoly / Asimetría always scans this window (FULL_WEEK_AUTO).
+ */
+export function getWeeklyDateRange(now: Date = new Date()): WeeklyDateRange {
+  const today = chileDateString(now);
+  const monday = chileDateOffset(-chileWeekdayMonday0(now), today);
+  const sunday = chileDateOffset(6, monday);
+  const dates = Array.from({ length: 7 }, (_, i) => chileDateOffset(i, monday));
+  return {
+    from: new Date(chileWallTimeToUtcMs(monday, 0, 0, 0)).toISOString(),
+    to: new Date(chileWallTimeToUtcMs(sunday, 23, 59, 59)).toISOString(),
+    fromYmd: monday,
+    toYmd: sunday,
+    dates,
+  };
+}
+
 /** Kickoff formateado en hora Chile (24h). */
 export function formatKickoff(iso: string): string {
   try {

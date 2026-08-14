@@ -3,9 +3,7 @@ import {
   buildStatsSummary,
   clearAllBets,
   deleteTicketById,
-  updateTicketStatusInDb,
 } from "@/lib/bet-db";
-import type { BetStatus } from "@/lib/history-tracker";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -46,10 +44,9 @@ export async function GET() {
 
 /**
  * PATCH /api/stats/summary
- * Manual ticket status override, single delete, or clear-all.
+ * Single delete or clear-all. Ticket outcomes come only from settlement.
  * Body:
- *   { action: "status", ticketId, status }
- *   | { action: "delete", ticketId }
+ *   { action: "delete", ticketId }
  *   | { action: "clear" }
  */
 export async function PATCH(request: NextRequest) {
@@ -69,19 +66,6 @@ export async function PATCH(request: NextRequest) {
         deleted,
         ...payload,
       });
-    }
-
-    if (body?.action === "status" && body.ticketId && body.status) {
-      const status = body.status as BetStatus;
-      if (!["pending", "won", "lost", "void"].includes(status)) {
-        return NextResponse.json(
-          { success: false, error: "status inválido" },
-          { status: 400 }
-        );
-      }
-      await updateTicketStatusInDb(String(body.ticketId), status);
-      const payload = await buildStatsSummary();
-      return NextResponse.json({ success: true, ...payload });
     }
 
     return NextResponse.json(

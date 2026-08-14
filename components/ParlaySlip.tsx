@@ -9,7 +9,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { addBetFromParlay, loadBets, saveBets } from "@/lib/history-tracker";
+import {
+  addBetFromParlay,
+  findExistingParlay,
+  loadBets,
+  saveBets,
+  type HistoryBet,
+} from "@/lib/history-tracker";
+import { contextBadgeLabels } from "@/lib/context-engine";
 import { recalculateParlay } from "@/lib/parlay-recalc";
 import type { GeneratedParlay, ParlayLeg } from "@/lib/types";
 import {
@@ -27,6 +34,7 @@ import {
   Flame,
   Lightbulb,
   Loader2,
+  MapPin,
   Pin,
   RefreshCw,
   RotateCcw,
@@ -72,6 +80,7 @@ export function ParlaySlip({
   const [registerMsg, setRegisterMsg] = useState<string | null>(null);
   const [activeLegs, setActiveLegs] = useState<ParlayLeg[]>(parlay.legs);
   const [exitingKeys, setExitingKeys] = useState<Set<string>>(new Set());
+  const [dbTickets, setDbTickets] = useState<HistoryBet[] | null>(null);
   const exitTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map()
   );
@@ -82,7 +91,6 @@ export function ParlaySlip({
     exitTimers.current.clear();
     setExitingKeys(new Set());
     setActiveLegs(parlay.legs);
-    setRegistered(false);
     setRegisterMsg(null);
   }, [parlay]);
 
@@ -92,6 +100,26 @@ export function ParlaySlip({
       exitTimers.current.clear();
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/stats/summary", { cache: "no-store" });
+        const data = (await res.json()) as {
+          success?: boolean;
+          tickets?: HistoryBet[];
+        };
+        if (!res.ok || !data.success || cancelled) return;
+        setDbTickets(data.tickets ?? []);
+      } catch {
+        if (!cancelled) setDbTickets([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [historyDate]);
 
   // Exclude legs mid-exit so odds / payout / joint prob update instantly
   const keptLegs = useMemo(
@@ -103,6 +131,20 @@ export function ParlaySlip({
     () => recalculateParlay(keptLegs, parlay),
     [keptLegs, parlay]
   );
+
+  useEffect(() => {
+    const localHit = findExistingParlay(activeParlay, loadBets());
+    const dbHit = dbTickets
+      ? findExistingParlay(activeParlay, dbTickets)
+      : undefined;
+    const hit = Boolean(localHit || dbHit);
+    setRegistered(hit);
+    if (hit) {
+      setRegisterMsg((prev) => prev ?? "Esta combinada ya está en tu historial.");
+    } else {
+      setRegisterMsg(null);
+    }
+  }, [activeParlay, dbTickets]);
 
   const isEdited = keptLegs.length !== parlay.legs.length;
   const originalCount = parlay.legs.length;
@@ -136,7 +178,6 @@ export function ParlaySlip({
     const existing = exitTimers.current.get(key);
     if (existing) clearTimeout(existing);
 
-    setRegistered(false);
     setRegisterMsg(null);
 
     const timer = setTimeout(() => {
@@ -157,7 +198,6 @@ export function ParlaySlip({
     exitTimers.current.clear();
     setExitingKeys(new Set());
     setActiveLegs(parlay.legs);
-    setRegistered(false);
     setRegisterMsg(null);
   }
 
@@ -165,6 +205,15 @@ export function ParlaySlip({
     if (activeParlay.legs.length === 0) return;
 
     const date = historyDate ?? chileDateString();
+    const already =
+      findExistingParlay(activeParlay, loadBets()) ||
+      (dbTickets ? findExistingParlay(activeParlay, dbTickets) : undefined);
+    if (already) {
+      setRegistered(true);
+      setRegisterMsg("Ticket ya registrado en el historial.");
+      return;
+    }
+
     // Keep localStorage for result-checker UX; primary persistence is SQLite
     const local = addBetFromParlay(activeParlay, date);
 
@@ -380,7 +429,7 @@ export function ParlaySlip({
               {regenerating ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <RefreshCw className="h-4 w-4 text-sky-400" />
+                <RefreshCw className="h-4 w-4" />
               )}
               {fromCache
                 ? "Volver a generar para hoy"
@@ -399,12 +448,12 @@ export function ParlaySlip({
             >
               {registered ? (
                 <>
-                  <Check className="h-4 w-4 text-emerald-400" /> Registrada en
+                  <Check className="h-4 w-4" /> Registrada en
                   historial
                 </>
               ) : (
                 <>
-                  <Pin className="h-4 w-4 text-sky-300" />
+                  <Pin className="h-4 w-4" />
                   Registrar Apuesta en Historial
                 </>
               )}
@@ -488,6 +537,35 @@ function LegRow({
           {formatKickoffDayLabel(leg.kickoff)} CL · modelo{" "}
           {formatPercent(leg.modelProbability)}
         </p>
+        {contextBadgeLabels(leg.contextFlags).length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {contextBadgeLabels(leg.contextFlags)
+              .slice(0, 3)
+              .map((label) => (
+                <Badge
+                  key={label}
+                  variant="info"
+                  className="px-1.5 py-0 text-[10px] font-normal"
+                >
+                  {label}
+                </Badge>
+              ))}
+          </div>
+        )}
+        {(leg.referee || leg.venue) && (
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-slate-600">
+            {leg.venue ? (
+              <span className="inline-flex items-center gap-0.5">
+                <MapPin className="h-2.5 w-2.5 text-sky-500" />
+                {leg.venue}
+              </span>
+            ) : null}
+            {leg.venue && leg.referee ? (
+              <span className="text-slate-700">·</span>
+            ) : null}
+            {leg.referee ? <span>Árb. {leg.referee}</span> : null}
+          </p>
+        )}
       </div>
       <span className="font-mono text-sm font-semibold text-emerald-300">
         @{formatOdds(leg.odds)}

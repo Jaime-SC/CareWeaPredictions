@@ -63,7 +63,7 @@ const freshHome: Match = {
 
 const xgFatigue = estimateExpectedGoals(base);
 const xgFresh = estimateExpectedGoals(freshHome);
-const { markets, isDerby } = predictMatchMarkets(base);
+const { markets, isDerby, contextFlags } = predictMatchMarkets(base);
 const under = markets.find((m) => m.market === "under_3_5");
 const over = markets.find((m) => m.market === "over_1_5");
 
@@ -77,6 +77,7 @@ console.log(
       underBlocked: isMarketBlockedByDerby(base, "under_3_5"),
       underSafe: under?.isSafePick ?? null,
       overProb: Number((over?.modelProbability ?? 0).toFixed(3)),
+      contextFlags,
       xgFatigue,
       xgFresh,
       fatigueReducedHomeXg: xgFatigue.home < xgFresh.home,

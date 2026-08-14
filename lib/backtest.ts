@@ -10,7 +10,7 @@ import {
 } from "./parlay-generator";
 import { getStrategyPreset } from "./parlay-defaults";
 import { evaluateMarket } from "./result-checker";
-import { ensureMatchOdds } from "./poisson";
+import { buildFairMatchOdds } from "./poisson";
 import type { GeneratedParlay, LeagueId, MarketType, Match, MatchOdds } from "./types";
 import { chileDateString, UNIT_STAKE } from "./utils";
 
@@ -126,6 +126,8 @@ function applyBookMargin(fair: MatchOdds, margin = 1.04): MatchOdds {
     under45: scale(fair.under45),
     homeScores: scale(fair.homeScores),
     awayScores: scale(fair.awayScores),
+    homeOver15: scale(fair.homeOver15 ?? 0) || undefined,
+    awayOver15: scale(fair.awayOver15 ?? 0) || undefined,
     dnbHome: scale(fair.dnbHome),
     dnbAway: scale(fair.dnbAway),
   };
@@ -234,6 +236,7 @@ function buildMatchFromRow(
     id: `bt-${row.apiFixtureId}`,
     league: mapLeagueSlug(row.leagueId),
     leagueName: row.leagueName,
+    leagueId: String(row.leagueId),
     kickoff: row.matchDate.toISOString(),
     home: {
       name: row.homeTeam,
@@ -278,7 +281,7 @@ function buildMatchFromRow(
     },
   };
 
-  const withFair = ensureMatchOdds(match);
+  const withFair = { ...match, odds: buildFairMatchOdds(match) };
   return { ...withFair, odds: applyBookMargin(withFair.odds) };
 }
 

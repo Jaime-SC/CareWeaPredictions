@@ -28,13 +28,14 @@ import {
   computeMarketBreakdown,
   computeStrategyBreakdown,
   computeSummary,
+  countSettledByStrategy,
+  marketGroupLabel,
   countLegHits,
   deleteBetById,
   formatSignedUnits,
   loadBets,
   purgeFakeHistory,
   replaceBets,
-  updateBetStatus,
 } from "@/lib/history-tracker";
 import { formatLegMatchStatus, updatePendingBets } from "@/lib/result-checker";
 import {
@@ -130,6 +131,7 @@ function summaryFromApi(
 ): HistorySummary {
   if (!api) return computeSummary(bets);
   const settled = api.settledTickets ?? api.won + api.lost;
+  const byStrategy = countSettledByStrategy(bets);
   return {
     netProfit: api.netProfit,
     totalStaked: api.totalStaked,
@@ -145,6 +147,7 @@ function summaryFromApi(
     pending: api.pending,
     voided: api.voided,
     completed: settled,
+    ...byStrategy,
   };
 }
 
@@ -464,21 +467,6 @@ export default function StatsPage() {
     setUpdating(false);
   }
 
-  async function handleStatus(id: string, status: BetStatus) {
-    updateBetStatus(id, status);
-    try {
-      await fetch("/api/stats/summary", {
-        method: "PATCH",
-        cache: "no-store",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "status", ticketId: id, status }),
-      });
-    } catch {
-      // local already updated
-    }
-    await refreshFromDb();
-  }
-
   async function handleClear() {
     if (
       !window.confirm(
@@ -670,7 +658,7 @@ export default function StatsPage() {
             onClick={handleExportTraining}
             disabled={bets.length === 0 && trainingExport.length === 0}
           >
-            <Download className="h-4 w-4 text-slate-300" />
+            <Download className="h-4 w-4" />
             Exportar Datos de Entrenamiento (JSON)
           </Button>
           <Button
@@ -682,7 +670,7 @@ export default function StatsPage() {
             {updating ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCw className="h-4 w-4 text-sky-300" />
+              <RefreshCw className="h-4 w-4" />
             )}
             Sincronizar Marcadores
           </Button>
@@ -875,7 +863,7 @@ export default function StatsPage() {
             <CardHeader>
               <CardTitle>Acierto por Fecha y Mercado</CardTitle>
               <CardDescription>
-                Doble Oportunidad · +1.5 Goles · Apuesta sin Empate · etc.
+                Doble oportunidad · Más de 1.5 goles · Apuesta sin empate · etc.
               </CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">
@@ -908,7 +896,7 @@ export default function StatsPage() {
                           {row.date}
                         </td>
                         <td className="py-2.5 pr-3 text-slate-100">
-                          {row.marketLabel}
+                          {marketGroupLabel(row.market, row.marketLabel)}
                         </td>
                         <td className="py-2.5 pr-3 text-slate-300">
                           {row.total}
@@ -955,7 +943,7 @@ export default function StatsPage() {
                 filas de entrenamiento disponibles en SQLite.
               </p>
               <Button variant="default" size="sm" onClick={handleExportTraining}>
-                <Download className="h-4 w-4 text-slate-200" />
+                <Download className="h-4 w-4" />
                 Exportar Datos de Entrenamiento (JSON)
               </Button>
             </CardContent>
@@ -984,7 +972,7 @@ export default function StatsPage() {
                 {calibrating ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Settings2 className="h-4 w-4 text-violet-300" />
+                  <Settings2 className="h-4 w-4" />
                 )}
                 Re-Calibrar Modelo con Datos Históricos
               </Button>
@@ -1093,7 +1081,7 @@ export default function StatsPage() {
             <CardHeader>
               <CardTitle>Historial de apuestas</CardTitle>
               <CardDescription>
-                Persistido en SQLite · override manual disponible
+                Persistido en SQLite · resultado según marcador real
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -1102,7 +1090,6 @@ export default function StatsPage() {
                   key={bet.id}
                   bet={bet}
                   removing={removingIds.has(bet.id)}
-                  onStatus={(status) => handleStatus(bet.id, status)}
                   onDelete={() => handleDeleteBet(bet.id)}
                 />
               ))}
@@ -1281,17 +1268,13 @@ function LegDetailRow({ leg }: { leg: HistoryBetLeg }) {
 function BetRow({
   bet,
   removing = false,
-  onStatus,
   onDelete,
 }: {
   bet: HistoryBet;
   removing?: boolean;
-  onStatus: (status: BetStatus) => void;
   onDelete: () => void;
 }) {
-  const [expanded, setExpanded] = useState(
-    () => bet.status === "pending" || bet.status === "lost"
-  );
+  const [expanded, setExpanded] = useState(false);
 
   const hits = countLegHits(bet.legs);
   const hitsVariant = legHitsBadgeVariant(bet.status);
@@ -1314,7 +1297,7 @@ function BetRow({
           : "max-h-[2000px] translate-y-0 scale-100 opacity-100"
       )}
     >
-      <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="p-4">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
@@ -1353,36 +1336,6 @@ function BetRow({
               Resultado {formatSignedUnits(unitPnl)}
             </p>
           )}
-        </div>
-
-        <div className="flex flex-wrap gap-1.5">
-          <Button
-            size="sm"
-            variant={bet.status === "won" ? "default" : "outline"}
-            onClick={() => onStatus("won")}
-            disabled={removing}
-          >
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            Ganada
-          </Button>
-          <Button
-            size="sm"
-            variant={bet.status === "lost" ? "danger" : "outline"}
-            onClick={() => onStatus("lost")}
-            disabled={removing}
-          >
-            <XCircle className="h-3.5 w-3.5" />
-            Perdida
-          </Button>
-          <Button
-            size="sm"
-            variant={bet.status === "void" ? "secondary" : "ghost"}
-            onClick={() => onStatus("void")}
-            disabled={removing}
-          >
-            <CircleSlash className="h-3.5 w-3.5" />
-            Cancelada
-          </Button>
         </div>
       </div>
 

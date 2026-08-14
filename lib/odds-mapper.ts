@@ -116,8 +116,6 @@ export function parseFixtureOdds(
   const ou = betById(book, 5) ?? betByName(book, "goals over/under", "over/under");
   const dnb =
     betById(book, 13) ?? betByName(book, "draw no bet");
-  const btts =
-    betById(book, 8) ?? betByName(book, "both teams score", "both teams to score");
   const homeScoreBet =
     betById(book, 21) ??
     betByName(book, "home team score", "team to score - home", "home will score");
@@ -138,88 +136,32 @@ export function parseFixtureOdds(
     doubleChanceX2 = Number((1 / Math.max(0.05, pAway + pDraw)).toFixed(3));
   }
 
-  const over15 = (ou && findValue(ou.values, "over 1.5")) ?? null;
-  const over25 = (ou && findValue(ou.values, "over 2.5")) ?? null;
-  const under35 = (ou && findValue(ou.values, "under 3.5")) ?? null;
-  const under45 = (ou && findValue(ou.values, "under 4.5")) ?? null;
+  const over05 = (ou && findValue(ou.values, "over 0.5")) ?? 0;
+  const over15 = (ou && findValue(ou.values, "over 1.5")) ?? 0;
+  const over25 = (ou && findValue(ou.values, "over 2.5")) ?? 0;
+  const under35 = (ou && findValue(ou.values, "under 3.5")) ?? 0;
+  const under45 = (ou && findValue(ou.values, "under 4.5")) ?? 0;
 
-  // Derive missing O/U from 1X2-implied total λ when book lacks the line
-  const totalProxy =
-    over25 != null
-      ? lambdaFromOver25(1 / over25)
-      : 2.2 + Math.abs(pHome - pAway) * 0.4;
+  const dnbHome =
+    (dnb && findValue(dnb.values, "home", "1")) ?? 0;
+  const dnbAway =
+    (dnb && findValue(dnb.values, "away", "2")) ?? 0;
 
-  const over05 =
-    (ou && findValue(ou.values, "over 0.5")) ??
-    Number(
-      (
-        1 /
-        Math.max(0.05, 1 - Math.exp(-Math.max(1.2, totalProxy * 0.85)))
-      ).toFixed(3)
-    );
-  const derivedOver15 =
-    over15 ??
-    Number(
-      (
-        1 /
-        Math.max(
-          0.08,
-          1 -
-            Math.exp(-totalProxy) *
-              (1 + totalProxy)
-        )
-      ).toFixed(3)
-    );
-  const derivedOver25 =
-    over25 ??
-    Number((1 / Math.max(0.1, 1 - poissonCdf2(totalProxy))).toFixed(3));
-  const derivedUnder35 =
-    under35 ??
-    Number((1 / Math.max(0.1, poissonCdf3(totalProxy))).toFixed(3));
-  const derivedUnder45 =
-    under45 ??
-    Number((1 / Math.max(0.08, poissonCdf4(totalProxy))).toFixed(3));
+  const homeScores =
+    (homeScoreBet && findValue(homeScoreBet.values, "yes", "home")) ?? 0;
+  const awayScores =
+    (awayScoreBet && findValue(awayScoreBet.values, "yes", "away")) ?? 0;
 
-  let dnbHome =
-    (dnb && findValue(dnb.values, "home", "1")) ?? null;
-  let dnbAway =
-    (dnb && findValue(dnb.values, "away", "2")) ?? null;
-  if (dnbHome == null) {
-    dnbHome = Number(
-      ((pHome + pAway) / Math.max(0.05, pHome)).toFixed(3)
-    );
-  }
-  if (dnbAway == null) {
-    dnbAway = Number(
-      ((pHome + pAway) / Math.max(0.05, pAway)).toFixed(3)
-    );
-  }
-
-  const bttsYes = btts ? findValue(btts.values, "yes") : null;
-  let homeScores =
-    (homeScoreBet && findValue(homeScoreBet.values, "yes", "home")) ?? null;
-  let awayScores =
-    (awayScoreBet && findValue(awayScoreBet.values, "yes", "away")) ?? null;
-  if (homeScores == null) {
-    // Soft proxy from home win + draw share
-    homeScores = Number(
-      (1 / Math.max(0.12, Math.min(0.95, 0.55 + pHome * 0.35))).toFixed(3)
-    );
-  }
-  if (awayScores == null) {
-    awayScores = Number(
-      (1 / Math.max(0.12, Math.min(0.95, 0.5 + pAway * 0.35))).toFixed(3)
-    );
-  }
-  if (bttsYes != null) {
-    // Blend BTTS into team-score proxies when explicit team-score lines missing
-    homeScores = Number(
-      Math.min(homeScores, Math.max(1.05, bttsYes * 0.92)).toFixed(3)
-    );
-    awayScores = Number(
-      Math.min(awayScores, Math.max(1.05, bttsYes * 0.92)).toFixed(3)
-    );
-  }
+  const homeTotals =
+    betById(book, 16) ??
+    betByName(book, "total - home", "home team total", "goals over/under home");
+  const awayTotals =
+    betById(book, 17) ??
+    betByName(book, "total - away", "away team total", "goals over/under away");
+  const homeOver15 =
+    (homeTotals && findValue(homeTotals.values, "over 1.5")) ?? 0;
+  const awayOver15 =
+    (awayTotals && findValue(awayTotals.values, "over 1.5")) ?? 0;
 
   return {
     home,
@@ -227,46 +169,18 @@ export function parseFixtureOdds(
     away,
     doubleChance1X,
     doubleChanceX2,
-    over05: over05 ?? 1.08,
-    over15: derivedOver15,
-    over25: derivedOver25,
-    under35: derivedUnder35,
-    under45: derivedUnder45,
+    over05,
+    over15,
+    over25,
+    under35,
+    under45,
     homeScores,
     awayScores,
+    homeOver15: homeOver15 || undefined,
+    awayOver15: awayOver15 || undefined,
     dnbHome,
     dnbAway,
   };
-}
-
-function poissonCdf2(lambda: number): number {
-  let term = Math.exp(-lambda);
-  let cdf = term;
-  term *= lambda;
-  cdf += term;
-  term *= lambda / 2;
-  cdf += term;
-  return cdf;
-}
-
-function poissonCdf3(lambda: number): number {
-  let term = Math.exp(-lambda);
-  let cdf = term;
-  for (let k = 1; k <= 3; k++) {
-    term *= lambda / k;
-    cdf += term;
-  }
-  return cdf;
-}
-
-function poissonCdf4(lambda: number): number {
-  let term = Math.exp(-lambda);
-  let cdf = term;
-  for (let k = 1; k <= 4; k++) {
-    term *= lambda / k;
-    cdf += term;
-  }
-  return cdf;
 }
 
 /**
@@ -279,7 +193,10 @@ export function applyOddsImpliedStats(
   odds: MatchOdds
 ): Match {
   const { pHome, pAway } = normalizeImplied(odds.home, odds.draw, odds.away);
-  const pOver25 = Math.min(0.9, Math.max(0.1, 1 / odds.over25));
+  const pOver25 =
+    odds.over25 > 1
+      ? Math.min(0.9, Math.max(0.1, 1 / odds.over25))
+      : 0.52;
   const totalLambda = lambdaFromOver25(pOver25);
   const homeShare = Math.min(
     0.72,

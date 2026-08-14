@@ -67,6 +67,18 @@ function resolveMarketKey(
   }
   if (s.includes("sin empate") || s.includes("dnb") || s.includes("draw no bet"))
     return "dnb_home";
+  if (
+    (s.includes("local") || s.includes("home") || s.includes("team total")) &&
+    (s.includes("más de 1.5") || s.includes("over 1.5"))
+  ) {
+    return "home_over_1_5";
+  }
+  if (
+    (s.includes("visita") || s.includes("away") || s.includes("visitante")) &&
+    (s.includes("más de 1.5") || s.includes("over 1.5"))
+  ) {
+    return "away_over_1_5";
+  }
   if (s.includes("over 1.5") || s.includes("más de 1.5") || s.includes("+1.5"))
     return "over_1_5";
   if (s.includes("over 0.5") || s.includes("más de 0.5") || s.includes("+0.5"))
@@ -267,6 +279,30 @@ export function getExplicitPickLabel(
         },
         `Ganas si ${away} anota; no importa el resultado final.`,
         "BTTS-A"
+      );
+    case "home_over_1_5":
+      return pack(
+        {
+          explicitLabel: `${home} más de 1.5 goles`,
+          bookmakerTab:
+            "Buscar en la casa como: «Goles del equipo» / «Team Totals» → Local Over 1.5 (no es el total del partido).",
+          warningNote:
+            `NO es Over 1.5 del partido. Solo cuentan los goles de ${home}. Empate o derrota no importan si anota 2+.`,
+        },
+        `Ganas si ${home} marca al menos 2 goles (90 min).`,
+        "TT O1.5 H"
+      );
+    case "away_over_1_5":
+      return pack(
+        {
+          explicitLabel: `${away} más de 1.5 goles`,
+          bookmakerTab:
+            "Buscar en la casa como: «Goles del equipo» / «Team Totals» → Visitante Over 1.5 (no es el total del partido).",
+          warningNote:
+            `NO es Over 1.5 del partido. Solo cuentan los goles de ${away}. Empate o derrota no importan si anota 2+.`,
+        },
+        `Ganas si ${away} marca al menos 2 goles (90 min).`,
+        "TT O1.5 A"
       );
     case "home":
       return pack(

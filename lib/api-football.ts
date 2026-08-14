@@ -1,4 +1,4 @@
-import type { LeagueId, Match, MatchOdds } from "./types";
+import type { LeagueId, Match, MatchOdds, NearbyTeamFixture } from "./types";
 import {
   API_AUTH_MESSAGE,
   API_CONNECTION_ERROR_MESSAGE,
@@ -11,6 +11,9 @@ import {
   CACHE_TTL_MINUTES,
   fetchWithCache,
   ttlMinutesForFixtureDate,
+  FREE_PLAN_MAX_PAGE,
+  getCachedPayload,
+  buildCacheKey,
 } from "./api-cache";
 import { prisma } from "./db";
 import {
@@ -21,6 +24,7 @@ import {
 } from "./odds-mapper";
 import {
   isFixtureFinished,
+  isFixtureLive,
   isFixtureVoided,
 } from "./match-status";
 import {
@@ -30,7 +34,16 @@ import {
   isAllowedLeagueId,
   isClubFriendlyLeagueId,
 } from "../config/allowed-leagues";
-import { CHILE_TIMEZONE, chileDateApiWindow, chileDateRange, chileDateString } from "./utils";
+import { CHILE_TIMEZONE, chileDateApiWindow, chileDateOffset, chileDateRange, chileDateString } from "./utils";
+import { purgeStaleOddsAndFixtureCache } from "./cache";
+import { enrichMatchContextFeatures } from "./context-enrichment";
+import {
+  getMonopolyTeams,
+  getMonopolyTeamIds,
+  getWeeklyDateRange,
+  MONOPOLY_WINDOW_DAYS,
+  type WeeklyDateRange,
+} from "./monopoly-engine";
 
 export {
   API_CONNECTION_ERROR_MESSAGE,
@@ -46,6 +59,7 @@ export {
   refreshApiQuotaFromStatus,
   CACHE_TTL_MINUTES,
   API_DAILY_QUOTA_LIMIT,
+  FREE_PLAN_MAX_PAGE,
 } from "./api-cache";
 
 export {
@@ -135,6 +149,7 @@ export interface FetchMatchesOptions {
   /** Ignored — elite whitelist is always applied. */
   expandIfFewerThan?: number;
   includeOdds?: boolean;
+  /** When omitted, follows includeOdds: live bookmaker odds are required. */
   requireOdds?: boolean;
 }
 
@@ -147,7 +162,14 @@ export interface FetchMatchesResult {
 }
 
 type ApiFixture = {
-  fixture: { id: number; date: string; timestamp?: number };
+  fixture: {
+    id: number;
+    date: string;
+    timestamp?: number;
+    status?: { short?: string };
+    referee?: string | null;
+    venue?: { id?: number; name?: string | null; city?: string | null };
+  };
   league: { id: number; name: string; season?: number };
   teams: {
     home: { id: number; name: string };
@@ -161,6 +183,14 @@ type ApiEnvelope<T> = {
 };
 
 let eliteTeamIdsCache: Set<number> | null = null;
+let staleCachePurged: Promise<void> | null = null;
+
+function ensureStaleCachePurged(): Promise<void> {
+  if (!staleCachePurged) {
+    staleCachePurged = purgeStaleOddsAndFixtureCache().then(() => undefined);
+  }
+  return staleCachePurged;
+}
 
 function resolveApiKey(): string {
   const key = process.env.FOOTBALL_API_KEY?.trim();
@@ -179,7 +209,7 @@ function isYouthOrReserve(name: string): boolean {
 }
 
 function mapLeagueSlug(apiLeagueId: number): LeagueId {
-  return LEAGUE_ID_TO_SLUG[apiLeagueId] ?? "club-friendlies";
+  return LEAGUE_ID_TO_SLUG[apiLeagueId] ?? "other-domestic";
 }
 
 function shortName(name: string): string {
@@ -252,6 +282,68 @@ function isPlanOrDateRestriction(
   );
 }
 
+/** Free plan: 10 HTTP requests / minute. Space live calls by 6.2s. */
+const FREE_PLAN_LIVE_INTERVAL_MS = 6_200;
+const ODDS_UNCACHED_BATCH_CAP = 8;
+const RATE_LIMIT_COOLDOWN_MS = 60_000;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+let liveGate: Promise<void> = Promise.resolve();
+let lastLiveRequestAt = 0;
+
+/**
+ * Serializes uncached upstream HTTP so we stay under 10 req/min
+ * (one in-flight live call, ≥6.2s between starts).
+ */
+async function runLiveRequest<T>(fn: () => Promise<T>): Promise<T> {
+  let release!: () => void;
+  const previous = liveGate;
+  liveGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    const wait = Math.max(
+      0,
+      FREE_PLAN_LIVE_INTERVAL_MS - (Date.now() - lastLiveRequestAt)
+    );
+    if (wait > 0) {
+      console.log(`[api-football] rate-limit throttle ${wait}ms`);
+      await delay(wait);
+    }
+    lastLiveRequestAt = Date.now();
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
+function isRateLimitError(err: unknown): boolean {
+  if (err instanceof FootballApiError && err.status === 429) return true;
+  const status =
+    typeof err === "object" &&
+    err !== null &&
+    "status" in err &&
+    typeof (err as { status?: unknown }).status === "number"
+      ? (err as { status: number }).status
+      : undefined;
+  if (status === 429) return true;
+  const msg = err instanceof Error ? err.message.toLowerCase() : "";
+  return msg.includes("too many requests") || msg.includes("rate limit");
+}
+
+function isRateLimitEnvelope(errors: ApiEnvelope<unknown>["errors"]): boolean {
+  const detail = formatApiErrors(errors).toLowerCase();
+  return (
+    detail.includes("rate limit") ||
+    detail.includes("too many requests") ||
+    detail.includes("per minute")
+  );
+}
+
 async function apiGet<T>(
   path: string,
   apiKey: string,
@@ -273,17 +365,29 @@ async function apiGet<T>(
     params[k] = v;
   }
 
+  const cacheKey = opts?.cacheKey ?? buildCacheKey(endpoint, params);
+
   try {
-    return await fetchWithCache<ApiEnvelope<T>>(
-      endpoint,
-      params,
-      opts?.ttlMinutes ?? CACHE_TTL_MINUTES.TODAY_PENDING,
-      {
-        apiKey,
-        cacheKey: opts?.cacheKey,
-        forceRefresh: opts?.forceRefresh,
-        resolveTtl: opts?.resolveTtl,
+    if (!opts?.forceRefresh) {
+      const cached = await getCachedPayload<ApiEnvelope<T>>(cacheKey);
+      if (cached !== null) {
+        console.log(`[CACHE HIT] Returning data for key=${cacheKey}`);
+        return cached;
       }
+    }
+
+    return await runLiveRequest(() =>
+      fetchWithCache<ApiEnvelope<T>>(
+        endpoint,
+        params,
+        opts?.ttlMinutes ?? CACHE_TTL_MINUTES.TODAY_PENDING,
+        {
+          apiKey,
+          cacheKey,
+          forceRefresh: opts?.forceRefresh,
+          resolveTtl: opts?.resolveTtl,
+        }
+      )
     );
   } catch (err) {
     const status =
@@ -412,8 +516,8 @@ function fixtureBelongsToChileDate(
 
 /**
  * Maps a live fixture into the Match shape.
- * Odds/stats are filled later via /odds + local enrichment — placeholders
- * here are only structural and MUST be replaced before prediction.
+ * Odds/stats are filled later via `/odds?fixture={id}` — placeholders
+ * here are only structural. Fixtures without a real book board are dropped.
  */
 function toMatch(item: ApiFixture): Match {
   const kickoff =
@@ -430,8 +534,10 @@ function toMatch(item: ApiFixture): Match {
     id: `live-${item.fixture.id}`,
     league: mapLeagueSlug(item.league.id),
     leagueName: item.league.name,
+    leagueId: String(item.league.id),
     kickoff,
     home: {
+      id: item.teams.home.id,
       name: item.teams.home.name,
       shortName: shortName(item.teams.home.name),
       form: [],
@@ -439,6 +545,7 @@ function toMatch(item: ApiFixture): Match {
       goalsConcededAvg: 0,
     },
     away: {
+      id: item.teams.away.id,
       name: item.teams.away.name,
       shortName: shortName(item.teams.away.name),
       form: [],
@@ -447,6 +554,8 @@ function toMatch(item: ApiFixture): Match {
     },
     h2h: { homeWins: 0, draws: 0, awayWins: 0, avgGoals: 2.4 },
     odds: EMPTY_ODDS,
+    referee: item.fixture.referee?.trim() || null,
+    venue: item.fixture.venue?.name?.trim() || null,
   };
 }
 
@@ -469,146 +578,37 @@ const EMPTY_ODDS: MatchOdds = {
 };
 
 function hasLiveOdds(odds: MatchOdds): boolean {
-  return odds.home > 1 && odds.draw > 1 && odds.away > 1 && odds.doubleChance1X > 1;
+  return (
+    odds.home > 1 &&
+    odds.draw > 1 &&
+    odds.away > 1 &&
+    odds.doubleChance1X > 1
+  );
 }
 
-/**
- * Live-only football client. Never returns simulated fixtures.
- * Throws FootballApiError on connection failure or empty elite pool.
- */
-export async function fetchUpcomingMatches(
-  options: FetchMatchesOptions = {}
-): Promise<FetchMatchesResult> {
-  const preferredPool = options.poolMode ?? "expanded";
-  const includeOdds = options.includeOdds ?? true;
-  const requireOdds = options.requireOdds ?? false;
-
-  // Every poolMode resolves to the same elite whitelist
-  let result = await fetchFromApiFootball({
-    ...options,
-    poolMode: preferredPool,
-    includeOdds,
-    requireOdds,
-  });
-
-  // Strict Chile civil-date clamp when a single date was requested
-  if (options.date) {
-    result = {
-      ...result,
-      matches: filterMatchesOnChileDate(result.matches, options.date),
-    };
-  }
-
-  if (result.matches.length === 0) {
-    throw new FootballApiError(EMPTY_MATCHES_MESSAGE, "EMPTY", 404);
-  }
-
+function toNearbyFixture(item: ApiFixture): NearbyTeamFixture {
   return {
-    matches: result.matches,
-    source: "live",
-    daysFetched: result.daysFetched,
-    poolMode: result.poolMode,
+    id: item.fixture.id,
+    date: item.fixture.date,
+    league: { id: item.league.id, name: item.league.name },
+    teams: {
+      home: { id: item.teams.home.id, name: item.teams.home.name },
+      away: { id: item.teams.away.id, name: item.teams.away.name },
+    },
   };
 }
 
-type OddsPageEnvelope = {
-  response?: ApiOddsFixture[];
-  errors?: ApiEnvelope<unknown>["errors"];
-  paging?: { current: number; total: number };
-};
-
-/**
- * Prefetch bookmaker odds for a civil date (paginated, cached).
- * Follows all pages (soft cap) so whitelist matchdays are not truncated.
- */
-async function fetchOddsMapForDate(
-  date: string,
-  apiKey: string,
-  maxPages = 25
-): Promise<Map<number, MatchOdds>> {
-  const map = new Map<number, MatchOdds>();
-  let page = 1;
-  let totalPages = 1;
-
-  while (page <= totalPages && page <= maxPages) {
-    try {
-      const json = await apiGet<ApiOddsFixture[]>(
-        `/odds?date=${date}&page=${page}`,
-        apiKey,
-        {
-          ttlMinutes: ttlMinutesForFixtureDate(date) ?? CACHE_TTL_MINUTES.FUTURE,
-          cacheKey: `odds_date_${date}_p${page}`,
-        }
-      );
-
-      if (hasApiErrors(json.errors)) {
-        break;
-      }
-
-      const envelope = json as OddsPageEnvelope;
-      totalPages = Math.max(1, envelope.paging?.total ?? 1);
-
-      for (const row of envelope.response ?? []) {
-        const parsed = parseFixtureOdds(row);
-        if (!parsed) continue;
-        map.set(row.fixture.id, parsed);
-      }
-    } catch (err) {
-      if (err instanceof FootballApiError && err.code === "AUTH") throw err;
-      console.warn(`[api-football] odds fetch failed date=${date} page=${page}:`, err);
-      break;
-    }
-    page += 1;
-  }
-
-  return map;
-}
-
-function attachOddsToMatches(
-  matches: Match[],
-  oddsByFixture: Map<number, MatchOdds>,
-  requireOdds: boolean
-): Match[] {
-  const out: Match[] = [];
-  for (const match of matches) {
-    const fixtureId = fixtureIdFromMatchId(match.id);
-    const odds = fixtureId != null ? oddsByFixture.get(fixtureId) : undefined;
-    if (!odds) {
-      // Keep fixture — Poisson fair odds fill gaps at prediction time
-      if (!requireOdds) out.push(match);
-      continue;
-    }
-    out.push(applyOddsImpliedStats(match, odds));
-  }
-  return out;
-}
-
-async function fetchFromApiFootball(
-  options: FetchMatchesOptions
-): Promise<{
-  matches: Match[];
-  daysFetched: number;
-  poolMode: "core" | "expanded" | "wide";
+async function fetchRawApiFixturesForDates(dates: string[]): Promise<{
+  fixtures: ApiFixture[];
+  successfulDays: number;
+  fatalError: FootballApiError | null;
 }> {
   const apiKey = resolveApiKey();
-  // Chile civil day → fetch ±1 API dates so UTC-shifted evening kickoffs are not missed
-  const dates = options.date
-    ? chileDateApiWindow(options.date)
-    : dateStrings(options.daysAhead ?? 3);
-  const targetChileDate = options.date ?? null;
-  const poolMode = options.poolMode ?? "expanded";
-  // Always the strict elite whitelist — poolMode is cosmetic for callers
-  const includeOdds = options.includeOdds ?? true;
-  // Never hard-drop whitelist fixtures solely for missing book lines
-  const requireOdds = options.requireOdds ?? false;
-
   const raw: ApiFixture[] = [];
   const seen = new Set<number>();
   let successfulDays = 0;
   let fatalError: FootballApiError | null = null;
 
-  // Aggregate EVERY accessible day in the requested Chile range.
-  // Free plans may reject some dates; we keep whatever days succeed.
   for (const date of dates) {
     try {
       const json = await apiGet<ApiFixture[]>(
@@ -655,6 +655,454 @@ async function fetchFromApiFootball(
     }
   }
 
+  return { fixtures: raw, successfulDays, fatalError };
+}
+
+/**
+ * Team fixtures in [fromYmd, toYmd] (civil dates). Used by monopoly anti-rotation
+ * and the Monday–Sunday weekly scan.
+ */
+async function fetchTeamApiFixtures(
+  teamId: number,
+  fromYmd: string,
+  toYmd: string
+): Promise<ApiFixture[]> {
+  const apiKey = resolveApiKey();
+  try {
+    const json = await apiGet<ApiFixture[]>(
+      `/fixtures?team=${teamId}&from=${fromYmd}&to=${toYmd}&timezone=${encodeURIComponent(CHILE_TIMEZONE)}`,
+      apiKey,
+      {
+        ttlMinutes: CACHE_TTL_MINUTES.TODAY_PENDING,
+        cacheKey: `fixtures_team_${teamId}_from_${fromYmd}_to_${toYmd}`,
+      }
+    );
+    if (hasApiErrors(json.errors)) {
+      if (isPlanOrDateRestriction(json.errors)) {
+        console.warn(
+          `[api-football] team window ${teamId} ${fromYmd}→${toYmd} no disponible en el plan`
+        );
+        return [];
+      }
+      console.warn(
+        `[api-football] team window ${teamId} errors:`,
+        json.errors
+      );
+      return [];
+    }
+    return json.response ?? [];
+  } catch (err) {
+    if (err instanceof FootballApiError && err.code === "AUTH") throw err;
+    console.warn(`[api-football] team window fetch failed team=${teamId}:`, err);
+    return [];
+  }
+}
+
+export async function fetchTeamFixturesWindow(
+  teamId: number,
+  fromYmd: string,
+  toYmd: string
+): Promise<NearbyTeamFixture[]> {
+  const rows = await fetchTeamApiFixtures(teamId, fromYmd, toYmd);
+  return rows.map(toNearbyFixture);
+}
+
+function isUpcomingMonopolyFixture(item: ApiFixture, nowMs = Date.now()): boolean {
+  const short = item.fixture.status?.short;
+  if (isFixtureFinished(short) || isFixtureVoided(short) || isFixtureLive(short)) {
+    return false;
+  }
+  const kick = Date.parse(item.fixture.date);
+  if (Number.isFinite(kick) && kick < nowMs) return false;
+  return true;
+}
+
+/**
+ * Attach bookmaker odds when available; keep the fixture if the book is missing
+ * (monopoly exotic leagues often have no Bet365 board).
+ */
+async function attachOddsBestEffort(
+  matches: Match[],
+  apiKey: string
+): Promise<Match[]> {
+  if (matches.length === 0) return matches;
+  const oddsByFixture = await fetchOddsForEliteFixtures(matches, apiKey);
+  const out: Match[] = [];
+  for (const match of matches) {
+    const fixtureId = fixtureIdFromMatchId(match.id);
+    const odds = fixtureId != null ? oddsByFixture.get(fixtureId) : undefined;
+    if (odds && hasLiveOdds(odds)) {
+      out.push(applyOddsImpliedStats(match, odds));
+      continue;
+    }
+    out.push(match);
+  }
+  return out;
+}
+
+/**
+ * Upcoming domestic monopoly fixtures for the current Chile week (Mon–Sun).
+ * Ignores any caller date; anti-rotation windows are ±4 days around each fixture.
+ */
+export async function fetchMonopolyMatchPool(): Promise<{
+  matches: Match[];
+  daysFetched: number;
+  week: WeeklyDateRange;
+}> {
+  await ensureStaleCachePurged();
+  const apiKey = resolveApiKey();
+  const week = getWeeklyDateRange();
+  const fromScan = chileDateOffset(-MONOPOLY_WINDOW_DAYS, week.fromYmd);
+  const toScan = chileDateOffset(MONOPOLY_WINDOW_DAYS, week.toYmd);
+
+  const windows = new Map<number, NearbyTeamFixture[]>();
+  const seen = new Set<number>();
+  const candidates: ApiFixture[] = [];
+  let teamCalls = 0;
+
+  for (const team of getMonopolyTeams()) {
+    const rows = await fetchTeamApiFixtures(team.teamId, fromScan, toScan);
+    teamCalls += 1;
+    windows.set(team.teamId, rows.map(toNearbyFixture));
+
+    for (const item of rows) {
+      if (seen.has(item.fixture.id)) continue;
+      const plays =
+        item.teams.home.id === team.teamId ||
+        item.teams.away.id === team.teamId;
+      if (!plays) continue;
+      if (item.league.id !== team.leagueId) continue;
+      const ymd = chileCivilDateFromKickoff(
+        item.fixture.timestamp ?? item.fixture.date
+      );
+      if (!ymd || ymd < week.fromYmd || ymd > week.toYmd) continue;
+      if (!isUpcomingMonopolyFixture(item)) continue;
+      seen.add(item.fixture.id);
+      candidates.push(item);
+    }
+  }
+
+  const matches: Match[] = (
+    await attachOddsBestEffort(
+      candidates.map((item) => {
+        const mapped = toMatch(item);
+        const monopolyId = getMonopolyTeamIds().has(item.teams.home.id)
+          ? item.teams.home.id
+          : item.teams.away.id;
+        const window = windows.get(monopolyId);
+        return {
+          ...mapped,
+          nearbyTeamFixtures:
+            window && window.length > 0 ? window : [toNearbyFixture(item)],
+        };
+      }),
+      apiKey
+    )
+  ).sort(
+    (a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime()
+  );
+
+  console.log(
+    `[api-football] monopoly week ${week.fromYmd}→${week.toYmd} candidates=${candidates.length} kept=${matches.length} teamCalls=${teamCalls}`
+  );
+
+  return { matches, daysFetched: week.dates.length, week };
+}
+
+/**
+ * Live-only football client. Never returns simulated fixtures.
+ * Throws FootballApiError on connection failure or empty elite pool.
+ */
+export async function fetchUpcomingMatches(
+  options: FetchMatchesOptions = {}
+): Promise<FetchMatchesResult> {
+  const preferredPool = options.poolMode ?? "expanded";
+  const includeOdds = options.includeOdds ?? true;
+  const requireOdds = options.requireOdds ?? includeOdds;
+
+  // Every poolMode resolves to the same elite whitelist
+  let result = await fetchFromApiFootball({
+    ...options,
+    poolMode: preferredPool,
+    includeOdds,
+    requireOdds,
+  });
+
+  // Strict Chile civil-date clamp when a single date was requested
+  if (options.date) {
+    result = {
+      ...result,
+      matches: filterMatchesOnChileDate(result.matches, options.date),
+    };
+  }
+
+  if (result.matches.length === 0) {
+    throw new FootballApiError(EMPTY_MATCHES_MESSAGE, "EMPTY", 404);
+  }
+
+  return {
+    matches: result.matches,
+    source: "live",
+    daysFetched: result.daysFetched,
+    poolMode: result.poolMode,
+  };
+}
+
+type OddsPageEnvelope = {
+  response?: ApiOddsFixture[];
+  errors?: ApiEnvelope<unknown>["errors"];
+  paging?: { current: number; total: number };
+};
+
+const UNAVAILABLE_NO_REAL_ODDS = "UNAVAILABLE_NO_REAL_ODDS";
+
+function oddsCacheKey(fixtureId: number, page = 1): string {
+  return `odds_fixture_${fixtureId}_p${page}`;
+}
+
+function ttlMinutesForOdds(kickoffIso: string): number | null {
+  const ymd = chileCivilDateFromKickoff(kickoffIso);
+  if (ymd && ymd < chileDateString()) return null;
+  return CACHE_TTL_MINUTES.ODDS;
+}
+
+/** UEFA / Libertadores / Primera first so the 8-call batch is well spent. */
+function oddsFetchPriority(match: Match): number {
+  const slug = match.league;
+  const name = match.leagueName.toLowerCase();
+  if (slug === "champions-league" || name.includes("champions league")) return 100;
+  if (slug === "europa-league") return 96;
+  if (slug === "conference-league") return 94;
+  if (slug === "copa-libertadores" || name.includes("libertadores")) return 92;
+  if (slug === "primera-chile" || name.includes("primera división chile"))
+    return 90;
+  if (name.includes("primera división") || name.includes("primera division"))
+    return 88;
+  if (
+    slug === "premier-league" ||
+    slug === "laliga" ||
+    slug === "serie-a" ||
+    slug === "bundesliga" ||
+    slug === "ligue-1"
+  ) {
+    return 80;
+  }
+  if (slug === "copa-sudamericana") return 72;
+  if (slug === "club-friendlies" || slug === "international-friendlies") return 8;
+  return 40;
+}
+
+function oddsFromEnvelope(
+  json: ApiEnvelope<ApiOddsFixture[]> | OddsPageEnvelope
+): MatchOdds | null {
+  if (hasApiErrors(json.errors)) return null;
+  let best: MatchOdds | null = null;
+  for (const row of json.response ?? []) {
+    const parsed = parseFixtureOdds(row);
+    if (parsed) best = parsed;
+  }
+  return best;
+}
+
+async function readCachedFixtureOdds(
+  fixtureId: number
+): Promise<MatchOdds | null> {
+  const cached = await getCachedPayload<OddsPageEnvelope>(
+    oddsCacheKey(fixtureId, 1)
+  );
+  if (!cached) return null;
+  return oddsFromEnvelope(cached);
+}
+
+async function fetchOddsForFixtureLive(
+  fixtureId: number,
+  apiKey: string,
+  ttlMinutes: number | null
+): Promise<MatchOdds | null> {
+  let best: MatchOdds | null = null;
+  let totalPages = 1;
+
+  for (let page = 1; page <= FREE_PLAN_MAX_PAGE && page <= totalPages; page++) {
+    const qs =
+      page === 1
+        ? `/odds?fixture=${fixtureId}`
+        : `/odds?fixture=${fixtureId}&page=${page}`;
+    const json = await apiGet<ApiOddsFixture[]>(qs, apiKey, {
+      ttlMinutes,
+      cacheKey: oddsCacheKey(fixtureId, page),
+    });
+
+    if (hasApiErrors(json.errors)) {
+      if (isRateLimitEnvelope(json.errors)) {
+        throw new FootballApiError(API_RATE_LIMIT_MESSAGE, "API_ERROR", 429);
+      }
+      if (page === 1) return null;
+      break;
+    }
+
+    const envelope = json as OddsPageEnvelope;
+    totalPages = Math.min(
+      FREE_PLAN_MAX_PAGE,
+      Math.max(1, envelope.paging?.total ?? 1)
+    );
+    const parsed = oddsFromEnvelope(envelope);
+    if (parsed) best = parsed;
+  }
+
+  return best;
+}
+
+async function fetchOddsForFixture(
+  fixtureId: number,
+  apiKey: string,
+  ttlMinutes: number | null
+): Promise<MatchOdds | null> {
+  try {
+    return await fetchOddsForFixtureLive(fixtureId, apiKey, ttlMinutes);
+  } catch (err) {
+    if (err instanceof FootballApiError && err.code === "AUTH") throw err;
+    if (!isRateLimitError(err)) {
+      console.warn(
+        `[api-football] odds fetch failed fixture=${fixtureId}:`,
+        err
+      );
+      return null;
+    }
+    console.warn(
+      `[api-football] 429 on odds fixture=${fixtureId} — cooling down ${RATE_LIMIT_COOLDOWN_MS / 1000}s`
+    );
+    await delay(RATE_LIMIT_COOLDOWN_MS);
+    try {
+      return await fetchOddsForFixtureLive(fixtureId, apiKey, ttlMinutes);
+    } catch (retryErr) {
+      if (retryErr instanceof FootballApiError && retryErr.code === "AUTH") {
+        throw retryErr;
+      }
+      if (isRateLimitError(retryErr)) throw retryErr;
+      console.warn(
+        `[api-football] odds retry failed fixture=${fixtureId}:`,
+        retryErr
+      );
+      return null;
+    }
+  }
+}
+
+/**
+ * Bookmaker odds for already-filtered elite fixtures only.
+ * Cache hits return immediately; uncached live calls are capped and throttled.
+ */
+async function fetchOddsForEliteFixtures(
+  matches: Match[],
+  apiKey: string
+): Promise<Map<number, MatchOdds>> {
+  const map = new Map<number, MatchOdds>();
+  const jobs = matches
+    .map((match) => {
+      const id = fixtureIdFromMatchId(match.id);
+      if (id == null) return null;
+      return {
+        id,
+        match,
+        ttl: ttlMinutesForOdds(match.kickoff),
+        priority: oddsFetchPriority(match),
+      };
+    })
+    .filter(
+      (row): row is {
+        id: number;
+        match: Match;
+        ttl: number | null;
+        priority: number;
+      } => row != null
+    )
+    .sort((a, b) => b.priority - a.priority || a.id - b.id);
+
+  const uncached: typeof jobs = [];
+
+  for (const job of jobs) {
+    const cached = await readCachedFixtureOdds(job.id);
+    if (cached) {
+      map.set(job.id, cached);
+      continue;
+    }
+    uncached.push(job);
+  }
+
+  const batch = uncached.slice(0, ODDS_UNCACHED_BATCH_CAP);
+  const skipped = uncached.length - batch.length;
+  if (skipped > 0) {
+    console.warn(
+      `[api-football] odds live batch cap=${ODDS_UNCACHED_BATCH_CAP}; skipping ${skipped} uncached fixtures this cycle`
+    );
+  }
+
+  console.log(
+    `[api-football] odds cache hits=${map.size} live=${batch.length} skipped=${skipped}`
+  );
+
+  for (const job of batch) {
+    try {
+      const odds = await fetchOddsForFixture(job.id, apiKey, job.ttl);
+      if (odds) map.set(job.id, odds);
+    } catch (err) {
+      if (err instanceof FootballApiError && err.code === "AUTH") throw err;
+      if (isRateLimitError(err)) {
+        console.warn(
+          `[api-football] 429 persists — remaining uncached fixtures marked ${UNAVAILABLE_NO_REAL_ODDS}`
+        );
+        break;
+      }
+      console.warn(
+        `[api-football] ${UNAVAILABLE_NO_REAL_ODDS} ${job.match.home.name} vs ${job.match.away.name} (${job.match.id})`
+      );
+    }
+  }
+
+  return map;
+}
+
+function attachOddsToMatches(
+  matches: Match[],
+  oddsByFixture: Map<number, MatchOdds>
+): Match[] {
+  const out: Match[] = [];
+  for (const match of matches) {
+    const fixtureId = fixtureIdFromMatchId(match.id);
+    const odds = fixtureId != null ? oddsByFixture.get(fixtureId) : undefined;
+    if (!odds || !hasLiveOdds(odds)) {
+      console.warn(
+        `[api-football] ${UNAVAILABLE_NO_REAL_ODDS} ${match.home.name} vs ${match.away.name} (${match.id})`
+      );
+      continue;
+    }
+    out.push(applyOddsImpliedStats(match, odds));
+  }
+  return out;
+}
+
+async function fetchFromApiFootball(
+  options: FetchMatchesOptions
+): Promise<{
+  matches: Match[];
+  daysFetched: number;
+  poolMode: "core" | "expanded" | "wide";
+}> {
+  await ensureStaleCachePurged();
+  const apiKey = resolveApiKey();
+  // Chile civil day → fetch ±1 API dates so UTC-shifted evening kickoffs are not missed
+  const dates = options.date
+    ? chileDateApiWindow(options.date)
+    : dateStrings(options.daysAhead ?? 3);
+  const targetChileDate = options.date ?? null;
+  const poolMode = options.poolMode ?? "expanded";
+  // Always the strict elite whitelist — poolMode is cosmetic for callers
+  const includeOdds = options.includeOdds ?? true;
+  const requireOdds = options.requireOdds ?? includeOdds;
+
+  const { fixtures: raw, successfulDays, fatalError } =
+    await fetchRawApiFixturesForDates(dates);
+
   // All dates blocked by plan/window → empty pool (caller may treat as EMPTY).
   // Only throw 502 when we had a real upstream failure.
   if (successfulDays === 0) {
@@ -686,15 +1134,14 @@ async function fetchFromApiFootball(
   }
 
   if (includeOdds) {
-    const oddsMaps = await Promise.all(
-      dates.map((d) => fetchOddsMapForDate(d, apiKey))
-    );
-    const merged = new Map<number, MatchOdds>();
-    for (const m of oddsMaps) {
-      for (const [id, odds] of m) merged.set(id, odds);
-    }
-    results = attachOddsToMatches(results, merged, requireOdds);
+    const oddsByFixture = await fetchOddsForEliteFixtures(results, apiKey);
+    results = attachOddsToMatches(results, oddsByFixture);
   }
+
+  // Injuries / H2H / venue splits (cache-first; tiny live budget under Free plan)
+  results = await enrichMatchContextFeatures(results, (path, opts) =>
+    apiGet(path, apiKey, opts)
+  );
 
   results.sort(
     (a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime()
@@ -704,7 +1151,6 @@ async function fetchFromApiFootball(
     results = results.filter((m) => options.leagues!.includes(m.league));
   }
 
-  // Optional strict mode only — default keeps fixtures and lets Poisson fill odds
   if (requireOdds) {
     results = results.filter((m) => hasLiveOdds(m.odds));
   }

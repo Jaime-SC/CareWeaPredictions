@@ -3,9 +3,11 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { contextBadgeLabels } from "@/lib/context-engine";
 import type { MatchPrediction } from "@/lib/types";
 import { formatKickoff, formatOdds, formatPercent } from "@/lib/utils";
-import { Plus, TrendingUp } from "lucide-react";
+import { ChevronDown, ChevronUp, MapPin, Plus, TrendingUp, User } from "lucide-react";
+import { useState } from "react";
 
 interface MatchCardProps {
   prediction: MatchPrediction;
@@ -14,9 +16,11 @@ interface MatchCardProps {
 
 export function MatchCard({ prediction, onAddPick }: MatchCardProps) {
   const { match, expectedGoals, bestSafePick, markets } = prediction;
+  const [detailOpen, setDetailOpen] = useState(false);
   const topMarkets = [...markets]
     .sort((a, b) => b.modelProbability - a.modelProbability)
     .slice(0, 3);
+  const badges = contextBadgeLabels(prediction.contextFlags).slice(0, 5);
 
   return (
     <Card className="transition hover:border-slate-700">
@@ -32,6 +36,20 @@ export function MatchCard({ prediction, onAddPick }: MatchCardProps) {
             <p className="mt-1 text-xs text-slate-400">
               {formatKickoff(match.kickoff)}
             </p>
+            {badges.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {badges.map((label) => (
+                  <Badge
+                    key={label}
+                    variant="info"
+                    className="max-w-[14rem] truncate font-normal"
+                    title={label}
+                  >
+                    {label}
+                  </Badge>
+                ))}
+              </div>
+            )}
           </div>
           {bestSafePick && (
             <Badge variant="success">Safe Pick</Badge>
@@ -85,6 +103,62 @@ export function MatchCard({ prediction, onAddPick }: MatchCardProps) {
             </div>
           ))}
         </div>
+
+        <button
+          type="button"
+          onClick={() => setDetailOpen((v) => !v)}
+          className="flex w-full items-center justify-between rounded-md border border-slate-800/80 px-3 py-2 text-left text-xs text-slate-400 transition hover:border-slate-700 hover:text-slate-200"
+        >
+          <span>Detalle del partido</span>
+          {detailOpen ? (
+            <ChevronUp className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5" />
+          )}
+        </button>
+
+        {detailOpen && (
+          <div className="space-y-2 rounded-md border border-slate-800/60 bg-slate-950/40 px-3 py-2.5 text-xs text-slate-300">
+            <p className="flex items-start gap-2">
+              <User className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
+              <span>
+                <span className="text-slate-500">Árbitro: </span>
+                {match.referee?.trim() || "No informado"}
+              </span>
+            </p>
+            <p className="flex items-start gap-2">
+              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
+              <span>
+                <span className="text-slate-500">Estadio: </span>
+                {match.venue?.trim() || "No informado"}
+              </span>
+            </p>
+            {(match.home.injuries?.length || match.away.injuries?.length) ? (
+              <div className="space-y-1 border-t border-slate-800/80 pt-2">
+                <p className="text-slate-500">Bajas conocidas</p>
+                {(match.home.injuries ?? []).slice(0, 3).map((inj) => (
+                  <p key={`h-${inj.player}`}>
+                    {match.home.shortName}: {inj.player}
+                    {inj.role !== "unknown" ? ` (${inj.role})` : ""}
+                  </p>
+                ))}
+                {(match.away.injuries ?? []).slice(0, 3).map((inj) => (
+                  <p key={`a-${inj.player}`}>
+                    {match.away.shortName}: {inj.player}
+                    {inj.role !== "unknown" ? ` (${inj.role})` : ""}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+            {prediction.contextNotes && prediction.contextNotes.length > 0 && (
+              <ul className="list-inside list-disc space-y-0.5 border-t border-slate-800/80 pt-2 text-slate-400">
+                {prediction.contextNotes.slice(0, 6).map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         {bestSafePick && onAddPick && (
           <Button

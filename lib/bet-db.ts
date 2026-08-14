@@ -100,8 +100,11 @@ function fromDbTicketStatus(status: string): BetStatus {
 }
 
 function strategyFromMode(mode: string): StrategyMode {
-  return mode.toLowerCase().includes("divers") ||
-    mode.toLowerCase().includes("fun")
+  const key = mode.toLowerCase();
+  if (key.includes("monopoly") || key.includes("asimet")) {
+    return "monopoly-asymmetry";
+  }
+  return key.includes("divers") || key.includes("fun")
     ? "daily-fun"
     : "daily-safe";
 }

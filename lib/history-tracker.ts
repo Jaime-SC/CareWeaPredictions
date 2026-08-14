@@ -69,6 +69,12 @@ export interface HistorySummary {
   pending: number;
   voided: number;
   completed: number;
+  /** Settled tickets in modo Segura / daily-safe */
+  safeWon: number;
+  safeLost: number;
+  /** Settled tickets in modo Diversión / combinada lotería */
+  lotteryWon: number;
+  lotteryLost: number;
 }
 
 export interface BreakdownItem {
@@ -91,13 +97,17 @@ function canUseStorage(): boolean {
 }
 
 export function modeFromStrategy(strategyMode: StrategyMode): BetMode {
-  return strategyMode.includes("fun") ? "Diversion" : "Segura";
+  return strategyMode.includes("fun") || strategyMode.includes("monopoly")
+    ? "Diversion"
+    : "Segura";
 }
 
 export function timeframeFromStrategy(
   strategyMode: StrategyMode
 ): BetTimeframe {
-  return strategyMode.includes("fun") ? "Combinada" : "Individual";
+  return strategyMode.includes("fun") || strategyMode.includes("monopoly")
+    ? "Combinada"
+    : "Individual";
 }
 
 /** Extract API-Football fixture id from `live-{id}` match ids. */
@@ -157,6 +167,12 @@ function inferMarketFromLabel(label: string): MarketType {
     return "dnb_away";
   }
   if (l.includes("sin empate") || l.includes("dnb")) return "dnb_home";
+  if ((l.includes("local") || l.includes("home")) && l.includes("1.5")) {
+    return "home_over_1_5";
+  }
+  if ((l.includes("visita") || l.includes("away")) && l.includes("1.5")) {
+    return "away_over_1_5";
+  }
   if (l.includes("2.5")) return "over_2_5";
   if (l.includes("1.5")) return "over_1_5";
   if (l.includes("0.5") && l.includes("under")) return "under_3_5";
@@ -294,17 +310,7 @@ export function addBetFromParlay(
   const strategyMode = parlay.strategyMode ?? "daily-fun";
   const existing = loadBets();
 
-  // Same day + strategy is only a duplicate when odds and leg count match
-  // (allows registering a manually filtered ticket vs. the full generated one).
-  const duplicate = existing.find(
-    (b) =>
-      b.date === date &&
-      b.strategyMode === strategyMode &&
-      b.timeframe === "Combinada" &&
-      b.status === "pending" &&
-      b.legs.length === parlay.legs.length &&
-      Math.abs(b.totalOdds - parlay.totalOdds) < 0.001
-  );
+  const duplicate = findExistingParlay(parlay, existing);
   if (duplicate) return duplicate;
 
   const legs = mapLegs(parlay.legs);
@@ -344,6 +350,73 @@ export interface SinglePickInput {
   odds: number;
 }
 
+/** Stable key for an individual pick (fixture + market), independent of `live-` prefix. */
+export function individualPickKey(matchId: string, market: string): string {
+  const fixtureId = parseFixtureId(matchId);
+  return `${fixtureId > 0 ? fixtureId : matchId}:${market}`;
+}
+
+function sameFixture(aMatchId: string, aFixtureId: number, bMatchId: string): boolean {
+  const aId = aFixtureId > 0 ? aFixtureId : parseFixtureId(aMatchId);
+  const bId = parseFixtureId(bMatchId);
+  if (aId > 0 && bId > 0) return aId === bId;
+  return aMatchId === bMatchId;
+}
+
+/** Find an already-registered individual ticket for this match + market (any status). */
+export function findExistingSinglePick(
+  pick: { matchId: string; market: MarketType },
+  bets: HistoryBet[] = loadBets()
+): HistoryBet | undefined {
+  return bets.find((b) => {
+    if (b.timeframe !== "Individual" || b.legs.length !== 1) return false;
+    const leg = b.legs[0];
+    return (
+      leg.market === pick.market &&
+      sameFixture(leg.matchId, leg.fixtureId, pick.matchId)
+    );
+  });
+}
+
+export function collectRegisteredIndividualPickKeys(
+  picks: Array<{ matchId: string; market: MarketType }>,
+  bets: HistoryBet[] = loadBets()
+): Set<string> {
+  const keys = new Set<string>();
+  for (const pick of picks) {
+    if (findExistingSinglePick(pick, bets)) {
+      keys.add(individualPickKey(pick.matchId, pick.market));
+    }
+  }
+  return keys;
+}
+
+function parlayLegsMatch(
+  a: Array<{ matchId: string; market: string }>,
+  b: Array<{ matchId: string; market: string }>
+): boolean {
+  if (a.length < 2 || a.length !== b.length) return false;
+  const wanted = new Set(a.map((l) => individualPickKey(l.matchId, l.market)));
+  if (wanted.size !== a.length) return false;
+  const got = new Set(b.map((l) => individualPickKey(l.matchId, l.market)));
+  if (got.size !== wanted.size) return false;
+  for (const key of wanted) {
+    if (!got.has(key)) return false;
+  }
+  return true;
+}
+
+/** Find a combinada already in history with the same fixture+market legs (any status). */
+export function findExistingParlay(
+  parlay: { legs: Array<{ matchId: string; market: MarketType }> },
+  bets: HistoryBet[] = loadBets()
+): HistoryBet | undefined {
+  if (parlay.legs.length < 2) return undefined;
+  return bets.find(
+    (b) => b.legs.length >= 2 && parlayLegsMatch(parlay.legs, b.legs)
+  );
+}
+
 /** Register one individual safe pick as its own history ticket (1U stake). */
 export function addBetFromSinglePick(
   pick: SinglePickInput,
@@ -354,14 +427,7 @@ export function addBetFromSinglePick(
   const existing = loadBets();
   const fixtureId = parseFixtureId(pick.matchId);
 
-  const duplicate = existing.find(
-    (b) =>
-      b.status === "pending" &&
-      b.timeframe === "Individual" &&
-      b.legs.length === 1 &&
-      b.legs[0].fixtureId === fixtureId &&
-      b.legs[0].market === pick.market
-  );
+  const duplicate = findExistingSinglePick(pick, existing);
   if (duplicate) return duplicate;
 
   const { homeTeam, awayTeam } = splitMatchLabel(pick.matchLabel);
@@ -441,6 +507,41 @@ export function clearHistory(): void {
   localStorage.removeItem(BACKTEST_FLAG_KEY);
 }
 
+export function isLotteryBet(bet: Pick<HistoryBet, "mode" | "strategyMode">): boolean {
+  return (
+    bet.mode === "Diversion" ||
+    String(bet.strategyMode).includes("fun") ||
+    String(bet.strategyMode).includes("monopoly")
+  );
+}
+
+export function countSettledByStrategy(bets: HistoryBet[]): {
+  safeWon: number;
+  safeLost: number;
+  lotteryWon: number;
+  lotteryLost: number;
+} {
+  let safeWon = 0;
+  let safeLost = 0;
+  let lotteryWon = 0;
+  let lotteryLost = 0;
+
+  for (const bet of bets) {
+    if (bet.status !== "won" && bet.status !== "lost") continue;
+    const lottery = isLotteryBet(bet);
+    if (bet.status === "won") {
+      if (lottery) lotteryWon += 1;
+      else safeWon += 1;
+    } else if (lottery) {
+      lotteryLost += 1;
+    } else {
+      safeLost += 1;
+    }
+  }
+
+  return { safeWon, safeLost, lotteryWon, lotteryLost };
+}
+
 /**
  * Performance (Win Rate, ROI, P&L) uses only Liquidados (WON / LOST).
  * Pending tickets are counted separately and never enter those formulas.
@@ -453,6 +554,7 @@ export function computeSummary(bets: HistoryBet[]): HistorySummary {
       payout: bet.potentialReturn,
     }))
   );
+  const byStrategy = countSettledByStrategy(bets);
 
   let totalReturned = 0;
   let legsWon = 0;
@@ -487,6 +589,7 @@ export function computeSummary(bets: HistoryBet[]): HistorySummary {
     pending: perf.pending,
     voided: perf.voided,
     completed: perf.settled,
+    ...byStrategy,
   };
 }
 
@@ -519,17 +622,70 @@ export function computeBankrollSeries(bets: HistoryBet[]): BankrollPoint[] {
   }));
 }
 
+const SPANISH_MARKET_LABELS: Record<string, string> = {
+  home: "Local gana (1)",
+  draw: "Empate (X)",
+  away: "Visitante gana (2)",
+  "1x": "Doble oportunidad 1X",
+  x2: "Doble oportunidad X2",
+  "12": "Doble oportunidad 12",
+  over_0_5: "Más de 0.5 goles",
+  over_1_5: "Más de 1.5 goles",
+  over_2_5: "Más de 2.5 goles",
+  under_3_5: "Menos de 3.5 goles",
+  under_4_5: "Menos de 4.5 goles",
+  home_scores: "Local marca gol",
+  away_scores: "Visitante marca gol",
+  home_over_1_5: "Local más de 1.5 goles",
+  away_over_1_5: "Visitante más de 1.5 goles",
+  dnb_home: "Apuesta sin empate (local)",
+  dnb_away: "Apuesta sin empate (visitante)",
+};
+
+/** Translate leftover English bookmaker jargon so the Mercado column stays Spanish. */
+function toSpanishMarketLabel(raw: string): string {
+  let s = raw.trim();
+  if (!s) return s;
+
+  const plusGoals = s.match(/^\+(\d+(?:\.\d+)?)\s*goles?$/i);
+  if (plusGoals) return `Más de ${plusGoals[1]} goles`;
+
+  const replacements: Array<[RegExp, string]> = [
+    [/\bboth teams to score\b/gi, "Ambos marcan"],
+    [/\bboth teams score\b/gi, "Ambos marcan"],
+    [/\bdraw no bet\b/gi, "Apuesta sin empate"],
+    [/\bdouble chance\b/gi, "Doble oportunidad"],
+    [/\bmatch winner\b/gi, "Ganador del partido"],
+    [/\bhome win\b/gi, "Local gana"],
+    [/\baway win\b/gi, "Visitante gana"],
+    [/\bhome scores\b/gi, "Local marca gol"],
+    [/\baway scores\b/gi, "Visitante marca gol"],
+    [/\bover\s+/gi, "Más de "],
+    [/\bunder\s+/gi, "Menos de "],
+    [/\bgoals\b/gi, "goles"],
+    [/\bgoal\b/gi, "gol"],
+  ];
+
+  for (const [pattern, replacement] of replacements) {
+    s = s.replace(pattern, replacement);
+  }
+
+  return s.replace(/\s+/g, " ").trim();
+}
+
 export function marketGroupLabel(market: MarketType | string, label?: string): string {
-  const m = String(market);
-  if (m === "1x" || m === "x2") return "Doble Oportunidad";
-  if (m === "dnb_home" || m === "dnb_away") return "Apuesta sin empate";
-  if (m === "over_1_5") return "+1.5 Goles";
-  if (m === "over_2_5") return "+2.5 Goles";
-  if (m === "over_0_5") return "+0.5 Goles";
-  if (m === "under_3_5" || m === "under_4_5") return "Under Goles";
-  if (m === "home_scores" || m === "away_scores") return "Equipo marca";
-  if (label) return label;
-  return m;
+  const key = String(market ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+
+  if (key && SPANISH_MARKET_LABELS[key]) return SPANISH_MARKET_LABELS[key];
+
+  const fromLabel = label?.trim();
+  if (fromLabel) return toSpanishMarketLabel(fromLabel);
+
+  if (key) return toSpanishMarketLabel(key.replace(/_/g, " "));
+  return "Mercado";
 }
 
 /** Per-leg accuracy by market (real evaluated matches only). */

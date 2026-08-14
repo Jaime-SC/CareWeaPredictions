@@ -13,12 +13,17 @@ export const CACHE_TTL_MINUTES = {
   ROSTER: 720,
   /** Account status ping */
   STATUS: 5,
+  /** Per-fixture bookmaker odds (6–12h; 12h keeps parlay regen on CACHE HIT) */
+  ODDS: 720,
 } as const;
 
 /** Free-plan style daily budget shown in the UI. */
 export const API_DAILY_QUOTA_LIMIT = Number(
   process.env.API_FOOTBALL_DAILY_LIMIT ?? 100
 );
+
+/** API-Football free plans reject Page > 3. */
+export const FREE_PLAN_MAX_PAGE = 3;
 
 export type FetchWithCacheOptions<T> = {
   apiKey?: string;
@@ -158,9 +163,6 @@ export async function syncApiQuotaFromHeaders(
 ): Promise<ApiQuotaSnapshot | null> {
   const parsed = parseApiFootballQuotaHeaders(headers);
   if (!parsed) {
-    console.warn(
-      "[api-cache] Missing x-ratelimit-requests-* headers; quota not updated"
-    );
     return null;
   }
 
@@ -274,6 +276,22 @@ export async function fetchWithCache<T>(
   const cacheKey =
     options.cacheKey ?? buildCacheKey(normalizedEndpoint, params);
 
+  const pageParam = params.page;
+  const pageNum =
+    pageParam === undefined || pageParam === null || pageParam === ""
+      ? null
+      : Number(pageParam);
+  if (
+    pageNum != null &&
+    Number.isFinite(pageNum) &&
+    pageNum > FREE_PLAN_MAX_PAGE
+  ) {
+    console.warn(
+      `[api-cache] blocked page=${pageNum} (free-plan cap ${FREE_PLAN_MAX_PAGE}) key=${cacheKey}`
+    );
+    return { response: [], paging: { current: pageNum, total: FREE_PLAN_MAX_PAGE } } as T;
+  }
+
   if (!options.forceRefresh) {
     const hit = await getCachedPayload<T>(cacheKey);
     if (hit !== null) {
@@ -309,8 +327,14 @@ export async function fetchWithCache<T>(
     throw err;
   }
 
-  // Official dashboard metrics — never local ++; cache hits never reach here
-  const quota = await syncApiQuotaFromHeaders(res.headers);
+  // Official dashboard metrics — only on HTTP 200 with real quota headers
+  let quota: ApiQuotaSnapshot | null = null;
+  if (res.status === 200) {
+    const parsed = parseApiFootballQuotaHeaders(res.headers);
+    if (parsed) {
+      quota = await syncApiQuotaFromHeaders(res.headers);
+    }
+  }
   console.log(
     `[CACHE MISS] Fetched key=${cacheKey} status=${res.status}` +
       (quota

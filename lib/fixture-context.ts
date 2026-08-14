@@ -3,7 +3,9 @@
  * Never issues live API-Football requests.
  */
 import { prisma } from "./db";
-import type { Match, TeamStats } from "./types";
+import type { Match, TeamInjury, TeamStats } from "./types";
+import { classifyInjuryRole } from "./context-engine";
+import { fixtureIdFromMatchId } from "./odds-mapper";
 
 type FormResult = "W" | "D" | "L";
 
@@ -249,19 +251,19 @@ function buildTeamIndex(fixtures: LocalFixtureRow[]): Map<string, TeamHistory> {
       );
     }
 
-    if (home.homeScored.length < 12) {
+    if (home.homeScored.length < 5) {
       home.homeScored.push(fx.homeGoals);
       home.homeConceded.push(fx.awayGoals);
     }
-    if (away.awayScored.length < 12) {
+    if (away.awayScored.length < 5) {
       away.awayScored.push(fx.awayGoals);
       away.awayConceded.push(fx.homeGoals);
     }
-    if (home.allScored.length < 12) {
+    if (home.allScored.length < 5) {
       home.allScored.push(fx.homeGoals);
       home.allConceded.push(fx.awayGoals);
     }
-    if (away.allScored.length < 12) {
+    if (away.allScored.length < 5) {
       away.allScored.push(fx.awayGoals);
       away.allConceded.push(fx.homeGoals);
     }
@@ -310,27 +312,234 @@ function enrichTeam(team: TeamStats, hist: TeamHistory | null): TeamStats {
   };
 }
 
+function h2hForMatch(
+  fixtures: LocalFixtureRow[],
+  homeName: string,
+  awayName: string,
+  kickoffIso: string
+): Match["h2h"] | null {
+  const kickoff = Date.parse(kickoffIso);
+  let homeWins = 0;
+  let draws = 0;
+  let awayWins = 0;
+  let goalSum = 0;
+  let n = 0;
+  let last4HomeWins = 0;
+  let last4AwayWins = 0;
+  let last4Draws = 0;
+  let last4N = 0;
+
+  for (const fx of fixtures) {
+    if (Number.isFinite(kickoff) && fx.matchDate.getTime() >= kickoff) continue;
+    const sameVenue =
+      namesEqual(fx.homeTeam, homeName) && namesEqual(fx.awayTeam, awayName);
+    const reversed =
+      namesEqual(fx.homeTeam, awayName) && namesEqual(fx.awayTeam, homeName);
+    if (!sameVenue && !reversed) continue;
+
+    n += 1;
+    goalSum += fx.homeGoals + fx.awayGoals;
+
+    let homeWon = false;
+    let awayWon = false;
+    let draw = false;
+    if (sameVenue) {
+      if (fx.homeGoals > fx.awayGoals) homeWon = true;
+      else if (fx.homeGoals === fx.awayGoals) draw = true;
+      else awayWon = true;
+    } else if (fx.awayGoals > fx.homeGoals) {
+      homeWon = true;
+    } else if (fx.homeGoals === fx.awayGoals) {
+      draw = true;
+    } else {
+      awayWon = true;
+    }
+
+    if (homeWon) homeWins += 1;
+    else if (awayWon) awayWins += 1;
+    else draws += 1;
+
+    if (last4N < 4) {
+      last4N += 1;
+      if (homeWon) last4HomeWins += 1;
+      else if (awayWon) last4AwayWins += 1;
+      else last4Draws += 1;
+    }
+  }
+
+  if (n === 0) return null;
+  return {
+    homeWins,
+    draws,
+    awayWins,
+    avgGoals: Number((goalSum / n).toFixed(3)),
+    last4HomeWins,
+    last4AwayWins,
+    last4Draws,
+  };
+}
+
+type CachedInjuryEnvelope = {
+  response?: Array<{
+    player?: {
+      name?: string;
+      type?: string;
+      reason?: string;
+      position?: string;
+    };
+    team?: { name?: string };
+    fixture?: { id?: number };
+  }>;
+};
+
+type InjuryIndex = {
+  byTeam: Map<string, TeamInjury[]>;
+  byFixtureTeam: Map<string, TeamInjury[]>;
+};
+
+function injuryKey(fixtureId: number, teamName: string): string {
+  return `${fixtureId}|${normalizeName(teamName)}`;
+}
+
+function toTeamInjury(raw: {
+  name?: string;
+  type?: string;
+  reason?: string;
+  position?: string;
+}): TeamInjury | null {
+  const player = raw.name?.trim();
+  if (!player) return null;
+  const role = classifyInjuryRole(
+    [raw.position, raw.type, raw.reason].filter(Boolean).join(" ")
+  );
+  const reason = (raw.reason ?? raw.type ?? "").toLowerCase();
+  const doubtful = /doubt|questionable|probable|duda/.test(reason);
+  return {
+    player,
+    role,
+    reason: raw.reason ?? raw.type,
+    status: doubtful ? "doubtful" : "out",
+  };
+}
+
+async function loadInjuriesFromApiCache(): Promise<InjuryIndex> {
+  const byTeam = new Map<string, TeamInjury[]>();
+  const byFixtureTeam = new Map<string, TeamInjury[]>();
+
+  try {
+    const rows = await prisma.cachedApiResponse.findMany({
+      where: {
+        OR: [
+          { id: { startsWith: "injuries" } },
+          { endpoint: { contains: "injuries" } },
+        ],
+      },
+      select: { payload: true },
+      take: 80,
+    });
+
+    for (const row of rows) {
+      let parsed: CachedInjuryEnvelope;
+      try {
+        parsed = JSON.parse(row.payload) as CachedInjuryEnvelope;
+      } catch {
+        continue;
+      }
+      for (const item of parsed.response ?? []) {
+        const teamName = item.team?.name;
+        if (!teamName) continue;
+        const injury = toTeamInjury(item.player ?? {});
+        if (!injury) continue;
+
+        const teamKey = normalizeName(teamName);
+        const list = byTeam.get(teamKey) ?? [];
+        if (!list.some((x) => x.player === injury.player)) list.push(injury);
+        byTeam.set(teamKey, list);
+
+        const fixtureId = item.fixture?.id;
+        if (fixtureId && Number.isFinite(fixtureId)) {
+          const fk = injuryKey(fixtureId, teamName);
+          const fxList = byFixtureTeam.get(fk) ?? [];
+          if (!fxList.some((x) => x.player === injury.player)) fxList.push(injury);
+          byFixtureTeam.set(fk, fxList);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[fixture-context] injury cache read failed:", err);
+  }
+
+  return { byTeam, byFixtureTeam };
+}
+
+function attachInjuries(
+  team: TeamStats,
+  match: Match,
+  index: InjuryIndex
+): TeamStats {
+  if (team.injuries && team.injuries.length > 0) return team;
+
+  const fixtureId = fixtureIdFromMatchId(match.id);
+  if (fixtureId != null) {
+    const keyed = index.byFixtureTeam.get(injuryKey(fixtureId, team.name));
+    if (keyed?.length) return { ...team, injuries: keyed };
+  }
+
+  const key = normalizeName(team.name);
+  let found = index.byTeam.get(key);
+  if (!found) {
+    for (const [k, list] of index.byTeam) {
+      if (namesEqual(k, key)) {
+        found = list;
+        break;
+      }
+    }
+  }
+  if (!found?.length) return team;
+  return { ...team, injuries: found };
+}
+
 /**
- * Overlay venue splits, recent form and last-match timestamps using only
- * SQLite MatchFixture rows + CachedApiResponse payloads (zero live HTTP).
+ * Overlay venue splits, recent form, H2H, injuries and last-match timestamps
+ * using only SQLite MatchFixture rows + CachedApiResponse payloads (zero live HTTP).
  */
 export async function enrichMatchesFromLocalData(
   matches: Match[]
 ): Promise<Match[]> {
   if (matches.length === 0) return matches;
 
-  const [dbRows, cacheRows] = await Promise.all([
+  const [dbRows, cacheRows, injuryIndex] = await Promise.all([
     loadFinishedFromMatchFixture(),
     loadFinishedFromApiCache(),
+    loadInjuriesFromApiCache(),
   ]);
   const fixtures = dedupeFixtures([...dbRows, ...cacheRows]);
-  if (fixtures.length === 0) return matches;
+  if (fixtures.length === 0 && injuryIndex.byTeam.size === 0) return matches;
 
   const index = buildTeamIndex(fixtures);
 
-  return matches.map((match) => ({
-    ...match,
-    home: enrichTeam(match.home, findHistory(index, match.home.name)),
-    away: enrichTeam(match.away, findHistory(index, match.away.name)),
-  }));
+  return matches.map((match) => {
+    const h2h = h2hForMatch(
+      fixtures,
+      match.home.name,
+      match.away.name,
+      match.kickoff
+    );
+    const home = attachInjuries(
+      enrichTeam(match.home, findHistory(index, match.home.name)),
+      match,
+      injuryIndex
+    );
+    const away = attachInjuries(
+      enrichTeam(match.away, findHistory(index, match.away.name)),
+      match,
+      injuryIndex
+    );
+    return {
+      ...match,
+      home,
+      away,
+      h2h: h2h ?? match.h2h,
+    };
+  });
 }

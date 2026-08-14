@@ -8,6 +8,7 @@ const LEGACY_PREFIXES = ["parleylab_mode_", "parleylab_parlay_"];
 const MODE_STORAGE_SLUG: Record<StrategyMode, string> = {
   "daily-safe": "safe",
   "daily-fun": "fun",
+  "monopoly-asymmetry": "monopoly",
 };
 
 export interface SafePickItem {
@@ -20,6 +21,11 @@ export interface SafePickItem {
   odds: number;
   modelProbability: number;
   edge: number;
+  contextFlags?: string[];
+  contextNotes?: string[];
+  confidenceModifier?: number;
+  referee?: string | null;
+  venue?: string | null;
 }
 
 export interface StoredParlayPayload {
@@ -99,7 +105,9 @@ export function loadStoredParlay(
   date = chileDateString()
 ): StoredParlayPayload | null {
   if (!canUseStorage()) return null;
-  if (strategyMode !== "daily-fun") return null;
+  if (strategyMode !== "daily-fun" && strategyMode !== "monopoly-asymmetry") {
+    return null;
+  }
 
   try {
     const raw = localStorage.getItem(builderStorageKey(strategyMode, date));

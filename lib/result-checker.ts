@@ -81,6 +81,10 @@ export function evaluateMarket(
       return homeGoals > 0 ? "won" : "lost";
     case "away_scores":
       return awayGoals > 0 ? "won" : "lost";
+    case "home_over_1_5":
+      return homeGoals > 1.5 ? "won" : "lost";
+    case "away_over_1_5":
+      return awayGoals > 1.5 ? "won" : "lost";
     case "dnb_home":
       if (homeGoals === awayGoals) return "void";
       return homeGoals > awayGoals ? "won" : "lost";

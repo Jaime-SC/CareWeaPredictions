@@ -79,6 +79,11 @@ export async function GET(request: NextRequest) {
             impliedProbability: m.impliedProbability,
             edge: m.edge,
             isSafePick: m.isSafePick,
+            contextFlags: m.contextFlags ?? p.contextFlags,
+            contextNotes: p.contextNotes,
+            confidenceModifier: m.confidenceModifier,
+            referee: p.match.referee ?? null,
+            venue: p.match.venue ?? null,
           }))
       )
       .sort((a, b) => b.modelProbability - a.modelProbability);

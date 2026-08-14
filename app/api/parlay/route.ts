@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   fetchUpcomingMatches,
+  fetchMonopolyMatchPool,
   filterMatchesOnChileDate,
   FootballApiError,
   EMPTY_MATCHES_MESSAGE,
@@ -10,6 +11,7 @@ import {
   FUN_MAX_DAYS_AHEAD,
   getStrategyPreset,
   isFunStrategy,
+  isMonopolyStrategy,
   resolveStrategyMode,
 } from "@/lib/parlay-defaults";
 import { enrichMatchesFromLocalData } from "@/lib/fixture-context";
@@ -22,6 +24,10 @@ import {
 } from "@/lib/parlay-generator";
 import type { Match } from "@/lib/types";
 import { chileDateOffset, chileDateString } from "@/lib/utils";
+import {
+  getWeeklyDateRange,
+  INSUFFICIENT_MATCHES_MESSAGE,
+} from "@/lib/monopoly-engine";
 
 /**
  * One-click fun accumulator generator for a specific date.
@@ -57,7 +63,7 @@ async function fetchWideDay(date: string): Promise<{
     date,
     poolMode: "expanded",
     includeOdds: true,
-    requireOdds: false,
+    requireOdds: true,
   });
   const scoped = filterMatchesOnChileDate(result.matches, date);
   const enriched = await enrichMatchesFromLocalData(scoped);
@@ -174,6 +180,49 @@ async function loadParlayMatchPool(
   };
 }
 
+async function buildMonopolyParlayResponse() {
+  const week = getWeeklyDateRange();
+  const strategyMode = "monopoly-asymmetry" as const;
+  const preset = getStrategyPreset(strategyMode);
+  const { matches: rawMatches, daysFetched } = await fetchMonopolyMatchPool();
+  const matches = await enrichMatchesFromLocalData(rawMatches);
+
+  const parlay = generateParlay(matches, { ...preset });
+  const clipboard = formatParlayClipboard(parlay, "CLP", week.fromYmd);
+  const insufficient =
+    parlay.status === "INSUFFICIENT_MATCHES" ||
+    parlay.legs.length < (preset.minLegs ?? 2);
+
+  return NextResponse.json({
+    success: true,
+    status: insufficient ? "INSUFFICIENT_MATCHES" : "OK",
+    source: "live",
+    date: week.fromYmd,
+    datesUsed: week.dates,
+    week: {
+      from: week.from,
+      to: week.to,
+      fromYmd: week.fromYmd,
+      toYmd: week.toYmd,
+    },
+    singleDayLocked: false,
+    dateSelectionMode: "FULL_WEEK_AUTO",
+    config: preset,
+    daysAhead: 6,
+    daysFetched: daysFetched ?? null,
+    poolMode: "monopoly",
+    matchPoolSize: matches.length,
+    error: insufficient ? INSUFFICIENT_MATCHES_MESSAGE : undefined,
+    parlay: {
+      ...parlay,
+      fillNotice: insufficient
+        ? INSUFFICIENT_MATCHES_MESSAGE
+        : parlay.fillNotice,
+    },
+    clipboard: insufficient ? "" : clipboard,
+  });
+}
+
 async function buildAutoParlayResponse(
   strategyModeRaw: unknown,
   dateRaw: unknown,
@@ -181,6 +230,9 @@ async function buildAutoParlayResponse(
 ) {
   try {
     const strategyMode = resolveStrategyMode(strategyModeRaw);
+    if (isMonopolyStrategy(strategyMode)) {
+      return buildMonopolyParlayResponse();
+    }
     if (!isFunStrategy(strategyMode)) {
       return NextResponse.json(
         {

@@ -11,9 +11,14 @@ import {
 } from "@/components/ui/card";
 import {
   addBetFromSinglePick,
+  collectRegisteredIndividualPickKeys,
+  findExistingSinglePick,
+  individualPickKey,
   loadBets,
   saveBets,
+  type HistoryBet,
 } from "@/lib/history-tracker";
+import { contextBadgeLabels } from "@/lib/context-engine";
 import type { SafePickItem } from "@/lib/parlay-storage";
 import {
   formatExplicitBetLine,
@@ -37,7 +42,7 @@ import {
   Target,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 interface SafePicksListProps {
   picks: SafePickItem[];
@@ -69,13 +74,45 @@ export function SafePicksList({
   }, [picks]);
 
   function pickKey(p: SafePickItem) {
-    return `${p.matchId}:${p.market}`;
+    return individualPickKey(p.matchId, p.market);
   }
 
+  useEffect(() => {
+    setRegisteredKeys(collectRegisteredIndividualPickKeys(picks));
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/stats/summary", { cache: "no-store" });
+        const data = (await res.json()) as {
+          success?: boolean;
+          tickets?: HistoryBet[];
+        };
+        if (!res.ok || !data.success || cancelled) return;
+        const tickets = data.tickets ?? [];
+        if (tickets.length === 0) return;
+        const fromDb = collectRegisteredIndividualPickKeys(picks, tickets);
+        setRegisteredKeys((prev) => {
+          const next = new Set(prev);
+          for (const key of fromDb) next.add(key);
+          return next;
+        });
+      } catch {
+        // localStorage already applied
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [picks]);
+
   async function handleRegister(pick: SafePickItem) {
+    const already = findExistingSinglePick(pick);
     const local = addBetFromSinglePick(pick, UNIT_STAKE, date);
     if (!local) return;
     setRegisteredKeys((prev) => new Set(prev).add(pickKey(pick)));
+    if (already) return;
 
     try {
       const res = await fetch("/api/bets/record", {
@@ -220,6 +257,17 @@ export function SafePicksList({
                               <Badge variant="info">
                                 Edge {formatPercent(pick.edge)}
                               </Badge>
+                              {contextBadgeLabels(pick.contextFlags)
+                                .slice(0, 3)
+                                .map((label) => (
+                                  <Badge
+                                    key={label}
+                                    variant="default"
+                                    className="font-normal"
+                                  >
+                                    {label}
+                                  </Badge>
+                                ))}
                               {valueBadge && (
                                 <Badge variant="warning" className="gap-1">
                                   <Flame className="h-3 w-3 text-amber-400" />
@@ -241,7 +289,7 @@ export function SafePicksList({
                                 </>
                               ) : (
                                 <>
-                                  <Pin className="h-3.5 w-3.5 text-sky-400" />
+                                  <Pin className="h-3.5 w-3.5" />
                                   Registrar Pick en Historial
                                 </>
                               )}
