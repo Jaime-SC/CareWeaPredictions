@@ -591,6 +591,7 @@ export function generateParlay(
     // Date-picker input is ignored upstream in /api/parlay.
     return buildMonopolyParlay(matches, {
       stake: config.stake ?? preset.stake,
+      ignoreRotationFilter: config.ignoreRotationFilter === true,
     });
   }
 

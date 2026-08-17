@@ -79,6 +79,7 @@ export default function BuilderPage() {
   const [emptyMessage, setEmptyMessage] = useState<string | null>(null);
   const [generated, setGenerated] = useState(false);
   const [fromCache, setFromCache] = useState(false);
+  const [ignoreRotationFilter, setIgnoreRotationFilter] = useState(false);
 
   const preset = getStrategyPreset(strategyMode);
   const isSafe = isSafeStrategy(strategyMode);
@@ -112,7 +113,11 @@ export default function BuilderPage() {
 
     const cacheDate = isMonopoly ? monopolyWeekKey : selectedDate;
     const cached = loadStoredParlay(strategyMode, cacheDate);
-    if (cached) {
+    if (
+      cached &&
+      (!isMonopoly ||
+        (cached.parlay.ignoreRotationFilter === true) === ignoreRotationFilter)
+    ) {
       setParlay(cached.parlay);
       setClipboard(cached.clipboard);
       setSafePicks([]);
@@ -125,7 +130,14 @@ export default function BuilderPage() {
     setSafePicks([]);
     setGenerated(false);
     setFromCache(false);
-  }, [strategyMode, selectedDate, isSafe, isMonopoly, monopolyWeekKey]);
+  }, [
+    strategyMode,
+    selectedDate,
+    isSafe,
+    isMonopoly,
+    monopolyWeekKey,
+    ignoreRotationFilter,
+  ]);
 
   const loadSafePicks = useCallback(
     async (opts?: { force?: boolean }) => {
@@ -279,7 +291,10 @@ export default function BuilderPage() {
 
       if (!force) {
         const cached = loadStoredParlay("monopoly-asymmetry", monopolyWeekKey);
-        if (cached) {
+        if (
+          cached &&
+          (cached.parlay.ignoreRotationFilter === true) === ignoreRotationFilter
+        ) {
           setParlay(cached.parlay);
           setClipboard(cached.clipboard);
           setGenerated(true);
@@ -301,6 +316,7 @@ export default function BuilderPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             strategyMode: "MONOPOLY_ASYMMETRY",
+            ignoreRotationFilter,
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -352,7 +368,7 @@ export default function BuilderPage() {
         setLoading(false);
       }
     },
-    [monopolyWeekKey]
+    [monopolyWeekKey, ignoreRotationFilter]
   );
 
   const runPrimaryAction = useCallback(
@@ -442,7 +458,12 @@ export default function BuilderPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6 pb-8">
-            <ModeSelector value={strategyMode} onChange={setStrategyMode} />
+            <ModeSelector
+              value={strategyMode}
+              onChange={setStrategyMode}
+              ignoreRotationFilter={ignoreRotationFilter}
+              onIgnoreRotationFilterChange={setIgnoreRotationFilter}
+            />
 
             {showGenerateCard && (
               <div className="flex flex-col items-center gap-3 pt-2">

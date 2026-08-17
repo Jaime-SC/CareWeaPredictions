@@ -90,6 +90,8 @@ const FLAG_NOTES: Record<string, string> = {
   HIGH_RISK_DERBY: "Clásico de alto riesgo",
   FATIGUE_HOME: "Fatiga del local (calendario apretado)",
   FATIGUE_AWAY: "Fatiga del visitante (calendario apretado)",
+  NEARBY_INTERNATIONAL_MATCH_PRESENT:
+    "Partido continental cercano — riesgo de rotación (filtro desactivado)",
 };
 
 /** Short UI badges (match cards / parlay legs). */
@@ -115,6 +117,8 @@ export const CONTEXT_BADGE_LABELS: Record<string, string> = {
   HIGH_RISK_DERBY: "Clásico",
   FATIGUE_HOME: "Fatiga Local",
   FATIGUE_AWAY: "Fatiga Visita",
+  NEARBY_INTERNATIONAL_MATCH_PRESENT:
+    "⚠️ RIESGO DE ROTACIÓN (Filtro Desactivado)",
 };
 
 /** Friendlies / pre-season: raise eligibility floor from 80% → 85%. */

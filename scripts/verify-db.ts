@@ -1,5 +1,5 @@
 /**
- * Smoke: record a ticket and read stats from SQLite.
+ * Smoke: record a ticket and read stats from Neon (PostgreSQL).
  * Usage: npx tsx scripts/verify-db.ts
  */
 import { buildStatsSummary, clearAllBets, recordBet } from "../lib/bet-db";

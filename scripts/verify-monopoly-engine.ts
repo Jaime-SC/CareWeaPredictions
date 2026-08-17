@@ -14,8 +14,8 @@ import {
 import { generateParlay } from "../lib/parlay-generator";
 import type { Match, MatchOdds } from "../lib/types";
 
-const JOHOR = 2939;
-const SUPER_LEAGUE = 349;
+const HILAL = 2931;
+const PRO_LEAGUE = 307;
 const UCL = 2;
 
 function fx(
@@ -31,17 +31,17 @@ function fx(
     date,
     league: { id: leagueId, name: leagueName },
     teams: {
-      home: { id: homeId, name: homeId === JOHOR ? "Johor" : `T${homeId}` },
-      away: { id: awayId, name: awayId === JOHOR ? "Johor" : `T${awayId}` },
+      home: { id: homeId, name: homeId === HILAL ? "Al Hilal" : `T${homeId}` },
+      away: { id: awayId, name: awayId === HILAL ? "Al Hilal" : `T${awayId}` },
     },
   };
 }
 
 const domestic = fx(
   10,
-  SUPER_LEAGUE,
-  "Super League",
-  JOHOR,
+  PRO_LEAGUE,
+  "Pro League",
+  HILAL,
   99,
   "2026-08-14T12:00:00.000Z"
 );
@@ -49,7 +49,7 @@ const ucl = fx(
   11,
   UCL,
   "UEFA Champions League",
-  JOHOR,
+  HILAL,
   50,
   "2026-08-16T18:00:00.000Z"
 );
@@ -57,7 +57,7 @@ const cup = fx(
   12,
   350,
   "FA Cup",
-  JOHOR,
+  HILAL,
   88,
   "2026-08-14T12:00:00.000Z"
 );
@@ -97,14 +97,14 @@ function monopolyMatch(opts: {
   return {
     id: `live-${opts.id}`,
     league: "other-domestic",
-    leagueName: opts.leagueName ?? "Super League",
-    leagueId: String(opts.leagueId ?? SUPER_LEAGUE),
+    leagueName: opts.leagueName ?? "Pro League",
+    leagueId: String(opts.leagueId ?? PRO_LEAGUE),
     kickoff: "2026-08-14T12:00:00.000Z",
     nearbyTeamFixtures: opts.nearby ?? [domestic],
     home: {
       id: opts.homeId,
-      name: homeDom ? "Johor Darul Ta'zim" : "Rival",
-      shortName: homeDom ? "JDT" : "RIV",
+      name: homeDom ? "Al Hilal" : "Rival",
+      shortName: homeDom ? "HIL" : "RIV",
       form: ["W", "W", "W", "W", "W"],
       goalsScoredAvg: homeDom ? 3.4 : 0.45,
       goalsConcededAvg: homeDom ? 0.35 : 2.6,
@@ -139,10 +139,13 @@ function monopolyMatch(opts: {
 const safeDomestic = isSafeMonopolyFixture(domestic, [domestic]);
 const cupRejected = isSafeMonopolyFixture(cup, [cup]);
 const rotationRejected = isSafeMonopolyFixture(domestic, [domestic, ucl]);
+const rotationBypassed = isSafeMonopolyFixture(domestic, [domestic, ucl], {
+  ignoreRotationFilter: true,
+});
 
 const homeMatch = monopolyMatch({
   id: 10,
-  homeId: JOHOR,
+  homeId: HILAL,
   awayId: 99,
   isHomeMonopoly: true,
   nearby: [domestic],
@@ -165,10 +168,10 @@ const awayPick = resolveMonopolyMarket(awayMatch, false);
 const three = [
   monopolyMatch({
     id: 31,
-    homeId: JOHOR,
+    homeId: HILAL,
     awayId: 91,
     isHomeMonopoly: true,
-    nearby: [fx(31, SUPER_LEAGUE, "Super League", JOHOR, 91, "2026-08-14T12:00:00.000Z")],
+    nearby: [fx(31, PRO_LEAGUE, "Pro League", HILAL, 91, "2026-08-14T12:00:00.000Z")],
   }),
   monopolyMatch({
     id: 32,
@@ -233,6 +236,24 @@ function mockFunMatch(id: number): Match {
   };
 }
 
+const rotationMatch = monopolyMatch({
+  id: 10,
+  homeId: HILAL,
+  awayId: 99,
+  isHomeMonopoly: true,
+  nearby: [domestic, ucl],
+});
+const rotationPool = [rotationMatch, three[1], three[2]];
+const rotationFiltered = buildMonopolyParlay(rotationPool, { stake: 1.5 });
+const rotationIgnored = buildMonopolyParlay(rotationPool, {
+  stake: 1.5,
+  ignoreRotationFilter: true,
+});
+const viaGenerator = generateParlay(rotationPool, {
+  ...STRATEGY_PRESETS["monopoly-asymmetry"],
+  ignoreRotationFilter: true,
+});
+
 const funParlay = generateParlay(
   Array.from({ length: 20 }, (_, i) => mockFunMatch(i + 1)),
   STRATEGY_PRESETS["daily-fun"]
@@ -246,6 +267,20 @@ const checks = {
   domesticSafe: safeDomestic.isSafe === true,
   cupRejected: cupRejected.reason === "NOT_DOMESTIC_LEAGUE",
   rotationRejected: rotationRejected.reason === "ROTATION_RISK",
+  rotationBypassSafe: rotationBypassed.isSafe === true,
+  rotationBypassWarning:
+    rotationBypassed.warning === "NEARBY_INTERNATIONAL_MATCH_PRESENT",
+  rotationFilteredDropsHilal: !rotationFiltered.legs.some((l) =>
+    l.matchLabel.includes("Al Hilal")
+  ),
+  rotationIgnoredKeepsHilal: rotationIgnored.legs.some(
+    (l) =>
+      l.matchLabel.includes("Al Hilal") &&
+      l.warning === "NEARBY_INTERNATIONAL_MATCH_PRESENT"
+  ),
+  generatorPassThrough: viaGenerator.legs.some(
+    (l) => l.warning === "NEARBY_INTERNATIONAL_MATCH_PRESENT"
+  ),
   homeMarket:
     homePick?.market === "home" || homePick?.market === "home_over_1_5",
   homeFloor: (homePick?.modelProbability ?? 0) >= 0.82,

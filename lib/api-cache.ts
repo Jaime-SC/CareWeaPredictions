@@ -46,7 +46,7 @@ function sanitizeKeyPart(value: string): string {
 }
 
 /**
- * Build a stable SQLite cache id from endpoint + params.
+ * Build a stable cache id from endpoint + params.
  * Example: fixtures + {date:2026-08-12} → fixtures_date_2026-08-12
  */
 export function buildCacheKey(

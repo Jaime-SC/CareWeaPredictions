@@ -11,14 +11,19 @@
     "lint": "eslint",
     "smoke": "tsx scripts/smoke-test.ts",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:http": "tsx scripts/apply-neon-migrations.ts",
+    "db:migrate:dev": "prisma migrate dev",
     "db:push": "prisma db push",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "db:import-sqlite": "tsx scripts/migrate-sqlite-to-neon.ts"
   },
   "prisma": {
     "schema": "prisma/schema.prisma"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
+    "@prisma/adapter-neon": "^5.22.0",
     "@prisma/client": "^5.22.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -30,13 +35,15 @@
     "react-dom": "19.2.8",
     "recharts": "^3.10.1",
     "simple-statistics": "^7.10.0",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ws": "^8.18.1",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
     "prisma": "^5.22.0",

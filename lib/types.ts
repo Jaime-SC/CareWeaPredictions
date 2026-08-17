@@ -187,6 +187,8 @@ export interface ParlayLeg {
   contextNotes?: string[];
   referee?: string | null;
   venue?: string | null;
+  /** Set when monopoly anti-rotation was bypassed and a continental fixture is nearby. */
+  warning?: "NEARBY_INTERNATIONAL_MATCH_PRESENT";
 }
 
 export interface ParlayConfig {
@@ -204,6 +206,8 @@ export interface ParlayConfig {
    */
   targetLegCount?: number;
   strategyMode?: StrategyMode;
+  /** Monopoly: skip ±4 day continental rotation check when true. */
+  ignoreRotationFilter?: boolean;
 }
 
 export interface GeneratedParlay {
@@ -224,4 +228,6 @@ export interface GeneratedParlay {
   fillNotice?: string;
   /** Structured builder status (monopoly mode uses INSUFFICIENT_MATCHES). */
   status?: ParlayStatus;
+  /** Monopoly: whether the ticket was generated with the rotation filter off. */
+  ignoreRotationFilter?: boolean;
 }

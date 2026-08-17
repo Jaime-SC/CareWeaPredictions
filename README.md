@@ -17,7 +17,7 @@ Motor de predicción basado en modelos de **Poisson** y análisis estadístico p
 - 🎲 **Generador de combinadas de alta cuota (Modo Diversión)** — parlays automáticos en un clic.
 - 🛡️ **Selección de Picks Individuales de Alta Probabilidad (Modo Seguro)** — mercados con probabilidad elevada y cuotas controladas.
 - 📊 **Panel de estadísticas dinámico** — verificación automática de marcadores reales.
-- 💾 **Persistencia local por fecha** — el estado del día se conserva en el navegador.
+- 💾 **Persistencia en Neon (PostgreSQL)** — historial, stats y predicciones se comparten entre PCs.
 
 ---
 
@@ -51,16 +51,35 @@ npm install
 
 ### 3. Configurar variables de entorno
 
-Copia el ejemplo y añade tu API key de [API-Football](https://www.api-football.com/):
+Copia el ejemplo a `.env` (Prisma CLI) y `.env.local` (Next.js):
 
 ```bash
+cp .env.example .env
 cp .env.example .env.local
 ```
 
-Edita `.env.local`:
+1. Crea un proyecto en [Neon](https://console.neon.tech) (plan Free).
+2. En **Connect**, copia las URLs **pooled** (`DATABASE_URL`, host con `-pooler`) y **direct** (`DIRECT_URL`).
+3. Pega las mismas dos URLs en `.env` y `.env.local`.
+4. Añade tu API key de [API-Football](https://www.api-football.com/) en `.env.local`:
 
 ```env
 FOOTBALL_API_KEY=tu_api_key_aqui
+```
+
+5. Crea las tablas y, si vienes de SQLite local, importa el historial:
+
+```bash
+npx prisma generate
+npm run db:migrate
+npm run db:import-sqlite
+```
+
+Si la red bloquea el puerto 5432 (común en oficinas), usa HTTPS:
+
+```bash
+npm run db:migrate:http
+npm run db:import-sqlite
 ```
 
 ### 4. Iniciar el servidor de desarrollo
@@ -99,11 +118,14 @@ Un mercado se considera “safe” cuando cumple:
 ## 📜 Scripts disponibles
 
 ```bash
-npm run dev      # Servidor de desarrollo
-npm run build    # Build de producción
-npm run start    # Servidor de producción
-npm run lint     # ESLint
-npm run smoke    # Smoke tests
+npm run dev              # Servidor de desarrollo
+npm run build            # Build de producción
+npm run start            # Servidor de producción
+npm run lint             # ESLint
+npm run smoke            # Smoke tests
+npm run db:migrate       # Aplicar migraciones Prisma en Neon (puerto 5432)
+npm run db:migrate:http  # Igual, por HTTPS si 5432 está bloqueado
+npm run db:import-sqlite # Copiar historial local (prisma/dev.db) a Neon
 ```
 
 ---

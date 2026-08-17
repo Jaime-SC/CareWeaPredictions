@@ -41,7 +41,8 @@ export async function POST(request: NextRequest) {
   return buildAutoParlayResponse(
     body?.strategyMode,
     body?.date,
-    body?.multiDay === true || body?.allowMultiDay === true
+    body?.multiDay === true || body?.allowMultiDay === true,
+    body?.ignoreRotationFilter === true
   );
 }
 
@@ -51,7 +52,14 @@ export async function GET(request: NextRequest) {
   const multiDay =
     request.nextUrl.searchParams.get("multiDay") === "true" ||
     request.nextUrl.searchParams.get("allowMultiDay") === "true";
-  return buildAutoParlayResponse(strategyMode, date, multiDay);
+  const ignoreRotationFilter =
+    request.nextUrl.searchParams.get("ignoreRotationFilter") === "true";
+  return buildAutoParlayResponse(
+    strategyMode,
+    date,
+    multiDay,
+    ignoreRotationFilter
+  );
 }
 
 async function fetchWideDay(date: string): Promise<{
@@ -180,14 +188,14 @@ async function loadParlayMatchPool(
   };
 }
 
-async function buildMonopolyParlayResponse() {
+async function buildMonopolyParlayResponse(ignoreRotationFilter: boolean) {
   const week = getWeeklyDateRange();
   const strategyMode = "monopoly-asymmetry" as const;
   const preset = getStrategyPreset(strategyMode);
   const { matches: rawMatches, daysFetched } = await fetchMonopolyMatchPool();
   const matches = await enrichMatchesFromLocalData(rawMatches);
 
-  const parlay = generateParlay(matches, { ...preset });
+  const parlay = generateParlay(matches, { ...preset, ignoreRotationFilter });
   const clipboard = formatParlayClipboard(parlay, "CLP", week.fromYmd);
   const insufficient =
     parlay.status === "INSUFFICIENT_MATCHES" ||
@@ -207,7 +215,7 @@ async function buildMonopolyParlayResponse() {
     },
     singleDayLocked: false,
     dateSelectionMode: "FULL_WEEK_AUTO",
-    config: preset,
+    config: { ...preset, ignoreRotationFilter },
     daysAhead: 6,
     daysFetched: daysFetched ?? null,
     poolMode: "monopoly",
@@ -226,12 +234,13 @@ async function buildMonopolyParlayResponse() {
 async function buildAutoParlayResponse(
   strategyModeRaw: unknown,
   dateRaw: unknown,
-  allowMultiDay: boolean
+  allowMultiDay: boolean,
+  ignoreRotationFilter: boolean
 ) {
   try {
     const strategyMode = resolveStrategyMode(strategyModeRaw);
     if (isMonopolyStrategy(strategyMode)) {
-      return buildMonopolyParlayResponse();
+      return buildMonopolyParlayResponse(ignoreRotationFilter);
     }
     if (!isFunStrategy(strategyMode)) {
       return NextResponse.json(

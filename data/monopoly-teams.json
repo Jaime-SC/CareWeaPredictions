@@ -1,11 +1,10 @@
 [
-  { "teamId": 2939, "teamName": "Johor Darul Ta'zim", "leagueId": 349, "country": "Malaysia" },
-  { "teamId": 1000, "teamName": "Crvena Zvezda", "leagueId": 286, "country": "Serbia" },
-  { "teamId": 643, "teamName": "Qarabağ", "leagueId": 361, "country": "Azerbaijan" },
-  { "teamId": 1029, "teamName": "Al Ahly", "leagueId": 233, "country": "Egypt" },
-  { "teamId": 1040, "teamName": "Sheriff Tiraspol", "leagueId": 329, "country": "Moldova" },
-  { "teamId": 562, "teamName": "Ludogorets", "leagueId": 172, "country": "Bulgaria" },
-  { "teamId": 2931, "teamName": "Al Hilal", "leagueId": 307, "country": "Saudi Arabia" },
-  { "teamId": 339, "teamName": "The Strongest", "leagueId": 296, "country": "Bolivia" },
-  { "teamId": 983, "teamName": "Mamelodi Sundowns", "leagueId": 288, "country": "South Africa" }
+  { "teamId": 1000, "teamName": "Crvena Zvezda", "leagueId": 286, "leagueName": "Super Liga", "country": "Serbia" },
+  { "teamId": 643, "teamName": "Qarabağ", "leagueId": 361, "leagueName": "Premyer Liqa", "country": "Azerbaijan" },
+  { "teamId": 1029, "teamName": "Al Ahly", "leagueId": 233, "leagueName": "Premier League", "country": "Egypt" },
+  { "teamId": 1040, "teamName": "Sheriff Tiraspol", "leagueId": 329, "leagueName": "Super Liga", "country": "Moldova" },
+  { "teamId": 562, "teamName": "Ludogorets", "leagueId": 172, "leagueName": "First League", "country": "Bulgaria" },
+  { "teamId": 2931, "teamName": "Al Hilal", "leagueId": 307, "leagueName": "Pro League", "country": "Saudi Arabia" },
+  { "teamId": 339, "teamName": "The Strongest", "leagueId": 296, "leagueName": "División Profesional", "country": "Bolivia" },
+  { "teamId": 983, "teamName": "Mamelodi Sundowns", "leagueId": 288, "leagueName": "Premier Soccer League", "country": "South Africa" }
 ]

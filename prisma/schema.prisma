@@ -1,10 +1,12 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 /// Fixture snapshot for analytics & result reconciliation
@@ -85,7 +87,7 @@ model CachedApiResponse {
 model ApiQuotaDaily {
   /// YYYY-MM-DD (Chile)
   date       String   @id
-  /// Official used (= limit - remaining); kept as callCount for SQLite compat
+  /// Official used (= limit - remaining)
   callCount  Int      @default(0)
   /// x-ratelimit-requests-limit
   limit      Int      @default(100)

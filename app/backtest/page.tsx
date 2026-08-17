@@ -74,7 +74,7 @@ export default function BacktestPage() {
         </h1>
         <p className="mt-2 text-base leading-relaxed text-slate-200">
           Simula el algoritmo activo (piso 80%, 15 legs) sobre fixtures
-          finalizados en SQLite.
+          finalizados en la base de datos.
         </p>
       </header>
 
@@ -189,7 +189,7 @@ export default function BacktestPage() {
             <CardContent>
               {result.tickets.length === 0 ? (
                 <p className="text-sm text-slate-200">
-                  No hay suficientes fixtures finalizados en SQLite para esta
+                  No hay suficientes fixtures finalizados en la base de datos para esta
                   ventana. Registra apuestas o liquida resultados primero.
                 </p>
               ) : (

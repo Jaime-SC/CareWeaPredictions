@@ -36,6 +36,7 @@ export type MonopolyTeam = {
   teamId: number;
   teamName: string;
   leagueId: number;
+  leagueName: string;
   country: string;
 };
 
@@ -47,11 +48,22 @@ export type MonopolyRejectReason =
   | "ROTATION_RISK"
   | "BELOW_PROBABILITY_FLOOR";
 
+export const NEARBY_INTERNATIONAL_MATCH_PRESENT =
+  "NEARBY_INTERNATIONAL_MATCH_PRESENT" as const;
+
+export type MonopolyRotationWarning = typeof NEARBY_INTERNATIONAL_MATCH_PRESENT;
+
+export interface MonopolyOptions {
+  ignoreRotationFilter?: boolean;
+  poissonProbability?: number;
+}
+
 export type MonopolySafetyResult = {
   isSafe: boolean;
   reason?: MonopolyRejectReason;
   team: MonopolyTeam | null;
   isHomeTeam: boolean;
+  warning?: MonopolyRotationWarning;
 };
 
 const TEAMS: MonopolyTeam[] = (monopolyTeamsJson as MonopolyTeam[]).map(
@@ -59,6 +71,7 @@ const TEAMS: MonopolyTeam[] = (monopolyTeamsJson as MonopolyTeam[]).map(
     teamId: Number(row.teamId),
     teamName: String(row.teamName),
     leagueId: Number(row.leagueId),
+    leagueName: String(row.leagueName ?? ""),
     country: String(row.country),
   })
 );
@@ -154,14 +167,40 @@ function toMonopolyFixture(match: Match): MonopolyFixture {
   };
 }
 
+function hasNearbyContinentalFixture(
+  fixture: MonopolyFixture,
+  teamFixturesWindow: MonopolyFixture[],
+  teamId: number
+): boolean {
+  const centerYmd = chileYmdFromIso(fixture.date);
+
+  for (const other of teamFixturesWindow) {
+    if (other.id === fixture.id) continue;
+    const otherYmd = chileYmdFromIso(other.date);
+    if (!fixtureInWindow(otherYmd, centerYmd)) continue;
+
+    const involvesTeam =
+      other.teams.home.id === teamId || other.teams.away.id === teamId;
+    if (!involvesTeam) continue;
+
+    if (isContinentalOrInternational(other.league.id, other.league.name)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * Domestic-only + anti-rotation gate.
- * Probability floor is applied when `poissonProbability` is provided.
+ * Probability floor is applied when `options.poissonProbability` is provided.
+ * When `options.ignoreRotationFilter` is true, nearby continental fixtures
+ * do not reject the match (ROTATION_RISK is bypassed) and a warning is set.
  */
 export function isSafeMonopolyFixture(
   fixture: MonopolyFixture,
   teamFixturesWindow: MonopolyFixture[],
-  poissonProbability?: number
+  options?: MonopolyOptions
 ): MonopolySafetyResult {
   const side = findMonopolySide(fixture);
   if (!side) {
@@ -182,28 +221,22 @@ export function isSafeMonopolyFixture(
     };
   }
 
-  const centerYmd = chileYmdFromIso(fixture.date);
-  const teamId = side.team.teamId;
+  const nearbyContinental = hasNearbyContinentalFixture(
+    fixture,
+    teamFixturesWindow,
+    side.team.teamId
+  );
 
-  for (const other of teamFixturesWindow) {
-    if (other.id === fixture.id) continue;
-    const otherYmd = chileYmdFromIso(other.date);
-    if (!fixtureInWindow(otherYmd, centerYmd)) continue;
-
-    const involvesTeam =
-      other.teams.home.id === teamId || other.teams.away.id === teamId;
-    if (!involvesTeam) continue;
-
-    if (isContinentalOrInternational(other.league.id, other.league.name)) {
-      return {
-        isSafe: false,
-        reason: "ROTATION_RISK",
-        team: side.team,
-        isHomeTeam: side.isHomeTeam,
-      };
-    }
+  if (nearbyContinental && options?.ignoreRotationFilter !== true) {
+    return {
+      isSafe: false,
+      reason: "ROTATION_RISK",
+      team: side.team,
+      isHomeTeam: side.isHomeTeam,
+    };
   }
 
+  const poissonProbability = options?.poissonProbability;
   if (
     typeof poissonProbability === "number" &&
     poissonProbability < MONOPOLY_MIN_PROBABILITY
@@ -220,6 +253,10 @@ export function isSafeMonopolyFixture(
     isSafe: true,
     team: side.team,
     isHomeTeam: side.isHomeTeam,
+    warning:
+      nearbyContinental && options?.ignoreRotationFilter === true
+        ? NEARBY_INTERNATIONAL_MATCH_PRESENT
+        : undefined,
   };
 }
 
@@ -371,8 +408,13 @@ function applyDominancePriors(match: Match, isHomeTeam: boolean): Match {
   };
 }
 
-function toLeg(match: Match, pick: MarketPrediction): ParlayLeg {
-  const flags = pick.contextFlags ?? [];
+function toLeg(
+  match: Match,
+  pick: MarketPrediction,
+  warning?: MonopolyRotationWarning
+): ParlayLeg {
+  const flags = [...(pick.contextFlags ?? [])];
+  if (warning && !flags.includes(warning)) flags.push(warning);
   return {
     matchId: match.id,
     matchLabel: `${match.home.name} vs ${match.away.name}`,
@@ -387,20 +429,27 @@ function toLeg(match: Match, pick: MarketPrediction): ParlayLeg {
     contextNotes: notesForFlags(flags),
     referee: match.referee ?? null,
     venue: match.venue ?? null,
+    warning,
   };
 }
 
-export function collectMonopolyLegs(matches: Match[]): {
+export function collectMonopolyLegs(
+  matches: Match[],
+  options?: MonopolyOptions
+): {
   legs: ParlayLeg[];
   rejected: Array<{ matchId: string; reason: MonopolyRejectReason }>;
 } {
   const legs: ParlayLeg[] = [];
   const rejected: Array<{ matchId: string; reason: MonopolyRejectReason }> = [];
+  const safetyOptions: MonopolyOptions = {
+    ignoreRotationFilter: options?.ignoreRotationFilter === true,
+  };
 
   for (const raw of matches) {
     const fixture = toMonopolyFixture(raw);
     const window = raw.nearbyTeamFixtures ?? [fixture];
-    const structural = isSafeMonopolyFixture(fixture, window);
+    const structural = isSafeMonopolyFixture(fixture, window, safetyOptions);
     if (!structural.isSafe || !structural.team) {
       rejected.push({
         matchId: raw.id,
@@ -416,11 +465,10 @@ export function collectMonopolyLegs(matches: Match[]): {
       continue;
     }
 
-    const withProb = isSafeMonopolyFixture(
-      fixture,
-      window,
-      pick.modelProbability
-    );
+    const withProb = isSafeMonopolyFixture(fixture, window, {
+      ...safetyOptions,
+      poissonProbability: pick.modelProbability,
+    });
     if (!withProb.isSafe) {
       rejected.push({
         matchId: raw.id,
@@ -429,7 +477,7 @@ export function collectMonopolyLegs(matches: Match[]): {
       continue;
     }
 
-    legs.push(toLeg(match, pick));
+    legs.push(toLeg(match, pick, withProb.warning ?? structural.warning));
   }
 
   legs.sort(
@@ -442,7 +490,8 @@ function finalizeMonopoly(
   legs: ParlayLeg[],
   stake: number,
   status: ParlayStatus,
-  fillNotice?: string
+  fillNotice?: string,
+  ignoreRotationFilter?: boolean
 ): GeneratedParlay {
   const totalOdds = legs.reduce((acc, l) => acc * l.odds, 1);
   const jointProbability = legs.reduce(
@@ -475,6 +524,7 @@ function finalizeMonopoly(
         : undefined,
     fillNotice,
     status,
+    ignoreRotationFilter: ignoreRotationFilter === true,
   };
 }
 
@@ -483,18 +533,20 @@ function finalizeMonopoly(
  */
 export function buildMonopolyParlay(
   matches: Match[],
-  config: Pick<ParlayConfig, "stake">
+  config: Pick<ParlayConfig, "stake" | "ignoreRotationFilter">
 ): GeneratedParlay {
   const stake = config.stake > 0 ? config.stake : 1.5;
+  const ignoreRotationFilter = config.ignoreRotationFilter === true;
   const week = getWeeklyDateRange();
-  const { legs } = collectMonopolyLegs(matches);
+  const { legs } = collectMonopolyLegs(matches, { ignoreRotationFilter });
 
   if (legs.length < MONOPOLY_MIN_LEGS) {
     return finalizeMonopoly(
       [],
       stake,
       "INSUFFICIENT_MATCHES",
-      INSUFFICIENT_MATCHES_MESSAGE
+      INSUFFICIENT_MATCHES_MESSAGE,
+      ignoreRotationFilter
     );
   }
 
@@ -502,6 +554,7 @@ export function buildMonopolyParlay(
     legs,
     stake,
     "OK",
-    `Cartelera semanal ${week.fromYmd} → ${week.toYmd}: ${legs.length} monopolios domésticos (sin tope)`
+    `Cartelera semanal ${week.fromYmd} → ${week.toYmd}: ${legs.length} monopolios domésticos (sin tope)`,
+    ignoreRotationFilter
   );
 }

@@ -661,6 +661,7 @@ async function fetchRawApiFixturesForDates(dates: string[]): Promise<{
 /**
  * Team fixtures in [fromYmd, toYmd] (civil dates). Used by monopoly anti-rotation
  * and the Monday–Sunday weekly scan.
+ * API-Football requires `season` on `/fixtures?team=&from=&to=`.
  */
 async function fetchTeamApiFixtures(
   teamId: number,
@@ -668,24 +669,19 @@ async function fetchTeamApiFixtures(
   toYmd: string
 ): Promise<ApiFixture[]> {
   const apiKey = resolveApiKey();
+  const currentYear = new Date().getFullYear();
   try {
     const json = await apiGet<ApiFixture[]>(
-      `/fixtures?team=${teamId}&from=${fromYmd}&to=${toYmd}&timezone=${encodeURIComponent(CHILE_TIMEZONE)}`,
+      `/fixtures?team=${teamId}&from=${fromYmd}&to=${toYmd}&season=${currentYear}&timezone=${encodeURIComponent(CHILE_TIMEZONE)}`,
       apiKey,
       {
         ttlMinutes: CACHE_TTL_MINUTES.TODAY_PENDING,
-        cacheKey: `fixtures_team_${teamId}_from_${fromYmd}_to_${toYmd}`,
+        cacheKey: `fixtures_team_${teamId}_from_${fromYmd}_to_${toYmd}_season_${currentYear}`,
       }
     );
     if (hasApiErrors(json.errors)) {
-      if (isPlanOrDateRestriction(json.errors)) {
-        console.warn(
-          `[api-football] team window ${teamId} ${fromYmd}→${toYmd} no disponible en el plan`
-        );
-        return [];
-      }
       console.warn(
-        `[api-football] team window ${teamId} errors:`,
+        `[api-football] team window ${teamId} ${fromYmd}→${toYmd} season=${currentYear} envelope errors — skipping cache/process:`,
         json.errors
       );
       return [];

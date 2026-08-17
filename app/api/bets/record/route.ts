@@ -4,7 +4,7 @@ import type { StrategyMode } from "@/lib/types";
 
 /**
  * POST /api/bets/record
- * Persist an accumulator or single-pick ticket into SQLite via Prisma.
+ * Persist an accumulator or single-pick ticket into Postgres via Prisma.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
       duplicate: result.duplicate,
       message: result.duplicate
         ? "Ticket pendiente equivalente ya registrado."
-        : "Apuesta registrada en SQLite.",
+        : "Apuesta registrada en la base de datos.",
     });
   } catch (error) {
     console.error("[api/bets/record]", error);

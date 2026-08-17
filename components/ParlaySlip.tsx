@@ -231,7 +231,7 @@ export function ParlaySlip({
       return;
     }
 
-    // Keep localStorage for result-checker UX; primary persistence is SQLite
+    // Keep localStorage for result-checker UX; primary persistence is Neon
     const local = addBetFromParlay(activeParlay, date);
 
     try {
@@ -262,7 +262,7 @@ export function ParlaySlip({
           typeof data.error === "string"
             ? data.error
             : local
-              ? "Guardada localmente; falló SQLite."
+              ? "Guardada localmente; falló la base de datos."
               : "No se pudo registrar la apuesta."
         );
         if (local) setRegistered(true);
@@ -272,10 +272,10 @@ export function ParlaySlip({
       setRegisterMsg(
         data.duplicate
           ? "Ticket ya registrado en la base de datos."
-          : "Apuesta guardada en SQLite + historial."
+          : "Apuesta guardada en la base de datos + historial."
       );
 
-      // Align localStorage id with SQLite ticket id for outcome sync
+      // Align localStorage id with Neon ticket id for outcome sync
       if (local && typeof data.ticketId === "string") {
         const bets = loadBets().map((b) =>
           b.id === local.id ? { ...b, id: data.ticketId as string } : b
@@ -513,6 +513,12 @@ function LegRow({
 }) {
   const valueBadge = formatValueBadge(leg.edge ?? 0);
   const explicit = getExplicitPickFromLeg(leg);
+  const rotationWarning =
+    leg.warning === "NEARBY_INTERNATIONAL_MATCH_PRESENT" ||
+    Boolean(leg.contextFlags?.includes("NEARBY_INTERNATIONAL_MATCH_PRESENT"));
+  const otherFlags = (leg.contextFlags ?? []).filter(
+    (flag) => flag !== "NEARBY_INTERNATIONAL_MATCH_PRESENT"
+  );
 
   return (
     <li
@@ -559,9 +565,16 @@ function LegRow({
           {formatKickoffDayLabel(leg.kickoff)} CL · modelo{" "}
           {formatPercent(leg.modelProbability)}
         </p>
-        {contextBadgeLabels(leg.contextFlags).length > 0 && (
+        {rotationWarning && (
+          <div className="mt-1">
+            <Badge variant="warning" className="px-1.5 py-0 text-[10px] font-semibold">
+              ⚠️ RIESGO DE ROTACIÓN (Filtro Desactivado)
+            </Badge>
+          </div>
+        )}
+        {contextBadgeLabels(otherFlags).length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
-            {contextBadgeLabels(leg.contextFlags)
+            {contextBadgeLabels(otherFlags)
               .slice(0, 3)
               .map((label) => (
                 <Badge

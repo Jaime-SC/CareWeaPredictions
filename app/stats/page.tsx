@@ -260,7 +260,7 @@ export default function StatsPage() {
       const data = (await res.json()) as StatsApiPayload;
       if (res.ok && data.success) {
         const tickets = data.tickets ?? [];
-        // Prefer SQLite; keep localStorage if DB still empty (pre-migration)
+        // Prefer Neon/Postgres; keep localStorage if DB still empty (pre-migration)
         if (tickets.length > 0) {
           setBets(tickets);
           replaceBets(tickets);
@@ -470,7 +470,7 @@ export default function StatsPage() {
   async function handleClear() {
     if (
       !window.confirm(
-        "¿Limpiar todo el historial (SQLite + local)? Esta acción no se puede deshacer."
+        "¿Limpiar todo el historial (base de datos + local)? Esta acción no se puede deshacer."
       )
     ) {
       return;
@@ -642,7 +642,7 @@ export default function StatsPage() {
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <Badge variant="info">Estadísticas</Badge>
-            <Badge variant="success">Prisma · SQLite</Badge>
+            <Badge variant="success">Prisma · Neon</Badge>
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-slate-50">
             Analytics de entrenamiento
@@ -725,7 +725,7 @@ export default function StatsPage() {
         <Card className="border-dashed border-slate-700">
           <CardContent className="flex flex-col items-center gap-4 px-6 py-14 text-center">
             <p className="max-w-lg text-sm leading-relaxed text-slate-300">
-              Aún no hay tickets en SQLite. Genera una combinada y pulsa
+              Aún no hay tickets en la base de datos. Genera una combinada y pulsa
               &apos;Registrar Apuesta&apos; para alimentar el motor de
               analytics.
             </p>
@@ -875,7 +875,7 @@ export default function StatsPage() {
                 <div className="space-y-3">
                   <p className="text-sm text-slate-300">
                     Vista agregada por mercado (sin desglose diario aún — se
-                    llena al resolver picks en SQLite).
+                    llena al resolver picks en la base de datos).
                   </p>
                   <MarketBars items={marketBreakdown} />
                 </div>
@@ -944,7 +944,7 @@ export default function StatsPage() {
               <p className="text-sm text-slate-300">
                 {trainingExport.length ||
                   bets.reduce((n, b) => n + b.legs.length, 0)}{" "}
-                filas de entrenamiento disponibles en SQLite.
+                filas de entrenamiento disponibles en la base de datos.
               </p>
               <Button variant="default" size="sm" onClick={handleExportTraining}>
                 <Download className="h-4 w-4" aria-hidden />
@@ -958,7 +958,7 @@ export default function StatsPage() {
               <CardTitle>Motor de autoajuste</CardTitle>
               <CardDescription>
                 Recalcula multiplicadores por liga, pesos de mercado y umbrales
-                de probabilidad a partir del historial (SQLite / JSON). Los
+                de probabilidad a partir del historial (base de datos / JSON). Los
                 nuevos pesos se aplican automáticamente a futuras predicciones.
               </CardDescription>
             </CardHeader>
@@ -1089,7 +1089,7 @@ export default function StatsPage() {
             <CardHeader>
               <CardTitle>Historial de apuestas</CardTitle>
               <CardDescription>
-                Persistido en SQLite · resultado según marcador real
+                Persistido en Neon · resultado según marcador real
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">

@@ -1,5 +1,5 @@
 /**
- * SQLite API-response cache helpers (purge / generation markers).
+ * API-response cache helpers (purge / generation markers).
  */
 import { prisma } from "./db";
 import { PERMANENT_EXPIRES_AT } from "./api-cache";
