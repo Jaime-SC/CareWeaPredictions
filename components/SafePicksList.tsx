@@ -7,7 +7,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import {
   addBetFromSinglePick,
@@ -152,20 +151,20 @@ export function SafePicksList({
   }
 
   return (
-    <Card className="border-emerald-500/20 bg-gradient-to-b from-slate-900 to-slate-950">
+    <Card>
       <CardHeader>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Target className="h-5 w-5 text-emerald-400" />
-              Picks Seguros Individuales
-            </CardTitle>
+            <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-50">
+              <Target className="h-5 w-5 text-emerald-300" aria-hidden />
+              Picks seguros individuales
+            </h2>
             <CardDescription>
               {date} · modelo ≥ 85% · {picks.length} selección
               {picks.length === 1 ? "" : "es"} · referencia 1U
             </CardDescription>
             {fromCache && (
-              <p className="mt-2 text-xs text-sky-300/90">
+              <p role="status" className="mt-2 text-sm text-sky-200">
                 Lista recuperada de caché para esta fecha.
               </p>
             )}
@@ -176,30 +175,31 @@ export function SafePicksList({
               size="sm"
               onClick={onRefresh}
               disabled={loading}
+              aria-busy={loading}
+              aria-label={loading ? "Actualizando picks" : "Actualizar picks"}
             >
               {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                "Actualizar"
-              )}
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              ) : null}
+              {loading ? "Actualizando…" : "Actualizar"}
             </Button>
           )}
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {picks.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500">
+          <p className="rounded-lg border border-dashed border-slate-600 p-6 text-center text-sm text-slate-200">
             No hay picks con probabilidad modelo ≥ 85% para esta fecha.
           </p>
         ) : (
           <div className="max-h-[36rem] space-y-5 overflow-y-auto pr-1">
             {grouped.map((group) => (
               <section key={group.key} className="space-y-2">
-                <div className="sticky top-0 z-10 flex items-center justify-between gap-2 rounded-md border border-slate-800/80 bg-slate-950/95 px-2.5 py-1.5 backdrop-blur">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                <div className="sticky top-0 z-10 flex items-center justify-between gap-2 rounded-md border border-slate-600 bg-[var(--background-elevated)] px-2.5 py-1.5">
+                  <p className="text-sm font-semibold text-slate-100">
                     {group.key}
-                  </h3>
-                  <span className="text-[10px] text-slate-500">
+                  </p>
+                  <span className="text-xs text-slate-300">
                     {group.items.length} pick
                     {group.items.length === 1 ? "" : "s"}
                   </span>
@@ -213,39 +213,39 @@ export function SafePicksList({
                     return (
                       <li
                         key={key}
-                        className="rounded-xl border border-slate-800 bg-slate-900/60 p-3"
+                        className="rounded-xl border border-slate-600 bg-slate-950/50 p-3"
                       >
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                           <div className="min-w-0 space-y-1">
-                            <p className="text-sm font-medium text-slate-100">
+                            <p className="text-sm font-medium text-slate-50">
                               {pick.matchLabel}
-                              <span className="ml-2 text-xs font-normal text-slate-500">
+                              <span className="ml-2 text-xs font-normal text-slate-300">
                                 {formatKickoffTime(pick.kickoff)} CL
                               </span>
                             </p>
-                            <p className="text-xs text-slate-200">
+                            <p className="text-sm text-slate-100">
                               Apuesta: {formatExplicitBetLine(explicit)}
-                              <span className="mx-1.5 text-slate-600">·</span>
-                              <span className="font-mono text-emerald-300">
+                              <span className="mx-1.5 text-slate-400">·</span>
+                              <span className="font-mono text-emerald-200">
                                 @{formatOdds(pick.odds)}
                               </span>
                             </p>
                             <p
-                              className="text-[11px] leading-snug text-slate-500"
+                              className="text-xs leading-snug text-slate-300"
                               title={explicit.condition}
                             >
                               Condición: {explicit.condition}
                             </p>
-                            <p className="text-[11px] leading-snug text-sky-300/90">
+                            <p className="text-xs leading-snug text-sky-200">
                               {explicit.bookmakerTab}
                             </p>
-                            <p className="flex items-start gap-1.5 text-[11px] leading-snug text-amber-300/90">
-                              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-400" />
+                            <p className="flex items-start gap-1.5 text-xs leading-snug text-amber-100">
+                              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
                               <span>{explicit.warningNote}</span>
                             </p>
                             {explicit.cupEquivalent ? (
-                              <p className="flex items-start gap-1.5 text-[11px] leading-snug text-emerald-300/80">
-                                <Lightbulb className="mt-0.5 h-3 w-3 shrink-0 text-emerald-400" />
+                              <p className="flex items-start gap-1.5 text-xs leading-snug text-emerald-100">
+                                <Lightbulb className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
                                 <span>{explicit.cupEquivalent}</span>
                               </p>
                             ) : null}
@@ -285,19 +285,19 @@ export function SafePicksList({
                             >
                               {registered ? (
                                 <>
-                                  <Check className="h-3.5 w-3.5" /> Registrado
+                                  <Check className="h-3.5 w-3.5" aria-hidden /> Registrado
                                 </>
                               ) : (
                                 <>
-                                  <Pin className="h-3.5 w-3.5" />
-                                  Registrar Pick en Historial
+                                  <Pin className="h-3.5 w-3.5" aria-hidden />
+                                  Registrar pick en historial
                                 </>
                               )}
                             </Button>
                             {registered && (
                               <Link
                                 href="/stats"
-                                className="text-center text-[11px] text-emerald-400 underline-offset-2 hover:underline"
+                                className="inline-flex min-h-11 items-center justify-center text-center text-sm text-emerald-200 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
                               >
                                 Ver en Estadísticas
                               </Link>

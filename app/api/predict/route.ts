@@ -4,19 +4,41 @@ import {
   toErrorResponse,
 } from "@/lib/api-football";
 import {
+  buildCacheKey,
+  getCachedPayload,
+  ttlMinutesForFixtureDate,
+  upsertCachedPayload,
+} from "@/lib/api-cache";
+import {
   isFunStrategy,
   resolveStrategyMode,
 } from "@/lib/parlay-defaults";
 import { enrichMatchesFromLocalData } from "@/lib/fixture-context";
 import { buildMatchPredictions } from "@/lib/parlay-generator";
+import type { MatchPrediction } from "@/lib/types";
 import { chileDateString } from "@/lib/utils";
 
 function isValidDate(value: string | null): value is string {
   return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
+type PredictSuccessBody = {
+  success: true;
+  source: string;
+  date: string;
+  minProb: number;
+  count: number;
+  safePickCount: number;
+  daysFetched: number | null;
+  poolMode: string | null;
+  predictions: MatchPrediction[];
+  safePicks: unknown[];
+  cached?: boolean;
+};
+
 /**
  * GET /api/predict?date=YYYY-MM-DD&safeOnly=true&minProb=0.85
+ * Optional: &refresh=1 to bypass the computed-payload SQLite cache.
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -31,15 +53,33 @@ export async function GET(request: NextRequest) {
   const strategyMode = resolveStrategyMode(
     searchParams.get("strategyMode") ?? "daily-safe"
   );
+  const poolMode =
+    poolParam === "expanded" || isFunStrategy(strategyMode)
+      ? "expanded"
+      : "core";
+  const forceRefresh = searchParams.get("refresh") === "1";
+  const cacheKey = buildCacheKey("predict", {
+    date,
+    pool: poolMode,
+    strategy: strategyMode,
+    safe: safeOnly ? "1" : "0",
+    minProb,
+    matchId: matchId || undefined,
+  });
+
+  if (!forceRefresh) {
+    const hit = await getCachedPayload<PredictSuccessBody>(cacheKey);
+    if (hit?.success && Array.isArray(hit.predictions)) {
+      console.log(`[CACHE HIT] Returning data for key=${cacheKey}`);
+      return NextResponse.json({ ...hit, cached: true });
+    }
+  }
 
   try {
-    const { matches: rawMatches, source, daysFetched, poolMode } =
+    const { matches: rawMatches, source, daysFetched, poolMode: resolvedPool } =
       await fetchUpcomingMatches({
         date,
-        poolMode:
-          poolParam === "expanded" || isFunStrategy(strategyMode)
-            ? "expanded"
-            : "core",
+        poolMode,
         expandIfFewerThan: 8,
       });
     const matches = await enrichMatchesFromLocalData(rawMatches);
@@ -88,7 +128,7 @@ export async function GET(request: NextRequest) {
       )
       .sort((a, b) => b.modelProbability - a.modelProbability);
 
-    return NextResponse.json({
+    const body: PredictSuccessBody = {
       success: true,
       source,
       date,
@@ -96,10 +136,19 @@ export async function GET(request: NextRequest) {
       count: predictions.length,
       safePickCount: safePicks.length,
       daysFetched: daysFetched ?? null,
-      poolMode: poolMode ?? null,
+      poolMode: resolvedPool ?? null,
       predictions,
       safePicks,
-    });
+    };
+
+    await upsertCachedPayload(
+      cacheKey,
+      "predict",
+      body,
+      ttlMinutesForFixtureDate(date)
+    );
+
+    return NextResponse.json(body);
   } catch (error) {
     const { body, status } = toErrorResponse(error);
     return NextResponse.json(body, { status });

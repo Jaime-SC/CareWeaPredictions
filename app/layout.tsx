@@ -29,11 +29,17 @@ export default function RootLayout({
       lang="es"
       className={`${geistSans.variable} ${geistMono.variable} h-full dark`}
     >
-      <body className="min-h-full flex flex-col bg-slate-950 text-slate-100 antialiased">
+      <body className="flex min-h-full flex-col bg-[var(--background)] text-[var(--foreground)] antialiased">
+        <a href="#contenido" className="skip-link">
+          Saltar al contenido
+        </a>
         <Navbar />
-        <main className="flex-1">{children}</main>
-        <footer className="border-t border-slate-800/80 py-4 text-center text-xs text-slate-600">
-          CareWeaPredictions · Solo fines educativos. El juego puede ser adictivo. +18.
+        <main id="contenido" className="flex-1">
+          {children}
+        </main>
+        <footer className="border-t border-slate-600/80 py-4 text-center text-sm text-slate-300">
+          CareWeaPredictions · Solo fines educativos. El juego puede ser
+          adictivo. +18.
         </footer>
       </body>
     </html>

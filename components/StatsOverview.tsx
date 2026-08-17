@@ -26,11 +26,11 @@ export function StatsOverview({ summary }: StatsOverviewProps) {
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Card className="sm:col-span-2">
         <CardContent className="p-4">
-          <p className="text-xs text-slate-500">Resultados liquidados</p>
+          <p className="text-xs text-slate-300">Resultados liquidados</p>
           <p className="mt-0.5 text-xl font-semibold text-slate-50">
-            <span className="text-emerald-300">{summary.won} ganadas</span>
-            <span className="text-slate-600"> · </span>
-            <span className="text-rose-300">{summary.lost} perdidas</span>
+            <span className="text-emerald-200">{summary.won} ganadas</span>
+            <span className="text-slate-400"> · </span>
+            <span className="text-rose-200">{summary.lost} perdidas</span>
           </p>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             <StrategySplit
@@ -47,7 +47,7 @@ export function StatsOverview({ summary }: StatsOverviewProps) {
             />
           </div>
           {summary.pending > 0 ? (
-            <p className="mt-2 text-[11px] text-slate-500">
+            <p className="mt-2 text-xs text-slate-300">
               {summary.pending} en juego (no cuentan)
             </p>
           ) : null}
@@ -68,7 +68,7 @@ export function StatsOverview({ summary }: StatsOverviewProps) {
         label="ROI % / Rendimiento"
         value={`${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}
         hint="1U por ticket liquidado · pendientes excluidos"
-        valueClass={roiPositive ? "text-emerald-300" : "text-rose-300"}
+        valueClass={roiPositive ? "text-emerald-200" : "text-rose-200"}
       />
     </div>
   );
@@ -120,15 +120,15 @@ function StrategySplit({
   lost: number;
 }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2">
-      <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
+    <div className="rounded-lg border border-slate-600 bg-slate-950/80 px-3 py-2">
+      <p className="flex items-center gap-1.5 text-xs text-slate-300">
         {icon}
         {label}
       </p>
       <p className="mt-1 text-sm font-medium tabular-nums">
-        <span className="text-emerald-400">{won} ganadas</span>
-        <span className="text-slate-600"> · </span>
-        <span className="text-rose-400">{lost} perdidas</span>
+        <span className="text-emerald-200">{won} ganadas</span>
+        <span className="text-slate-400"> · </span>
+        <span className="text-rose-200">{lost} perdidas</span>
       </p>
     </div>
   );
@@ -150,15 +150,17 @@ function Metric({
   return (
     <Card>
       <CardContent className="flex items-start gap-3 p-4">
-        <div className="rounded-lg bg-slate-800/80 p-2">{icon}</div>
+        <div className="rounded-lg bg-slate-800 p-2" aria-hidden>
+          {icon}
+        </div>
         <div className="min-w-0">
-          <p className="text-xs text-slate-500">{label}</p>
+          <p className="text-xs text-slate-300">{label}</p>
           <p
             className={`truncate text-xl font-semibold ${valueClass ?? "text-slate-50"}`}
           >
             {value}
           </p>
-          <p className="text-[11px] text-slate-500">{hint}</p>
+          <p className="text-xs text-slate-300">{hint}</p>
         </div>
       </CardContent>
     </Card>

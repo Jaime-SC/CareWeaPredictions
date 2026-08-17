@@ -114,14 +114,15 @@ export function SlipExporter({
       size={size}
       disabled={parlay.legs.length === 0}
       onClick={handleCopy}
+      aria-live="polite"
     >
       {copied ? (
         <>
-          <Check className="h-4 w-4" /> Copiado
+          <Check className="h-4 w-4" aria-hidden /> Copiado
         </>
       ) : (
         <>
-          <Copy className="h-4 w-4" /> {label}
+          <Copy className="h-4 w-4" aria-hidden /> {label}
         </>
       )}
     </Button>

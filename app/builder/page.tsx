@@ -11,7 +11,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import {
   API_CONNECTION_ERROR_MESSAGE,
@@ -369,16 +368,26 @@ export default function BuilderPage() {
   const showGenerateCard =
     !generated || (!!error && (isSafe ? safePicks.length === 0 : !parlay.legs.length));
 
+  const helperId = "builder-action-help";
+  const primaryLabel = isSafe
+    ? `Buscar picks seguros (${selectedDate})`
+    : isMonopoly
+      ? "Generar cartelera semanal"
+      : `Generar combinada (~${preset.targetMultiplier}x)`;
+
   return (
     <div className="relative min-h-[calc(100vh-3.5rem)] overflow-hidden">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(16,185,129,0.14),_transparent_50%),radial-gradient(ellipse_at_bottom_right,_rgba(14,165,233,0.08),_transparent_40%)]" />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(16,185,129,0.14),_transparent_50%),radial-gradient(ellipse_at_bottom_right,_rgba(14,165,233,0.08),_transparent_40%)]"
+      />
 
       <div className="relative mx-auto flex max-w-5xl flex-col gap-6 px-4 py-10 sm:px-6">
-        <div className="text-center">
+        <header className="text-center">
           <Badge variant="success" className="mb-4 gap-1.5">
             {isMonopoly ? (
               <>
-                <CalendarDays className="h-3.5 w-3.5 text-emerald-400" />
+                <CalendarDays className="h-3.5 w-3.5" aria-hidden />
                 Generador · {WEEKLY_CARTELERA_LABEL}
               </>
             ) : (
@@ -386,14 +395,20 @@ export default function BuilderPage() {
             )}
           </Badge>
           <h1 className="text-3xl font-bold tracking-tight text-slate-50 sm:text-4xl">
-            Generar Selecciones
+            Generar selecciones
           </h1>
-          <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-slate-400">
+          <p
+            className={
+              isMonopoly
+                ? "mx-auto mt-3 max-w-3xl text-pretty text-base leading-relaxed text-slate-200"
+                : "mx-auto mt-3 text-base leading-relaxed text-slate-200 max-sm:text-pretty sm:whitespace-nowrap"
+            }
+          >
             {isMonopoly
-              ? "Asimetría barre sola la semana en curso (lunes a domingo) y arma una combinada dinámica con todos los gigantes que pasen anti-rotación."
-              : "Elige fecha y modo. Segura = picks individuales ≥85%. Lotería = combinada 15 legs."}
+              ? "Asimetría barre la semana en curso (lunes a domingo) y arma una combinada con los gigantes que pasen anti-rotación."
+              : "Elige fecha y modo. Segura: picks individuales ≥85%. Lotería: combinada de 15 legs."}
           </p>
-        </div>
+        </header>
 
         <BuilderDatePicker
           selectedDate={selectedDate}
@@ -403,20 +418,23 @@ export default function BuilderPage() {
           weekToYmd={week.toYmd}
         />
 
-        <div className="rounded-xl border border-emerald-500/15 bg-emerald-500/5 px-4 py-3 text-center text-sm text-emerald-200/90">
+        <p
+          role="status"
+          className="rounded-xl border border-emerald-400/35 bg-emerald-500/15 px-4 py-3 text-center text-sm text-emerald-100"
+        >
           {STRATEGY_LABELS[strategyMode]} ·{" "}
           {isSafe
             ? "Picks individuales · referencia 1U · sin acumulador"
             : isMonopoly
               ? `Cartelera lun–dom · ${BUILDER_MODES.MONOPOLY_ASYMMETRY.recommendedStake} · anti-rotación`
               : `Objetivo ~${preset.targetMultiplier}x (${projected}) · ${preset.minLegs} legs · 1U`}
-        </div>
+        </p>
 
-        <Card className="border-slate-700/80 bg-slate-900/70 shadow-xl shadow-emerald-950/20">
+        <Card>
           <CardHeader className="text-center">
-            <CardTitle className="text-xl sm:text-2xl">
+            <h2 className="text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl">
               Elige tu estrategia
-            </CardTitle>
+            </h2>
             <CardDescription className="text-base">
               {isMonopoly
                 ? "Asimetría ignora la fecha diaria y escanea lunes a domingo"
@@ -430,33 +448,34 @@ export default function BuilderPage() {
               <div className="flex flex-col items-center gap-3 pt-2">
                 <Button
                   size="lg"
-                  className="h-14 w-full max-w-md text-base font-semibold sm:text-lg"
+                  className="min-h-14 w-full max-w-md text-base font-semibold sm:text-lg"
                   onClick={() => runPrimaryAction()}
                   disabled={loading}
+                  aria-busy={loading}
+                  aria-describedby={helperId}
                 >
                   {loading ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
                   ) : (
-                    <Sparkles className="h-5 w-5" />
+                    <Sparkles className="h-5 w-5" aria-hidden />
                   )}
-                  {isSafe
-                    ? `Buscar Picks Seguros (${selectedDate})`
-                    : isMonopoly
-                      ? "Generar cartelera semanal"
-                      : `Generar Combinada (~${preset.targetMultiplier}x)`}
+                  {loading ? "Generando…" : primaryLabel}
                 </Button>
-                <p className="max-w-md text-center text-xs text-slate-500">
+                <p
+                  id={helperId}
+                  className="max-w-md text-center text-sm leading-relaxed text-slate-300"
+                >
                   {isSafe
-                    ? "Lista de apuestas individuales: Doble oportunidad, DNB y Over 1.5 con prob. modelo ≥ 85%."
+                    ? "Lista de apuestas individuales: doble oportunidad, DNB y Over 1.5 con probabilidad modelo ≥ 85%."
                     : isMonopoly
-                      ? "Escaneo lunes a domingo: todos los monopolios domésticos ≥82% que pasen anti-rotación. Sin tope de legs."
-                      : "Modo Seguro / Alta Probabilidad: piso 80% por leg · cuotas 1.18–1.28 · objetivo ~20x–35x · métricas en unidades (1U)."}
+                      ? "Escaneo lunes a domingo: monopolios domésticos ≥82% que pasen anti-rotación. Sin tope de legs."
+                      : "Piso 80% por leg · cuotas 1.18–1.28 · objetivo ~20x–35x · métricas en unidades (1U)."}
                 </p>
               </div>
             )}
 
             {generated && fromCache && (isSafe ? safePicks.length > 0 : parlay.legs.length > 0) && (
-              <p className="text-center text-xs text-sky-300/90">
+              <p role="status" className="text-center text-sm text-sky-200">
                 Datos recuperados para{" "}
                 {isMonopoly
                   ? `${week.fromYmd} → ${week.toYmd}`
@@ -468,16 +487,16 @@ export default function BuilderPage() {
         </Card>
 
         {error && (
-          <Card className="border-rose-500/40 bg-rose-950/20">
-            <CardContent className="p-4 text-center text-sm text-rose-300">
+          <Card role="alert" className="border-rose-400/50 bg-rose-950/40">
+            <CardContent className="p-4 text-center text-sm text-rose-100">
               {error}
             </CardContent>
           </Card>
         )}
 
         {emptyMessage && !error && (
-          <Card className="border-sky-500/20">
-            <CardContent className="p-6 text-center text-sm text-slate-300">
+          <Card>
+            <CardContent className="p-6 text-center text-sm text-slate-200">
               {emptyMessage}
             </CardContent>
           </Card>
@@ -518,13 +537,14 @@ export default function BuilderPage() {
                 variant="outline"
                 onClick={() => runPrimaryAction({ force: true })}
                 disabled={loading}
+                aria-busy={loading}
               >
                 {loading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                 ) : (
-                  <Sparkles className="h-4 w-4" />
+                  <Sparkles className="h-4 w-4" aria-hidden />
                 )}
-                Reintentar
+                {loading ? "Reintentando…" : "Reintentar"}
               </Button>
             </div>
           )}

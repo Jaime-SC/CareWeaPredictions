@@ -130,9 +130,10 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
 
   return (
     <span
-      title={`Cuota oficial API-Football del ${quota.date}: ${quota.used} usadas · ${quota.remaining} restantes (sync headers) · estado ${label}`}
+      role="status"
+      aria-label={`Cuota oficial API-Football del ${quota.date}: ${quota.used} usadas, ${quota.remaining} restantes. Estado ${label}.`}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-medium tabular-nums sm:text-[11px]",
+        "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium tabular-nums",
         tone,
         className
       )}
@@ -146,7 +147,7 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
         restantes
       </span>
       <span className="sm:hidden">
-        API {quota.used}/{quota.limit} · {quota.remaining} left
+        API {quota.used}/{quota.limit} · {quota.remaining} restantes
       </span>
     </span>
   );

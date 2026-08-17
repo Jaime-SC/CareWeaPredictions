@@ -2,7 +2,7 @@
 
 import { StatsOverview } from "@/components/StatsOverview";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -193,7 +193,7 @@ function ticketStatusBadge(status: BetStatus): {
     label: (
       <span className="inline-flex items-center gap-1">
         <Clock className="h-3 w-3 text-sky-400" />
-        En Juego
+        En juego
       </span>
     ),
   };
@@ -213,15 +213,15 @@ function LegHitsInline({
         className
       )}
     >
-      <span className="inline-flex items-center gap-0.5 text-emerald-400">
+      <span className="inline-flex items-center gap-0.5 text-emerald-200">
         <Check className="h-3 w-3" strokeWidth={2.5} />
         {hits.won}
       </span>
-      <span className="inline-flex items-center gap-0.5 text-rose-400">
+      <span className="inline-flex items-center gap-0.5 text-rose-200">
         <X className="h-3 w-3" strokeWidth={2.5} />
         {hits.lost}
       </span>
-      <span className="inline-flex items-center gap-0.5 text-sky-400">
+      <span className="inline-flex items-center gap-0.5 text-sky-200">
         <Clock className="h-3 w-3" />
         {hits.pending}
       </span>
@@ -627,7 +627,10 @@ export default function StatsPage() {
 
   if (!hydrated) {
     return (
-      <div className="mx-auto max-w-7xl px-4 py-16 text-center text-sm text-slate-500">
+      <div
+        role="status"
+        className="mx-auto max-w-7xl px-4 py-16 text-center text-sm text-slate-300"
+      >
         Cargando analytics y sincronizando marcadores…
       </div>
     );
@@ -644,11 +647,11 @@ export default function StatsPage() {
           <h1 className="text-3xl font-bold tracking-tight text-slate-50">
             Analytics de entrenamiento
           </h1>
-          <p className="mt-2 max-w-2xl text-sm text-slate-400">
-            Win Rate y ROI se calculan solo con boletos liquidados (Ganada /
-            Perdida). Los pendientes en juego no distorsionan el rendimiento.
-            Al cargar el panel se sincronizan automáticamente los marcadores
-            de partidos con kickoff ya ocurrido (FT, AET, PEN, EXTRA).
+          <p className="mt-2 max-w-2xl text-base leading-relaxed text-slate-200">
+            Win rate y ROI se calculan solo con boletos liquidados (ganada /
+            perdida). Los pendientes en juego no distorsionan el rendimiento.
+            Al cargar el panel se sincronizan los marcadores de partidos con
+            kickoff ya ocurrido (FT, AET, PEN, EXTRA).
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -658,25 +661,26 @@ export default function StatsPage() {
             onClick={handleExportTraining}
             disabled={bets.length === 0 && trainingExport.length === 0}
           >
-            <Download className="h-4 w-4" />
-            Exportar Datos de Entrenamiento (JSON)
+            <Download className="h-4 w-4" aria-hidden />
+            Exportar datos de entrenamiento (JSON)
           </Button>
           <Button
             variant="default"
             size="sm"
             onClick={handleSyncScores}
             disabled={updating}
+            aria-busy={updating}
           >
             {updating ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
             ) : (
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" aria-hidden />
             )}
-            Sincronizar Marcadores
+            {updating ? "Sincronizando…" : "Sincronizar marcadores"}
           </Button>
           {bets.length > 0 && (
             <Button variant="danger" size="sm" onClick={handleClear}>
-              <Trash2 className="h-4 w-4" />
+              <Trash2 className="h-4 w-4" aria-hidden />
               Limpiar
             </Button>
           )}
@@ -684,9 +688,9 @@ export default function StatsPage() {
       </div>
 
       {overduePendingCount > 0 && (
-        <Card className="border-sky-500/40 bg-sky-950/20">
+        <Card role="status" className="border-sky-400/40 bg-sky-950/30">
           <CardContent className="flex items-start gap-2 p-4 text-sm text-sky-100">
-            <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+            <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
             <span>
               Tienes {overduePendingCount} boletos pendientes de ayer. Haz clic
               en Sincronizar para actualizar marcadores.
@@ -695,15 +699,15 @@ export default function StatsPage() {
         </Card>
       )}
       {updateMsg && (
-        <Card className="border-emerald-500/20 bg-emerald-950/10">
-          <CardContent className="p-4 text-sm text-emerald-200/90">
+        <Card role="status" className="border-emerald-400/40 bg-emerald-950/30">
+          <CardContent className="p-4 text-sm text-emerald-100">
             {updateMsg}
           </CardContent>
         </Card>
       )}
       {updateError && (
-        <Card className="border-rose-500/40 bg-rose-950/20">
-          <CardContent className="p-4 text-sm text-rose-300">
+        <Card role="alert" className="border-rose-400/50 bg-rose-950/40">
+          <CardContent className="p-4 text-sm text-rose-100">
             {updateError}
           </CardContent>
         </Card>
@@ -725,8 +729,8 @@ export default function StatsPage() {
               &apos;Registrar Apuesta&apos; para alimentar el motor de
               analytics.
             </p>
-            <Link href="/builder">
-              <Button>Ir al Generador</Button>
+            <Link href="/builder" className={buttonVariants()}>
+              Ir al Generador
             </Link>
           </CardContent>
         </Card>
@@ -738,7 +742,7 @@ export default function StatsPage() {
             <Card className="border-sky-500/30 bg-sky-950/15">
               <CardHeader>
                 <div className="flex flex-wrap items-center gap-2">
-                  <CardTitle>Boletos En Juego / Pendientes</CardTitle>
+                  <CardTitle>Boletos en juego / pendientes</CardTitle>
                   <Badge variant="info" className="gap-1">
                     <Clock className="h-3 w-3 text-sky-400" />
                     {pendingBets.length} en curso
@@ -763,12 +767,12 @@ export default function StatsPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant="info" className="gap-1">
                             <Clock className="h-3 w-3 text-sky-400" />
-                            En Juego
+                            En juego
                           </Badge>
                           <Badge variant={bet.mode === "Segura" ? "success" : "warning"}>
                             {bet.mode} · {bet.timeframe}
                           </Badge>
-                          <span className="text-xs text-slate-500">{bet.date}</span>
+                          <span className="text-xs text-slate-300">{bet.date}</span>
                         </div>
                         <p className="text-sm text-slate-200">
                           {bet.legs.length} legs · {formatOdds(bet.totalOdds)}x · 1U
@@ -785,7 +789,7 @@ export default function StatsPage() {
           {/* 1. By competition */}
           <Card>
             <CardHeader>
-              <CardTitle>Rendimiento por Competición</CardTitle>
+              <CardTitle>Rendimiento por competición</CardTitle>
               <CardDescription>
                 Identifica ligas predecibles vs. alta varianza — Total · Won ·
                 Lost · Win Rate · Net ROI
@@ -793,13 +797,13 @@ export default function StatsPage() {
             </CardHeader>
             <CardContent className="overflow-x-auto">
               {leagueRows.length === 0 ? (
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-slate-200">
                   Sin legs evaluadas todavía. Actualiza resultados tras el FT.
                 </p>
               ) : (
                 <table className="w-full min-w-[640px] text-left text-sm">
                   <thead>
-                    <tr className="border-b border-slate-800 text-xs uppercase tracking-wide text-slate-500">
+                    <tr className="border-b border-slate-600 text-xs font-medium text-slate-300">
                       <th className="pb-2 pr-3 font-medium">Liga / Torneo</th>
                       <th className="pb-2 pr-3 font-medium">Total</th>
                       <th className="pb-2 pr-3 font-medium">Won</th>
@@ -861,7 +865,7 @@ export default function StatsPage() {
           {/* 2. By date & market */}
           <Card>
             <CardHeader>
-              <CardTitle>Acierto por Fecha y Mercado</CardTitle>
+              <CardTitle>Acierto por fecha y mercado</CardTitle>
               <CardDescription>
                 Doble oportunidad · Más de 1.5 goles · Apuesta sin empate · etc.
               </CardDescription>
@@ -869,7 +873,7 @@ export default function StatsPage() {
             <CardContent className="overflow-x-auto">
               {byDateMarket.length === 0 ? (
                 <div className="space-y-3">
-                  <p className="text-xs text-slate-500">
+                  <p className="text-sm text-slate-300">
                     Vista agregada por mercado (sin desglose diario aún — se
                     llena al resolver picks en SQLite).
                   </p>
@@ -878,7 +882,7 @@ export default function StatsPage() {
               ) : (
                 <table className="w-full min-w-[560px] text-left text-sm">
                   <thead>
-                    <tr className="border-b border-slate-800 text-xs uppercase tracking-wide text-slate-500">
+                    <tr className="border-b border-slate-600 text-xs font-medium text-slate-300">
                       <th className="pb-2 pr-3 font-medium">Fecha</th>
                       <th className="pb-2 pr-3 font-medium">Mercado</th>
                       <th className="pb-2 pr-3 font-medium">Total</th>
@@ -892,7 +896,7 @@ export default function StatsPage() {
                         key={`${row.date}-${row.marketLabel}`}
                         className="border-b border-slate-800/60"
                       >
-                        <td className="py-2.5 pr-3 font-mono text-xs text-slate-400">
+                        <td className="py-2.5 pr-3 font-mono text-xs text-slate-300">
                           {row.date}
                         </td>
                         <td className="py-2.5 pr-3 text-slate-100">
@@ -903,7 +907,7 @@ export default function StatsPage() {
                         </td>
                         <td className="py-2.5 pr-3 text-xs">
                           <span className="text-emerald-400">{row.won}</span>
-                          <span className="text-slate-600"> / </span>
+                          <span className="text-slate-400"> / </span>
                           <span className="text-rose-400">{row.lost}</span>
                         </td>
                         <td className="py-2.5">
@@ -930,7 +934,7 @@ export default function StatsPage() {
           {/* 3. Model insight */}
           <Card className="border-sky-500/20 bg-sky-950/10">
             <CardHeader>
-              <CardTitle>Model Decision Insight</CardTitle>
+              <CardTitle>Insight del modelo</CardTitle>
               <CardDescription>
                 Vectores de features listos para reentrenar pesos Poisson / ML:
                 League · Market · Model Prob · Odds · Outcome
@@ -943,15 +947,15 @@ export default function StatsPage() {
                 filas de entrenamiento disponibles en SQLite.
               </p>
               <Button variant="default" size="sm" onClick={handleExportTraining}>
-                <Download className="h-4 w-4" />
-                Exportar Datos de Entrenamiento (JSON)
+                <Download className="h-4 w-4" aria-hidden />
+                Exportar datos de entrenamiento (JSON)
               </Button>
             </CardContent>
           </Card>
 
           <Card className="border-amber-500/25 bg-amber-950/10">
             <CardHeader>
-              <CardTitle>Auto-Tuning Engine</CardTitle>
+              <CardTitle>Motor de autoajuste</CardTitle>
               <CardDescription>
                 Recalcula multiplicadores por liga, pesos de mercado y umbrales
                 de probabilidad a partir del historial (SQLite / JSON). Los
@@ -959,7 +963,7 @@ export default function StatsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="max-w-xl text-sm text-slate-400">
+              <p className="max-w-xl text-sm text-slate-200">
                 Ligas &lt;70% WR → mayor penalización · Ligas &gt;88% → umbral de
                 cuota más flexible · Mercados con ROI negativo → cutoff más alto.
               </p>
@@ -968,13 +972,16 @@ export default function StatsPage() {
                 size="sm"
                 onClick={handleCalibrateModel}
                 disabled={calibrating}
+                aria-busy={calibrating}
               >
                 {calibrating ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                 ) : (
-                  <Settings2 className="h-4 w-4" />
+                  <Settings2 className="h-4 w-4" aria-hidden />
                 )}
-                Re-Calibrar Modelo con Datos Históricos
+                {calibrating
+                  ? "Recalibrando…"
+                  : "Recalibrar modelo con datos históricos"}
               </Button>
             </CardContent>
           </Card>
@@ -988,7 +995,7 @@ export default function StatsPage() {
             </CardHeader>
             <CardContent className="h-72 pt-2 sm:h-80">
               {series.length === 0 ? (
-                <p className="flex h-full items-center justify-center text-sm text-slate-500">
+                <p className="flex h-full items-center justify-center text-sm text-slate-200">
                   Sin tickets resueltos aún.
                 </p>
               ) : (
@@ -1024,13 +1031,13 @@ export default function StatsPage() {
                     />
                     <XAxis
                       dataKey="date"
-                      tick={{ fill: "#64748b", fontSize: 11 }}
+                      tick={{ fill: "#cbd5e1", fontSize: 12 }}
                       tickFormatter={(v: string) => v.slice(5)}
                       axisLine={false}
                       tickLine={false}
                     />
                     <YAxis
-                      tick={{ fill: "#64748b", fontSize: 11 }}
+                      tick={{ fill: "#cbd5e1", fontSize: 12 }}
                       tickFormatter={(v: number) =>
                         `${v >= 0 ? "" : "−"}${Math.abs(Number(v.toFixed(1)))}U`
                       }
@@ -1040,12 +1047,13 @@ export default function StatsPage() {
                     />
                     <Tooltip
                       contentStyle={{
-                        background: "#0f172a",
-                        border: "1px solid #1e293b",
-                        borderRadius: 8,
-                        fontSize: 12,
+                        background: "#172033",
+                        border: "1px solid #3d4f66",
+                        borderRadius: 12,
+                        fontSize: 13,
+                        color: "#f8fafc",
                       }}
-                      labelStyle={{ color: "#94a3b8" }}
+                      labelStyle={{ color: "#cbd5e1" }}
                       formatter={(value) => [
                         formatSignedUnits(Number(value ?? 0)),
                         "Unidades",
@@ -1066,12 +1074,12 @@ export default function StatsPage() {
 
           <div className="grid gap-4 lg:grid-cols-2">
             <BreakdownCard
-              title="Acierto por Estrategia"
+              title="Acierto por estrategia"
               description="Modo Segura vs Modo Diversión (tickets)"
               items={strategyBreakdown}
             />
             <BreakdownCard
-              title="Acierto por Mercado (agregado)"
+              title="Acierto por mercado (agregado)"
               description="Win rate global por familia de mercado"
               items={marketBreakdown}
             />
@@ -1104,7 +1112,7 @@ export default function StatsPage() {
 function MarketBars({ items }: { items: BreakdownItem[] }) {
   if (items.length === 0) {
     return (
-      <p className="text-sm text-slate-500">
+      <p className="text-sm text-slate-200">
         Sin legs evaluadas todavía.
       </p>
     );
@@ -1127,7 +1135,7 @@ function MarketBars({ items }: { items: BreakdownItem[] }) {
               >
                 {formatPercent(item.winRate)}
               </Badge>
-              <span className="text-[11px] text-slate-500">
+              <span className="text-xs text-slate-300">
                 {item.won}/{item.total}
               </span>
             </div>
@@ -1179,7 +1187,8 @@ function LegResultIcon({ status }: { status: LegStatus }) {
   if (status === "won") {
     return (
       <span
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-200"
+        aria-label="Acertada"
         title="Acertada"
       >
         <Check className="h-4 w-4" strokeWidth={2.5} />
@@ -1189,7 +1198,8 @@ function LegResultIcon({ status }: { status: LegStatus }) {
   if (status === "lost") {
     return (
       <span
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-rose-500/15 text-rose-400"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-rose-500/20 text-rose-200"
+        aria-label="Fallida"
         title="Fallida"
       >
         <X className="h-4 w-4" strokeWidth={2.5} />
@@ -1199,7 +1209,8 @@ function LegResultIcon({ status }: { status: LegStatus }) {
   if (status === "void") {
     return (
       <span
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-300"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-100"
+        aria-label="Anulada"
         title="Anulada"
       >
         <CircleSlash className="h-3.5 w-3.5" />
@@ -1207,10 +1218,11 @@ function LegResultIcon({ status }: { status: LegStatus }) {
     );
   }
   return (
-    <span
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-500/15 text-sky-400"
-      title="Pendiente"
-    >
+      <span
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-500/20 text-sky-200"
+        aria-label="Pendiente"
+        title="Pendiente"
+      >
       <Clock className="h-3.5 w-3.5" />
     </span>
   );
@@ -1236,7 +1248,7 @@ function LegDetailRow({ leg }: { leg: HistoryBetLeg }) {
         leg.status === "won" && "border-emerald-500/20 bg-emerald-500/5",
         leg.status === "lost" && "border-rose-500/20 bg-rose-500/5",
         leg.status === "void" && "border-amber-500/20 bg-amber-500/5",
-        leg.status === "pending" && "border-slate-800 bg-slate-900/40"
+        leg.status === "pending" && "border-slate-600 bg-slate-950/50"
       )}
     >
       <LegResultIcon status={leg.status} />
@@ -1244,20 +1256,20 @@ function LegDetailRow({ leg }: { leg: HistoryBetLeg }) {
         <p className="text-sm font-medium leading-snug text-slate-100">
           {matchName}
         </p>
-        <p className="text-xs text-slate-400">
+        <p className="text-sm text-slate-200">
           {formatExplicitBetLine(explicit)}
-          <span className="mx-1.5 text-slate-600">·</span>
-          <span className="font-mono text-emerald-300/90">
+          <span className="mx-1.5 text-slate-400">·</span>
+          <span className="font-mono text-emerald-200">
             @{formatOdds(leg.odds)}
           </span>
         </p>
-        <p className="text-[11px] leading-snug text-sky-300/80">
+        <p className="text-xs leading-snug text-sky-200">
           {explicit.bookmakerTab}
         </p>
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-slate-300">
           {statusLine}
           {leg.leagueName ? (
-            <span className="text-slate-600"> · {leg.leagueName}</span>
+            <span className="text-slate-300"> · {leg.leagueName}</span>
           ) : null}
         </p>
       </div>
@@ -1291,7 +1303,7 @@ function BetRow({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-xl border border-slate-800 bg-slate-950/50 transition-all duration-200 ease-out",
+        "overflow-hidden rounded-xl border border-slate-600 bg-slate-950/50 transition-all duration-200 ease-out motion-reduce:transition-none",
         removing
           ? "max-h-0 -translate-y-1 scale-[0.98] border-transparent opacity-0"
           : "max-h-[2000px] translate-y-0 scale-100 opacity-100"
@@ -1307,9 +1319,9 @@ function BetRow({
               title="Eliminar del historial"
               onClick={onDelete}
               disabled={removing}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-rose-500/15 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/50 disabled:opacity-40"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-slate-300 transition-colors hover:bg-rose-500/20 hover:text-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 disabled:opacity-40"
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 className="h-4 w-4" aria-hidden />
             </button>
             <Badge
               variant={hitsVariant}
@@ -1321,7 +1333,7 @@ function BetRow({
             <Badge variant={bet.mode === "Segura" ? "success" : "warning"}>
               {bet.mode} · {bet.timeframe}
             </Badge>
-            <span className="text-xs text-slate-500">{bet.date}</span>
+            <span className="text-xs text-slate-300">{bet.date}</span>
           </div>
           <p className="text-sm text-slate-200">
             {bet.legs.length} legs · Multiplicador{" "}
@@ -1343,17 +1355,18 @@ function BetRow({
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2.5 text-left text-sm text-slate-300 transition hover:bg-slate-900/80 hover:text-slate-100"
+          className="flex min-h-11 w-full items-center justify-between gap-2 rounded-lg px-2 py-2.5 text-left text-sm text-slate-200 transition hover:bg-slate-800 hover:text-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
           aria-expanded={expanded}
           disabled={removing}
         >
           <span className="inline-flex flex-wrap items-center gap-2">
             Desglose de legs
-            <LegHitsInline hits={hits} className="text-slate-500" />
+            <LegHitsInline hits={hits} className="text-slate-300" />
           </span>
           <ChevronDown
+            aria-hidden
             className={cn(
-              "h-4 w-4 shrink-0 text-slate-500 transition-transform",
+              "h-4 w-4 shrink-0 text-slate-300 transition-transform motion-reduce:transition-none",
               expanded && "rotate-180"
             )}
           />

@@ -8,7 +8,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "rounded-xl border border-slate-800 bg-slate-900/80 text-slate-100 shadow-sm backdrop-blur",
+        "rounded-2xl border border-slate-600/80 bg-[var(--background-elevated)] text-slate-50 shadow-[0_1px_0_rgba(255,255,255,0.04)_inset,0_8px_24px_rgba(0,0,0,0.28)]",
         className
       )}
       {...props}
@@ -42,7 +42,7 @@ export function CardDescription({
   ...props
 }: React.HTMLAttributes<HTMLParagraphElement>) {
   return (
-    <p className={cn("text-sm text-slate-400", className)} {...props} />
+    <p className={cn("text-sm text-slate-300", className)} {...props} />
   );
 }
 

@@ -7,7 +7,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import {
   addBetFromParlay,
@@ -53,6 +52,18 @@ import {
 import { formatValueBadge } from "@/lib/value-finder";
 
 const EXIT_MS = 220;
+
+const RISK_LABELS: Record<GeneratedParlay["riskLevel"], string> = {
+  low: "Riesgo bajo",
+  medium: "Riesgo medio",
+  high: "Riesgo alto",
+  extreme: "Riesgo extremo",
+};
+
+function prefersReducedMotion() {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
 
 function legKey(leg: ParlayLeg): string {
   return `${leg.matchId}::${leg.market}`;
@@ -173,6 +184,12 @@ export function ParlaySlip({
     const key = legKey(leg);
     if (exitingKeys.has(key)) return;
 
+    if (prefersReducedMotion()) {
+      setActiveLegs((prev) => prev.filter((l) => legKey(l) !== key));
+      setRegisterMsg(null);
+      return;
+    }
+
     setExitingKeys((prev) => new Set(prev).add(key));
 
     const existing = exitTimers.current.get(key);
@@ -278,11 +295,13 @@ export function ParlaySlip({
   let legNumber = 0;
 
   return (
-    <Card className="border-emerald-500/20 bg-gradient-to-b from-slate-900 to-slate-950">
+    <Card>
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <CardTitle className="text-lg">Tu Combinada</CardTitle>
+            <h2 className="text-lg font-semibold tracking-tight text-slate-50">
+              Tu combinada
+            </h2>
             <CardDescription>
               {activeParlay.legs.length} selecciones
               {isEdited ? ` de ${originalCount}` : ""} ·{" "}
@@ -301,37 +320,37 @@ export function ParlaySlip({
               </div>
             )}
             {activeParlay.legs.length > 0 && (
-              <p className="mt-2 inline-flex items-center rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-200">
+              <p className="mt-2 inline-flex items-center rounded-md border border-emerald-400/40 bg-emerald-500/15 px-2.5 py-1 text-sm font-medium text-emerald-100">
                 {activeParlay.legs.length} partidos seleccionados para la
                 apuesta real
               </p>
             )}
             {activeParlay.successProbabilityLabel && (
-              <p className="mt-2 text-sm font-medium text-emerald-300/90">
+              <p className="mt-2 text-sm font-medium text-emerald-100">
                 {activeParlay.successProbabilityLabel}
               </p>
             )}
             {activeParlay.fillNotice && (
-              <p className="mt-2 text-xs text-amber-200/90">
+              <p className="mt-2 text-sm text-amber-100">
                 {activeParlay.fillNotice}
               </p>
             )}
           </div>
           <Badge variant={riskVariant}>
-            {activeParlay.riskLevel.toUpperCase()}
+            {RISK_LABELS[activeParlay.riskLevel]}
           </Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {activeLegs.length === 0 ? (
-          <div className="space-y-3 rounded-lg border border-dashed border-slate-700 p-6 text-center">
-            <p className="text-sm text-slate-500">
+          <div className="space-y-3 rounded-lg border border-dashed border-slate-600 p-6 text-center">
+            <p className="text-sm text-slate-200">
               No quedan selecciones. Restablece el ticket o regenera la
               combinada.
             </p>
             {originalCount > 0 && (
               <Button variant="outline" size="sm" onClick={handleRestore}>
-                <RotateCcw className="h-3.5 w-3.5" />
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden />
                 Restablecer Ticket
               </Button>
             )}
@@ -340,11 +359,11 @@ export function ParlaySlip({
           <div className="max-h-[28rem] space-y-4 overflow-y-auto pr-1">
             {groupedLegs.map((group) => (
               <section key={group.key} className="space-y-2">
-                <div className="sticky top-0 z-10 flex items-center justify-between gap-2 rounded-md border border-slate-800/80 bg-slate-950/95 px-2.5 py-1.5 backdrop-blur">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                <div className="sticky top-0 z-10 flex items-center justify-between gap-2 rounded-md border border-slate-600 bg-[var(--background-elevated)] px-2.5 py-1.5">
+                  <p className="text-sm font-semibold text-slate-100">
                     {group.key}
-                  </h3>
-                  <span className="text-[10px] text-slate-500">
+                  </p>
+                  <span className="text-xs text-slate-300">
                     {group.items.length} pick
                     {group.items.length === 1 ? "" : "s"}
                   </span>
@@ -369,7 +388,7 @@ export function ParlaySlip({
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-3 rounded-xl bg-slate-950/70 p-4 transition-all duration-200 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-600 bg-slate-950/70 p-4 sm:grid-cols-3">
           <Stat
             label="Cuota total / Multiplicador"
             value={`${formatOdds(activeParlay.totalOdds)}x`}
@@ -386,7 +405,7 @@ export function ParlaySlip({
         </div>
 
         {activeParlay.legs.length > 0 && (
-          <p className="text-xs leading-relaxed text-slate-400">
+          <p className="text-sm leading-relaxed text-slate-300">
             {activeParlay.riskLabel}
             {" · "}
             Edge medio {formatPercent(activeParlay.averageEdge)}
@@ -415,7 +434,7 @@ export function ParlaySlip({
               variant="outline"
               onClick={handleRestore}
             >
-              <RotateCcw className="h-4 w-4" />
+              <RotateCcw className="h-4 w-4" aria-hidden />
               Restablecer Ticket
             </Button>
           )}
@@ -424,16 +443,19 @@ export function ParlaySlip({
               className="flex-1"
               variant="outline"
               disabled={regenerating}
+              aria-busy={regenerating}
               onClick={onRegenerate}
             >
               {regenerating ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
               ) : (
-                <RefreshCw className="h-4 w-4" />
+                <RefreshCw className="h-4 w-4" aria-hidden />
               )}
-              {fromCache
-                ? "Volver a generar para hoy"
-                : "Regenerar Otra Combinada"}
+              {regenerating
+                ? "Generando…"
+                : fromCache
+                  ? "Volver a generar para hoy"
+                  : "Regenerar otra combinada"}
             </Button>
           )}
         </div>
@@ -448,23 +470,23 @@ export function ParlaySlip({
             >
               {registered ? (
                 <>
-                  <Check className="h-4 w-4" /> Registrada en
+                  <Check className="h-4 w-4" aria-hidden /> Registrada en
                   historial
                 </>
               ) : (
                 <>
-                  <Pin className="h-4 w-4" />
-                  Registrar Apuesta en Historial
+                  <Pin className="h-4 w-4" aria-hidden />
+                  Registrar apuesta en historial
                 </>
               )}
             </Button>
             {registerMsg && (
-              <p className="text-center text-xs text-slate-400">
+              <p role="status" className="text-center text-sm text-slate-300">
                 {registerMsg}{" "}
                 {registered && (
                   <Link
                     href="/stats"
-                    className="text-emerald-400 underline-offset-2 hover:underline"
+                    className="text-emerald-200 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
                   >
                     Ver Estadísticas
                   </Link>
@@ -495,45 +517,45 @@ function LegRow({
   return (
     <li
       className={cn(
-        "flex items-start gap-2 overflow-hidden rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2.5 transition-all duration-200 ease-out",
+        "flex items-start gap-2 overflow-hidden rounded-lg border border-slate-600 bg-slate-950/50 px-3 py-2.5 transition-all duration-200 ease-out motion-reduce:transition-none",
         exiting
-          ? "max-h-0 -translate-x-2 scale-[0.98] border-transparent py-0 opacity-0"
+          ? "max-h-0 -translate-x-2 scale-[0.98] border-transparent py-0 opacity-0 motion-reduce:transition-none"
           : "max-h-[280px] translate-x-0 scale-100 opacity-100"
       )}
     >
-      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-slate-800 text-[10px] font-bold text-slate-400">
+      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded bg-slate-700 text-xs font-bold text-slate-100">
         {index}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium leading-snug text-slate-100">
+        <p className="text-sm font-medium leading-snug text-slate-50">
           {leg.matchLabel}
         </p>
-        <p className="text-xs text-slate-200">
+        <p className="text-sm text-slate-100">
           Apuesta: {formatExplicitBetLine(explicit)}
           {valueBadge ? (
-            <span className="ml-1 inline-flex items-center gap-0.5 text-amber-300">
-              <Flame className="h-3 w-3 text-amber-400" />
+            <span className="ml-1 inline-flex items-center gap-0.5 text-amber-100">
+              <Flame className="h-3 w-3" aria-hidden />
               {valueBadge}
             </span>
           ) : null}
         </p>
-        <p className="text-[11px] leading-snug text-slate-500" title={explicit.condition}>
+        <p className="text-xs leading-snug text-slate-300" title={explicit.condition}>
           Condición: {explicit.condition}
         </p>
-        <p className="text-[11px] leading-snug text-sky-300/90">
+        <p className="text-xs leading-snug text-sky-200">
           {explicit.bookmakerTab}
         </p>
-        <p className="flex items-start gap-1.5 text-[11px] leading-snug text-amber-300/90">
-          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-400" />
+        <p className="flex items-start gap-1.5 text-xs leading-snug text-amber-100">
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
           <span>{explicit.warningNote}</span>
         </p>
         {explicit.cupEquivalent ? (
-          <p className="flex items-start gap-1.5 text-[11px] leading-snug text-emerald-300/80">
-            <Lightbulb className="mt-0.5 h-3 w-3 shrink-0 text-emerald-400" />
+          <p className="flex items-start gap-1.5 text-xs leading-snug text-emerald-100">
+            <Lightbulb className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
             <span>{explicit.cupEquivalent}</span>
           </p>
         ) : null}
-        <p className="text-[11px] text-slate-500">
+        <p className="text-xs text-slate-300">
           {formatKickoffDayLabel(leg.kickoff)} CL · modelo{" "}
           {formatPercent(leg.modelProbability)}
         </p>
@@ -553,7 +575,7 @@ function LegRow({
           </div>
         )}
         {(leg.referee || leg.venue) && (
-          <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-slate-600">
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-slate-300">
             {leg.venue ? (
               <span className="inline-flex items-center gap-0.5">
                 <MapPin className="h-2.5 w-2.5 text-sky-500" />
@@ -567,7 +589,7 @@ function LegRow({
           </p>
         )}
       </div>
-      <span className="font-mono text-sm font-semibold text-emerald-300">
+      <span className="font-mono text-sm font-semibold text-emerald-200">
         @{formatOdds(leg.odds)}
       </span>
       <button
@@ -576,9 +598,9 @@ function LegRow({
         title="Quitar de la apuesta"
         onClick={onRemove}
         disabled={exiting}
-        className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-rose-500/15 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/50 disabled:opacity-40"
+        className="mt-0.5 inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-slate-300 transition-colors hover:bg-rose-500/20 hover:text-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 disabled:opacity-40"
       >
-        <Trash2 className="h-3.5 w-3.5" />
+        <Trash2 className="h-4 w-4" aria-hidden />
       </button>
     </li>
   );
@@ -595,12 +617,12 @@ function Stat({
 }) {
   return (
     <div>
-      <p className="text-[10px] uppercase tracking-wide text-slate-500">
+      <p className="text-xs text-slate-300">
         {label}
       </p>
       <p
-        className={`mt-0.5 font-semibold tabular-nums transition-colors duration-200 ${
-          highlight ? "text-lg text-emerald-300" : "text-slate-100"
+        className={`mt-0.5 font-semibold tabular-nums ${
+          highlight ? "text-lg text-emerald-200" : "text-slate-50"
         }`}
       >
         {value}

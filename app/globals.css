@@ -1,17 +1,33 @@
 @import "tailwindcss";
 
 :root {
-  --background: #020617;
-  --foreground: #f1f5f9;
-  --card: #0f172a;
-  --muted: #94a3b8;
+  /* Dark Mode HIG: dimmer base, brighter elevated surfaces */
+  --background: #080c16;
+  --background-elevated: #172033;
+  --foreground: #f8fafc;
+  --foreground-secondary: #cbd5e1;
+  --foreground-tertiary: #94a3b8;
+  --muted: #cbd5e1;
   --accent: #34d399;
-  --border: #1e293b;
+  --accent-foreground: #042f1e;
+  --border: #3d4f66;
+  --separator: rgba(148, 163, 184, 0.22);
+  --ring: rgba(52, 211, 153, 0.7);
+
+  /* Liquid Glass — regular, opaque enough for dark UI legibility */
+  --glass-bg: rgba(8, 12, 22, 0.84);
+  --glass-border: rgba(226, 232, 240, 0.1);
+  --glass-blur: 18px;
+  --glass-saturate: 1.12;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-card: var(--background-elevated);
+  --color-muted: var(--foreground-secondary);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -26,18 +42,67 @@ body {
   border-color: var(--border);
 }
 
-/* Subtle scrollbar for dark UI */
+.liquid-glass {
+  isolation: isolate;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -100%;
+  z-index: 100;
+  border-radius: 0.75rem;
+  background: var(--accent);
+  color: var(--accent-foreground);
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.skip-link:focus {
+  top: 0.75rem;
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .liquid-glass {
+    background: #10182a;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:focus-within {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: #020617;
+  background: var(--background);
 }
 ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: #475569;
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #64748b;
 }

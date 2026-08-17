@@ -7,7 +7,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import type { BiasBucket } from "@/lib/algorithm-health";
 import { cn, formatPercent } from "@/lib/utils";
@@ -67,40 +66,52 @@ export default function HealthPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <header>
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-50">
-            <Activity className="h-6 w-6 text-sky-400" />
+            <Activity className="h-6 w-6 text-sky-300" aria-hidden />
             Salud del algoritmo
           </h1>
-          <p className="mt-1 text-sm text-slate-400">
+          <p className="mt-2 text-base leading-relaxed text-slate-200">
             Sesgo y calibración por mercado y liga (modelo vs resultado real).
           </p>
-        </div>
-        <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+        </header>
+        <Button
+          variant="outline"
+          onClick={load}
+          disabled={loading}
+          aria-busy={loading}
+          aria-label={loading ? "Actualizando reporte" : "Actualizar reporte"}
+        >
           {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
           ) : (
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className="h-4 w-4" aria-hidden />
           )}
-          Actualizar
+          {loading ? "Actualizando…" : "Actualizar"}
         </Button>
       </div>
 
       {error && (
-        <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-          {error}
+        <Card role="alert" className="border-rose-400/50 bg-rose-950/40">
+          <CardContent className="p-4 text-sm text-rose-100">{error}</CardContent>
+        </Card>
+      )}
+
+      {loading && !data && (
+        <p role="status" aria-live="polite" className="text-sm text-slate-300">
+          Cargando reporte de calibración…
         </p>
       )}
 
       {data?.success && (
         <>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <section aria-label="Resumen de calibración" className="grid gap-3 sm:grid-cols-3">
             <Metric
               label="Legs evaluadas"
               value={String(data.evaluatedLegs ?? 0)}
             />
             <Metric
-              label="Win Rate empírico"
+              label="Win rate empírico"
               value={formatPercent(data.overallWinRate ?? 0)}
               hint={`Modelo medio ${formatPercent(data.overallAvgModelProb ?? 0)}`}
             />
@@ -115,10 +126,10 @@ export default function HealthPage() {
                     : "Dentro de banda sana"
               }
               valueClass={
-                Math.abs(gap) >= 0.08 ? "text-amber-300" : "text-emerald-300"
+                Math.abs(gap) >= 0.08 ? "text-amber-100" : "text-emerald-200"
               }
             />
-          </div>
+          </section>
 
           <div className="grid gap-4 lg:grid-cols-2">
             <BiasTable title="Por mercado" rows={data.byMarket ?? []} />
@@ -126,7 +137,7 @@ export default function HealthPage() {
           </div>
 
           {data.generatedAt && (
-            <p className="text-xs text-slate-600">
+            <p className="text-sm text-slate-300">
               Generado {new Date(data.generatedAt).toLocaleString("es-CL")}
             </p>
           )}
@@ -138,22 +149,25 @@ export default function HealthPage() {
 
 function BiasTable({ title, rows }: { title: string; rows: BiasBucket[] }) {
   return (
-    <Card className="border-slate-800 bg-slate-900/60">
+    <Card>
       <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
+        <h2 className="text-base font-semibold tracking-tight text-slate-50">
+          {title}
+        </h2>
         <CardDescription>
           Win rate vs probabilidad media del modelo
         </CardDescription>
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-slate-200">
             Sin legs liquidadas todavía.
           </p>
         ) : (
           <div className="max-h-[28rem] overflow-y-auto">
             <table className="w-full text-left text-sm">
-              <thead className="sticky top-0 bg-slate-950 text-[11px] uppercase tracking-wide text-slate-500">
+              <caption className="sr-only">{title}</caption>
+              <thead className="sticky top-0 bg-[var(--background-elevated)] text-xs font-medium text-slate-300">
                 <tr>
                   <th className="py-2 pr-2">Grupo</th>
                   <th className="py-2 pr-2">n</th>
@@ -164,14 +178,11 @@ function BiasTable({ title, rows }: { title: string; rows: BiasBucket[] }) {
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr
-                    key={row.key}
-                    className="border-t border-slate-800/80"
-                  >
-                    <td className="max-w-[10rem] truncate py-2 pr-2 text-slate-200">
+                  <tr key={row.key} className="border-t border-slate-600/80">
+                    <td className="max-w-[10rem] truncate py-2 pr-2 text-slate-100">
                       {row.label}
                     </td>
-                    <td className="py-2 pr-2 tabular-nums text-slate-400">
+                    <td className="py-2 pr-2 tabular-nums text-slate-300">
                       {row.won + row.lost}
                     </td>
                     <td className="py-2 pr-2 tabular-nums">
@@ -181,8 +192,8 @@ function BiasTable({ title, rows }: { title: string; rows: BiasBucket[] }) {
                       className={cn(
                         "py-2 pr-2 tabular-nums",
                         row.avgEdge >= 0.05
-                          ? "text-emerald-300"
-                          : "text-slate-400"
+                          ? "text-emerald-200"
+                          : "text-slate-300"
                       )}
                     >
                       {row.avgEdge >= 0 ? "+" : ""}
@@ -206,21 +217,21 @@ function HealthBadge({ health }: { health: BiasBucket["health"] }) {
   if (health === "healthy") {
     return (
       <Badge variant="success" className="gap-1">
-        <CheckCircle2 className="h-3 w-3" /> OK
+        <CheckCircle2 className="h-3 w-3" aria-hidden /> OK
       </Badge>
     );
   }
   if (health === "overconfident") {
     return (
       <Badge variant="warning" className="gap-1">
-        <AlertTriangle className="h-3 w-3" /> Sobre
+        <AlertTriangle className="h-3 w-3" aria-hidden /> Sobre
       </Badge>
     );
   }
   if (health === "underconfident") {
     return (
       <Badge variant="info" className="gap-1">
-        <ShieldAlert className="h-3 w-3" /> Sub
+        <ShieldAlert className="h-3 w-3" aria-hidden /> Sub
       </Badge>
     );
   }
@@ -243,20 +254,18 @@ function Metric({
   valueClass?: string;
 }) {
   return (
-    <Card className="border-slate-800 bg-slate-900/60">
+    <Card>
       <CardContent className="pt-4">
-        <p className="text-[10px] uppercase tracking-wide text-slate-500">
-          {label}
-        </p>
+        <p className="text-xs text-slate-300">{label}</p>
         <p
           className={cn(
-            "mt-1 text-xl font-semibold tabular-nums text-slate-100",
+            "mt-1 text-xl font-semibold tabular-nums text-slate-50",
             valueClass
           )}
         >
           {value}
         </p>
-        {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+        {hint && <p className="mt-1 text-xs text-slate-300">{hint}</p>}
       </CardContent>
     </Card>
   );

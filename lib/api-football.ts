@@ -31,7 +31,7 @@ import {
   ALLOWED_LEAGUE_IDS,
   CLUB_FRIENDLY_LEAGUE_IDS,
   ELITE_DOMESTIC_LEAGUE_IDS,
-  isAllowedLeagueId,
+  isAllowedCompetition,
   isClubFriendlyLeagueId,
 } from "../config/allowed-leagues";
 import { CHILE_TIMEZONE, chileDateApiWindow, chileDateOffset, chileDateRange, chileDateString } from "./utils";
@@ -467,7 +467,7 @@ function shouldKeepFixture(
   const home = item.teams.home;
   const away = item.teams.away;
 
-  if (!isAllowedLeagueId(leagueId)) return false;
+  if (!isAllowedCompetition(leagueId, item.league.name)) return false;
 
   if (isYouthOrReserve(home.name) || isYouthOrReserve(away.name)) {
     return false;

@@ -36,7 +36,7 @@ import {
   resolveMinProbability,
 } from "./model-weights";
 import { chileDateString, formatKickoffDayLabel } from "./utils";
-import { isAllowedLeagueName } from "../config/allowed-leagues";
+import { isAllowedCompetition } from "../config/allowed-leagues";
 import { prioritizeValueLegs, valueRankBonus } from "./value-finder";
 import {
   formatExplicitBetLine,
@@ -49,11 +49,12 @@ export { DEFAULT_AUTO_PARLAY_CONFIG } from "./parlay-defaults";
 export { getWeeklyDateRange };
 
 /**
- * Defense-in-depth: drop any match whose league name is outside the elite whitelist.
- * Primary filtering happens in api-football by league ID.
+ * Defense-in-depth: ID is source of truth; name cannot rescue a lower division
+ * (e.g. Colombia Primera B labeled "Primera B" must not match Chile's alias).
+ * Primary filtering happens in api-football; this clamp runs again before parlays.
  */
 export function filterEliteWhitelistMatches(matches: Match[]): Match[] {
-  return matches.filter((m) => isAllowedLeagueName(m.leagueName));
+  return matches.filter((m) => isAllowedCompetition(m.leagueId, m.leagueName));
 }
 
 /** Strategic / safe modes: only bookmaker-friendly high-probability lines */

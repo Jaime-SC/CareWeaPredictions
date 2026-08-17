@@ -7,7 +7,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import type { BacktestResult } from "@/lib/backtest";
 import { cn, formatOdds, formatPercent } from "@/lib/utils";
@@ -27,6 +26,16 @@ type ApiPayload = BacktestResult & {
 };
 
 const WINDOWS = [30, 60, 90] as const;
+
+const TICKET_STATUS_LABEL: Record<
+  "WON" | "LOST" | "VOID" | "INCOMPLETE",
+  string
+> = {
+  WON: "Ganada",
+  LOST: "Perdida",
+  VOID: "Anulada",
+  INCOMPLETE: "Incompleta",
+};
 
 export default function BacktestPage() {
   const [days, setDays] = useState<(typeof WINDOWS)[number]>(60);
@@ -58,109 +67,135 @@ export default function BacktestPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 px-4 py-8 sm:px-6">
-      <div>
+      <header>
         <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-50">
-          <FlaskConical className="h-6 w-6 text-emerald-400" />
+          <FlaskConical className="h-6 w-6 text-emerald-300" aria-hidden />
           Backtesting histórico
         </h1>
-        <p className="mt-1 text-sm text-slate-400">
+        <p className="mt-2 text-base leading-relaxed text-slate-200">
           Simula el algoritmo activo (piso 80%, 15 legs) sobre fixtures
           finalizados en SQLite.
         </p>
-      </div>
+      </header>
 
-      <Card className="border-slate-800 bg-slate-900/60">
+      <Card>
         <CardHeader>
-          <CardTitle className="text-base">Ventana de simulación</CardTitle>
+          <h2 className="text-base font-semibold tracking-tight text-slate-50">
+            Ventana de simulación
+          </h2>
           <CardDescription>
             Elige 30–90 días y ejecuta el replay sin llamar a la API live.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">
-          <div className="flex gap-1 rounded-lg border border-slate-800 p-1">
-            {WINDOWS.map((w) => (
-              <button
-                key={w}
-                type="button"
-                onClick={() => setDays(w)}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-sm transition",
-                  days === w
-                    ? "bg-emerald-500/20 text-emerald-300"
-                    : "text-slate-400 hover:text-slate-200"
-                )}
-              >
-                {w}d
-              </button>
-            ))}
+          <div
+            className="flex gap-1 rounded-xl border border-slate-600 p-1"
+            role="radiogroup"
+            aria-label="Ventana en días"
+            onKeyDown={(event) => {
+              const index = WINDOWS.indexOf(days);
+              if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                event.preventDefault();
+                setDays(WINDOWS[(index + 1) % WINDOWS.length]);
+              } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                event.preventDefault();
+                setDays(
+                  WINDOWS[(index - 1 + WINDOWS.length) % WINDOWS.length]
+                );
+              }
+            }}
+          >
+            {WINDOWS.map((w) => {
+              const checked = days === w;
+              return (
+                <button
+                  key={w}
+                  type="button"
+                  role="radio"
+                  aria-checked={checked}
+                  tabIndex={checked ? 0 : -1}
+                  onClick={() => setDays(w)}
+                  className={cn(
+                    "min-h-11 min-w-11 rounded-lg px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400",
+                    checked
+                      ? "bg-emerald-500/20 text-emerald-100"
+                      : "text-slate-200 hover:text-slate-50"
+                  )}
+                >
+                  {w} días
+                </button>
+              );
+            })}
           </div>
-          <Button onClick={run} disabled={loading}>
+          <Button onClick={run} disabled={loading} aria-busy={loading}>
             {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
             ) : (
-              <Play className="h-4 w-4" />
+              <Play className="h-4 w-4" aria-hidden />
             )}
-            Ejecutar backtest
+            {loading ? "Ejecutando…" : "Ejecutar backtest"}
           </Button>
         </CardContent>
       </Card>
 
       {error && (
-        <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-          {error}
-        </p>
+        <Card role="alert" className="border-rose-400/50 bg-rose-950/40">
+          <CardContent className="p-4 text-sm text-rose-100">{error}</CardContent>
+        </Card>
       )}
 
       {result && (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <section aria-label="Resultados del backtest" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Metric
               label="Tickets simulados"
               value={String(result.totalSimulatedTickets)}
               hint={`${result.fixturesAvailable} fixtures · ${result.daysWithPool} días con pool`}
             />
             <Metric
-              label="Win Rate simulado"
+              label="Win rate simulado"
               value={formatPercent(result.winRate)}
-              hint={`${result.won}G / ${result.lost}P`}
+              hint={`${result.won} ganadas / ${result.lost} perdidas`}
             />
             <Metric
               label="ROI total (U)"
               value={`${result.totalRoiUnits >= 0 ? "+" : ""}${result.totalRoiUnits.toFixed(2)}U`}
               hint={`${result.roiPct >= 0 ? "+" : ""}${result.roiPct.toFixed(1)}%`}
-              valueClass={roiPositive ? "text-emerald-300" : "text-rose-300"}
+              valueClass={roiPositive ? "text-emerald-200" : "text-rose-200"}
               icon={
                 roiPositive ? (
-                  <TrendingUp className="h-3.5 w-3.5 text-emerald-400" />
+                  <TrendingUp className="h-3.5 w-3.5 text-emerald-200" aria-hidden />
                 ) : (
-                  <TrendingDown className="h-3.5 w-3.5 text-rose-400" />
+                  <TrendingDown className="h-3.5 w-3.5 text-rose-200" aria-hidden />
                 )
               }
             />
             <Metric
               label="Cuotas media G/P"
               value={`${formatOdds(result.avgWinningOdds)} / ${formatOdds(result.avgLosingOdds)}`}
-              hint="Promedio odds tickets ganadores vs perdedores"
+              hint="Promedio de cuotas: tickets ganadores vs perdedores"
             />
-          </div>
+          </section>
 
-          <Card className="border-slate-800 bg-slate-900/60">
+          <Card>
             <CardHeader>
-              <CardTitle className="text-base">Tickets por día</CardTitle>
+              <h2 className="text-base font-semibold tracking-tight text-slate-50">
+                Tickets por día
+              </h2>
               <CardDescription>
                 {result.fromDate} → {result.toDate}
               </CardDescription>
             </CardHeader>
             <CardContent>
               {result.tickets.length === 0 ? (
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-slate-200">
                   No hay suficientes fixtures finalizados en SQLite para esta
                   ventana. Registra apuestas o liquida resultados primero.
                 </p>
               ) : (
                 <div className="max-h-[28rem] overflow-y-auto">
                   <table className="w-full text-left text-sm">
-                    <thead className="sticky top-0 bg-slate-950 text-[11px] uppercase tracking-wide text-slate-500">
+                    <thead className="sticky top-0 bg-[var(--background-elevated)] text-xs font-medium text-slate-300">
                       <tr>
                         <th className="py-2 pr-2">Fecha</th>
                         <th className="py-2 pr-2">Legs</th>
@@ -174,16 +209,16 @@ export default function BacktestPage() {
                       {result.tickets.map((t) => (
                         <tr
                           key={`${t.date}-${t.totalOdds}`}
-                          className="border-t border-slate-800/80"
+                          className="border-t border-slate-600/80"
                         >
-                          <td className="py-2 pr-2 tabular-nums text-slate-300">
+                          <td className="py-2 pr-2 tabular-nums text-slate-200">
                             {t.date}
                           </td>
                           <td className="py-2 pr-2 tabular-nums">{t.legs}</td>
-                          <td className="py-2 pr-2 tabular-nums text-emerald-300/90">
+                          <td className="py-2 pr-2 tabular-nums text-emerald-200">
                             {formatOdds(t.totalOdds)}x
                           </td>
-                          <td className="py-2 pr-2 tabular-nums text-slate-400">
+                          <td className="py-2 pr-2 tabular-nums text-slate-300">
                             {formatPercent(t.jointProbability, 2)}
                           </td>
                           <td className="py-2 pr-2">
@@ -193,10 +228,10 @@ export default function BacktestPage() {
                             className={cn(
                               "py-2 tabular-nums",
                               t.pnlUnits > 0
-                                ? "text-emerald-300"
+                                ? "text-emerald-200"
                                 : t.pnlUnits < 0
-                                  ? "text-rose-300"
-                                  : "text-slate-500"
+                                  ? "text-rose-200"
+                                  : "text-slate-300"
                             )}
                           >
                             {t.pnlUnits >= 0 ? "+" : ""}
@@ -229,7 +264,7 @@ function StatusBadge({
         : status === "VOID"
           ? "warning"
           : "default";
-  return <Badge variant={variant}>{status}</Badge>;
+  return <Badge variant={variant}>{TICKET_STATUS_LABEL[status]}</Badge>;
 }
 
 function Metric({
@@ -246,21 +281,19 @@ function Metric({
   icon?: ReactNode;
 }) {
   return (
-    <Card className="border-slate-800 bg-slate-900/60">
+    <Card>
       <CardContent className="pt-4">
-        <p className="text-[10px] uppercase tracking-wide text-slate-500">
-          {label}
-        </p>
+        <p className="text-xs text-slate-300">{label}</p>
         <p
           className={cn(
-            "mt-1 flex items-center gap-1.5 text-xl font-semibold tabular-nums text-slate-100",
+            "mt-1 flex items-center gap-1.5 text-xl font-semibold tabular-nums text-slate-50",
             valueClass
           )}
         >
           {icon}
           {value}
         </p>
-        {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+        {hint && <p className="mt-1 text-xs text-slate-300">{hint}</p>}
       </CardContent>
     </Card>
   );
