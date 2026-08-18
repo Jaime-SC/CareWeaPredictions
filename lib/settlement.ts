@@ -1,5 +1,5 @@
 /**
- * Server-side auto-settlement for PENDING accumulator tickets in SQLite.
+ * Server-side auto-settlement for PENDING accumulator tickets in Neon.
  * Fetches finished scores (FT / AET / PEN / EXTRA) and evaluates each leg.
  * POSTP / CANC / ABD / SUSP / INT → CANCELLED (void, odds 1.00).
  */
@@ -11,8 +11,11 @@ import {
   type FixtureResult,
 } from "./result-checker";
 import {
+  STALE_UNRESOLVED_DAYS,
+  isCivilDateStale,
   isFixtureFinished,
   isFixtureLive,
+  isFixtureStaleUnresolved,
   isFixtureVoided,
   isKickoffDueForSettlement,
 } from "./match-status";
@@ -362,12 +365,19 @@ export async function settlePendingTickets(): Promise<SettlementResult> {
       } else if (finished && (homeGoals == null || awayGoals == null)) {
         nextLeg = "void";
         reason = `Finalizado ${statusShort || "FT"} sin marcador usable → CANCELLED.`;
+      } else if (
+        due &&
+        !apiFx &&
+        (isFixtureStaleUnresolved(pred.fixture.matchDate, nowMs) ||
+          isCivilDateStale(ticket.date, nowMs))
+      ) {
+        nextLeg = "void";
+        reason = `Sin resultado API tras ${STALE_UNRESOLVED_DAYS} días (fixture ${pred.fixture.apiFixtureId}). Anulado.`;
       } else {
         if (pred.fixture.apiFixtureId <= 0) {
           reason = "Sin ID de API-Football para este fixture.";
         } else if (due && !apiFx) {
           reason = `Sin payload API para fixture ${pred.fixture.apiFixtureId} (${label}).`;
-          errors.push(reason);
         } else {
           reason = `API devolvió ${statusShort || "NS"} sin marcador final.`;
         }

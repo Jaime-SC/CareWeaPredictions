@@ -2,7 +2,7 @@
  * API-Football fixture.status.short classification for settlement.
  * https://www.api-football.com/documentation-v3#tag/Fixtures
  */
-import { chileDateString } from "./utils";
+import { chileDateOffset, chileDateString } from "./utils";
 
 /** Full time / finished — evaluate the market against the final score. */
 export const FINISHED_STATUSES = [
@@ -38,6 +38,12 @@ export const LIVE_STATUSES = [
 
 /** @deprecated Kickoff-in-the-past is enough; kept at 0 for callers. */
 export const SETTLE_DELAY_MS = 0;
+
+/**
+ * Chile civil days after kickoff before a missing API payload is treated as
+ * unrecoverable (orphaned tickets from a previous DB / machine).
+ */
+export const STALE_UNRESOLVED_DAYS = 2;
 
 const FINISHED_SET = new Set<string>(FINISHED_STATUSES);
 const VOID_SET = new Set<string>(VOID_STATUSES);
@@ -77,4 +83,35 @@ export function isKickoffDueForSettlement(
   const chileToday = chileDateString(new Date(nowMs));
   const chileKick = chileDateString(new Date(t));
   return chileKick < chileToday;
+}
+
+/**
+ * Kickoff is old enough that a missing API-Football payload will not arrive.
+ * Voids pending legs left over from another environment (e.g. pre-Neon).
+ */
+export function isFixtureStaleUnresolved(
+  matchDate: Date | string | number | null | undefined,
+  nowMs = Date.now(),
+  staleDays = STALE_UNRESOLVED_DAYS
+): boolean {
+  if (matchDate == null) return false;
+  const t =
+    matchDate instanceof Date
+      ? matchDate.getTime()
+      : new Date(matchDate).getTime();
+  if (!Number.isFinite(t)) return false;
+  const chileToday = chileDateString(new Date(nowMs));
+  const chileKick = chileDateString(new Date(t));
+  return chileKick <= chileDateOffset(-staleDays, chileToday);
+}
+
+/** YYYY-MM-DD ticket date old enough to stop retrying missing API payloads. */
+export function isCivilDateStale(
+  ymd: string | null | undefined,
+  nowMs = Date.now(),
+  staleDays = STALE_UNRESOLVED_DAYS
+): boolean {
+  if (!ymd || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return false;
+  const chileToday = chileDateString(new Date(nowMs));
+  return ymd <= chileDateOffset(-staleDays, chileToday);
 }

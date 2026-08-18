@@ -1,5 +1,6 @@
 "use client";
 
+import { BetHistory } from "@/components/bet-history";
 import { StatsOverview } from "@/components/StatsOverview";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -16,12 +17,9 @@ import type {
   TrainingFeatureRow,
 } from "@/lib/bet-types";
 import {
-  type BetStatus,
   type BreakdownItem,
   type HistoryBet,
-  type HistoryBetLeg,
   type HistorySummary,
-  type LegStatus,
   clearHistory,
   computeBankrollSeries,
   computeLeagueBreakdown,
@@ -30,33 +28,21 @@ import {
   computeSummary,
   countSettledByStrategy,
   marketGroupLabel,
-  countLegHits,
   deleteBetById,
   formatSignedUnits,
   loadBets,
   purgeFakeHistory,
   replaceBets,
 } from "@/lib/history-tracker";
-import { formatLegMatchStatus, updatePendingBets } from "@/lib/result-checker";
+import { updatePendingBets } from "@/lib/result-checker";
+import { cn, chileDateString, formatPercent } from "@/lib/utils";
 import {
-  formatExplicitBetLine,
-  getExplicitPickLabel,
-} from "@/lib/formatters";
-import { cn, chileDateString, formatOdds, formatPercent } from "@/lib/utils";
-import {
-  Check,
-  CheckCircle2,
-  ChevronDown,
-  CircleSlash,
-  Clock,
   Download,
   Info,
   Loader2,
   RefreshCw,
   Settings2,
   Trash2,
-  X,
-  XCircle,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -64,7 +50,6 @@ import {
   useEffect,
   useMemo,
   useState,
-  type ReactNode,
 } from "react";
 import {
   Area,
@@ -151,90 +136,6 @@ function summaryFromApi(
   };
 }
 
-function ticketStatusBadge(status: BetStatus): {
-  variant: "success" | "danger" | "warning" | "info";
-  label: ReactNode;
-} {
-  if (status === "won") {
-    return {
-      variant: "success",
-      label: (
-        <span className="inline-flex items-center gap-1">
-          <CheckCircle2 className="h-3 w-3 text-emerald-400" />
-          Ganada
-        </span>
-      ),
-    };
-  }
-  if (status === "lost") {
-    return {
-      variant: "danger",
-      label: (
-        <span className="inline-flex items-center gap-1">
-          <XCircle className="h-3 w-3 text-rose-400" />
-          Perdida
-        </span>
-      ),
-    };
-  }
-  if (status === "void") {
-    return {
-      variant: "warning",
-      label: (
-        <span className="inline-flex items-center gap-1">
-          <CircleSlash className="h-3 w-3 text-amber-300" />
-          Cancelada
-        </span>
-      ),
-    };
-  }
-  return {
-    variant: "info",
-    label: (
-      <span className="inline-flex items-center gap-1">
-        <Clock className="h-3 w-3 text-sky-400" />
-        En juego
-      </span>
-    ),
-  };
-}
-
-function LegHitsInline({
-  hits,
-  className,
-}: {
-  hits: { won: number; lost: number; pending: number; voided?: number };
-  className?: string;
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs",
-        className
-      )}
-    >
-      <span className="inline-flex items-center gap-0.5 text-emerald-200">
-        <Check className="h-3 w-3" strokeWidth={2.5} />
-        {hits.won}
-      </span>
-      <span className="inline-flex items-center gap-0.5 text-rose-200">
-        <X className="h-3 w-3" strokeWidth={2.5} />
-        {hits.lost}
-      </span>
-      <span className="inline-flex items-center gap-0.5 text-sky-200">
-        <Clock className="h-3 w-3" />
-        {hits.pending}
-      </span>
-      {(hits.voided ?? 0) > 0 ? (
-        <span className="inline-flex items-center gap-0.5 text-amber-300">
-          <CircleSlash className="h-3 w-3" />
-          {hits.voided}
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
 export default function StatsPage() {
   const [bets, setBets] = useState<HistoryBet[]>([]);
   const [byLeague, setByLeague] = useState<LeagueStatsRow[]>([]);
@@ -316,6 +217,10 @@ export default function StatsPage() {
       const voided = settle.ticketsVoided ?? 0;
       const unresolved =
         settle.diagnostics?.filter((d) => d.action === "unresolved") ?? [];
+      // Missing API payload is retried / auto-voided when stale — not a user error.
+      const visibleUnresolved = unresolved.filter(
+        (d) => !d.reason.includes("Sin payload API")
+      );
 
       console.info("[settle] Sincronización de marcadores", {
         settledTicketsCount: n,
@@ -330,18 +235,22 @@ export default function StatsPage() {
       });
 
       if (n > 0) {
+        const voidPart =
+          voided > 0 ? `, ${voided} Anulados` : "";
         setUpdateMsg(
-          `Sincronización completada: ${n} boletos actualizados (${won} Ganados, ${lost} Perdidos).`
+          `Sincronización completada: ${n} boletos actualizados (${won} Ganados, ${lost} Perdidos${voidPart}).`
         );
-        if (unresolved.length > 0) {
+        if (visibleUnresolved.length > 0) {
           setUpdateError(
-            unresolved
+            visibleUnresolved
               .slice(0, 4)
               .map((d) => `${d.match}: ${d.reason}`)
               .join(" · ")
           );
         } else if (!settle.success && (settle.error || settle.errors?.length)) {
           setUpdateError(settle.error ?? settle.errors?.[0] ?? null);
+        } else {
+          setUpdateError(null);
         }
         return;
       }
@@ -351,9 +260,9 @@ export default function StatsPage() {
         );
         return;
       }
-      if (unresolved.length > 0) {
+      if (visibleUnresolved.length > 0) {
         setUpdateError(
-          unresolved
+          visibleUnresolved
             .slice(0, 4)
             .map((d) => `${d.match}: ${d.reason}`)
             .join(" · ")
@@ -738,53 +647,11 @@ export default function StatsPage() {
         <>
           <StatsOverview summary={summary} />
 
-          {pendingBets.length > 0 && (
-            <Card className="border-sky-500/30 bg-sky-950/15">
-              <CardHeader>
-                <div className="flex flex-wrap items-center gap-2">
-                  <CardTitle>Boletos en juego / pendientes</CardTitle>
-                  <Badge variant="info" className="gap-1">
-                    <Clock className="h-3 w-3 text-sky-400" />
-                    {pendingBets.length} en curso
-                  </Badge>
-                </div>
-                <CardDescription>
-                  Combinadas cuyo resultado aún no está liquidado. No entran en
-                  Win Rate %, ROI ni precisión del algoritmo. Al abrir esta
-                  página se consultan marcadores de partidos con kickoff
-                  vencido (FT, AET, PEN, EXTRA).
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {pendingBets.map((bet) => {
-                  const hits = countLegHits(bet.legs);
-                  return (
-                    <div
-                      key={bet.id}
-                      className="flex flex-col gap-1 rounded-lg border border-sky-500/20 bg-slate-950/50 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div className="min-w-0 space-y-0.5">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="info" className="gap-1">
-                            <Clock className="h-3 w-3 text-sky-400" />
-                            En juego
-                          </Badge>
-                          <Badge variant={bet.mode === "Segura" ? "success" : "warning"}>
-                            {bet.mode} · {bet.timeframe}
-                          </Badge>
-                          <span className="text-xs text-slate-300">{bet.date}</span>
-                        </div>
-                        <p className="text-sm text-slate-200">
-                          {bet.legs.length} legs · {formatOdds(bet.totalOdds)}x · 1U
-                          <LegHitsInline hits={hits} className="ml-2" />
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </CardContent>
-            </Card>
-          )}
+          <BetHistory
+            bets={bets}
+            removingIds={removingIds}
+            onDelete={handleDeleteBet}
+          />
 
           {/* 1. By competition */}
           <Card>
@@ -1084,25 +951,6 @@ export default function StatsPage() {
               items={marketBreakdown}
             />
           </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Historial de apuestas</CardTitle>
-              <CardDescription>
-                Persistido en Neon · resultado según marcador real
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {bets.map((bet) => (
-                <BetRow
-                  key={bet.id}
-                  bet={bet}
-                  removing={removingIds.has(bet.id)}
-                  onDelete={() => handleDeleteBet(bet.id)}
-                />
-              ))}
-            </CardContent>
-          </Card>
         </>
       )}
     </div>
@@ -1171,218 +1019,5 @@ function BreakdownCard({
         <MarketBars items={items} />
       </CardContent>
     </Card>
-  );
-}
-
-function legHitsBadgeVariant(
-  betStatus: BetStatus
-): "success" | "danger" | "warning" | "info" {
-  if (betStatus === "won") return "success";
-  if (betStatus === "lost") return "danger";
-  if (betStatus === "void") return "warning";
-  return "info";
-}
-
-function LegResultIcon({ status }: { status: LegStatus }) {
-  if (status === "won") {
-    return (
-      <span
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-200"
-        aria-label="Acertada"
-        title="Acertada"
-      >
-        <Check className="h-4 w-4" strokeWidth={2.5} />
-      </span>
-    );
-  }
-  if (status === "lost") {
-    return (
-      <span
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-rose-500/20 text-rose-200"
-        aria-label="Fallida"
-        title="Fallida"
-      >
-        <X className="h-4 w-4" strokeWidth={2.5} />
-      </span>
-    );
-  }
-  if (status === "void") {
-    return (
-      <span
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-100"
-        aria-label="Anulada"
-        title="Anulada"
-      >
-        <CircleSlash className="h-3.5 w-3.5" />
-      </span>
-    );
-  }
-  return (
-      <span
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-500/20 text-sky-200"
-        aria-label="Pendiente"
-        title="Pendiente"
-      >
-      <Clock className="h-3.5 w-3.5" />
-    </span>
-  );
-}
-
-function LegDetailRow({ leg }: { leg: HistoryBetLeg }) {
-  const home = leg.homeTeam || leg.matchLabel.split(/\s+vs\.?\s+/i)[0] || "—";
-  const away =
-    leg.awayTeam || leg.matchLabel.split(/\s+vs\.?\s+/i)[1] || "";
-  const matchName = away ? `${home} vs ${away}` : home;
-  const statusLine = formatLegMatchStatus(leg);
-  const explicit = getExplicitPickLabel(
-    leg.market,
-    leg.marketLabel,
-    home,
-    away || "Visitante"
-  );
-
-  return (
-    <li
-      className={cn(
-        "flex gap-3 rounded-lg border px-3 py-2.5",
-        leg.status === "won" && "border-emerald-500/20 bg-emerald-500/5",
-        leg.status === "lost" && "border-rose-500/20 bg-rose-500/5",
-        leg.status === "void" && "border-amber-500/20 bg-amber-500/5",
-        leg.status === "pending" && "border-slate-600 bg-slate-950/50"
-      )}
-    >
-      <LegResultIcon status={leg.status} />
-      <div className="min-w-0 flex-1 space-y-0.5">
-        <p className="text-sm font-medium leading-snug text-slate-100">
-          {matchName}
-        </p>
-        <p className="text-sm text-slate-200">
-          {formatExplicitBetLine(explicit)}
-          <span className="mx-1.5 text-slate-400">·</span>
-          <span className="font-mono text-emerald-200">
-            @{formatOdds(leg.odds)}
-          </span>
-        </p>
-        <p className="text-xs leading-snug text-sky-200">
-          {explicit.bookmakerTab}
-        </p>
-        <p className="text-xs text-slate-300">
-          {statusLine}
-          {leg.leagueName ? (
-            <span className="text-slate-300"> · {leg.leagueName}</span>
-          ) : null}
-        </p>
-      </div>
-    </li>
-  );
-}
-
-function BetRow({
-  bet,
-  removing = false,
-  onDelete,
-}: {
-  bet: HistoryBet;
-  removing?: boolean;
-  onDelete: () => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-
-  const hits = countLegHits(bet.legs);
-  const hitsVariant = legHitsBadgeVariant(bet.status);
-
-  const statusBadge = ticketStatusBadge(bet.status);
-
-  const unitPnl =
-    bet.status === "won"
-      ? bet.potentialReturn - bet.stakeCLP
-      : bet.status === "lost"
-        ? -bet.stakeCLP
-        : 0;
-
-  return (
-    <div
-      className={cn(
-        "overflow-hidden rounded-xl border border-slate-600 bg-slate-950/50 transition-all duration-200 ease-out motion-reduce:transition-none",
-        removing
-          ? "max-h-0 -translate-y-1 scale-[0.98] border-transparent opacity-0"
-          : "max-h-[2000px] translate-y-0 scale-100 opacity-100"
-      )}
-    >
-      <div className="p-4">
-        <div className="min-w-0 space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
-            <button
-              type="button"
-              aria-label="Eliminar esta combinada del historial"
-              title="Eliminar del historial"
-              onClick={onDelete}
-              disabled={removing}
-              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-slate-300 transition-colors hover:bg-rose-500/20 hover:text-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 disabled:opacity-40"
-            >
-              <Trash2 className="h-4 w-4" aria-hidden />
-            </button>
-            <Badge
-              variant={hitsVariant}
-              className="gap-1 font-semibold tracking-tight"
-            >
-              <Check className="h-3 w-3 text-emerald-400" strokeWidth={2.5} />
-              {hits.won} / {hits.total} Acertadas
-            </Badge>
-            <Badge variant={bet.mode === "Segura" ? "success" : "warning"}>
-              {bet.mode} · {bet.timeframe}
-            </Badge>
-            <span className="text-xs text-slate-300">{bet.date}</span>
-          </div>
-          <p className="text-sm text-slate-200">
-            {bet.legs.length} legs · Multiplicador{" "}
-            {formatOdds(bet.totalOdds)}x · 1U
-          </p>
-          {(bet.status === "won" || bet.status === "lost") && (
-            <p
-              className={`text-xs font-medium ${
-                unitPnl >= 0 ? "text-emerald-400" : "text-rose-400"
-              }`}
-            >
-              Resultado {formatSignedUnits(unitPnl)}
-            </p>
-          )}
-        </div>
-      </div>
-
-      <div className="border-t border-slate-800/80 px-2 pb-2">
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="flex min-h-11 w-full items-center justify-between gap-2 rounded-lg px-2 py-2.5 text-left text-sm text-slate-200 transition hover:bg-slate-800 hover:text-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
-          aria-expanded={expanded}
-          disabled={removing}
-        >
-          <span className="inline-flex flex-wrap items-center gap-2">
-            Desglose de legs
-            <LegHitsInline hits={hits} className="text-slate-300" />
-          </span>
-          <ChevronDown
-            aria-hidden
-            className={cn(
-              "h-4 w-4 shrink-0 text-slate-300 transition-transform motion-reduce:transition-none",
-              expanded && "rotate-180"
-            )}
-          />
-        </button>
-
-        {expanded && (
-          <ul className="space-y-2 px-1 pb-2 pt-1">
-            {bet.legs.map((leg, idx) => (
-              <LegDetailRow
-                key={`${leg.fixtureId}-${leg.market}-${idx}`}
-                leg={leg}
-              />
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
   );
 }
