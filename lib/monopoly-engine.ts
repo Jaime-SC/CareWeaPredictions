@@ -22,6 +22,12 @@ import type {
   ParlayStatus,
 } from "./types";
 import { notesForFlags } from "./context-engine";
+import {
+  applyKnockoutMarketAdjustments,
+  evaluateKnockoutContext,
+  knockoutMarketLabel,
+  toKnockoutContext,
+} from "./knockout-engine";
 import { chileDateOffset, chileDateString, getWeeklyDateRange } from "./utils";
 export type { WeeklyDateRange } from "./utils";
 export { getWeeklyDateRange };
@@ -312,14 +318,32 @@ function monopolyPoissonBoard(match: Match): {
   const matrix = buildScoreMatrix(xg.home, xg.away);
   const outcomes = matchOutcomeProbabilities(matrix);
   const decisive = outcomes.home + outcomes.away;
-  return {
+  const knockout = applyKnockoutMarketAdjustments(match, {
     home: outcomes.home,
-    away: outcomes.away,
     draw: outcomes.draw,
+    away: outcomes.away,
+    "1x": outcomes.home + outcomes.draw,
     x2: outcomes.away + outcomes.draw,
-    dnbAway: decisive > 0 ? outcomes.away / decisive : 0.5,
-    homeOver15: teamOverProbability(matrix, "home", 1.5),
-    awayOver15: teamOverProbability(matrix, "away", 1.5),
+    over_0_5: 0,
+    over_1_5: 0,
+    over_2_5: 0,
+    under_3_5: 0,
+    under_4_5: 0,
+    home_scores: 0,
+    away_scores: 0,
+    home_over_1_5: teamOverProbability(matrix, "home", 1.5),
+    away_over_1_5: teamOverProbability(matrix, "away", 1.5),
+    dnb_home: decisive > 0 ? outcomes.home / decisive : 0.5,
+    dnb_away: decisive > 0 ? outcomes.away / decisive : 0.5,
+  });
+  return {
+    home: knockout.home,
+    away: knockout.away,
+    draw: knockout.draw,
+    x2: knockout.x2,
+    dnbAway: knockout.dnb_away,
+    homeOver15: knockout.home_over_1_5,
+    awayOver15: knockout.away_over_1_5,
   };
 }
 
@@ -330,15 +354,19 @@ function toPrediction(
 ): MarketPrediction {
   const odds = oddsForResolvedMarket(match, market, probability);
   const implied = impliedProbability(odds);
+  const knockoutEval = evaluateKnockoutContext(match);
+  const knockoutContext = toKnockoutContext(knockoutEval);
   return {
     market,
-    label: MARKET_LABELS[market],
+    label: knockoutMarketLabel(MARKET_LABELS[market], knockoutEval),
     odds,
     modelProbability: Math.min(0.99, Math.max(0, probability)),
     impliedProbability: implied,
     edge: calculateEdge(probability, odds),
     isSafePick: probability >= MONOPOLY_MIN_PROBABILITY && odds > 1,
     expectedGoals: estimateExpectedGoals(match),
+    contextFlags: knockoutEval.flags,
+    knockoutContext,
   };
 }
 
@@ -357,6 +385,7 @@ export function resolveMonopolyMarket(
       : null;
   if (!match) return null;
 
+  evaluateKnockoutContext(match);
   const board = monopolyPoissonBoard(match);
   const candidates: Array<{ market: MarketType; p: number }> = isHomeTeam
     ? [
@@ -413,8 +442,15 @@ function toLeg(
   pick: MarketPrediction,
   warning?: MonopolyRotationWarning
 ): ParlayLeg {
-  const flags = [...(pick.contextFlags ?? [])];
+  const knockoutEval = evaluateKnockoutContext(match);
+  const knockoutContext = pick.knockoutContext ?? toKnockoutContext(knockoutEval);
+  const flags = [...(pick.contextFlags ?? []), ...knockoutEval.flags];
   if (warning && !flags.includes(warning)) flags.push(warning);
+  const uniqueFlags = [...new Set(flags)];
+  const notes = notesForFlags(uniqueFlags);
+  if (knockoutContext?.note && !notes.includes(knockoutContext.note)) {
+    notes.push(knockoutContext.note);
+  }
   return {
     matchId: match.id,
     matchLabel: `${match.home.name} vs ${match.away.name}`,
@@ -425,11 +461,12 @@ function toLeg(
     odds: pick.odds,
     modelProbability: pick.modelProbability,
     edge: pick.edge,
-    contextFlags: flags,
-    contextNotes: notesForFlags(flags),
+    contextFlags: uniqueFlags,
+    contextNotes: notes,
     referee: match.referee ?? null,
     venue: match.venue ?? null,
     warning,
+    knockoutContext,
   };
 }
 

@@ -5,6 +5,7 @@
 import { prisma } from "./db";
 import type { Match, TeamInjury, TeamStats } from "./types";
 import { classifyInjuryRole } from "./context-engine";
+import { isKnockoutFixtureText } from "./knockout-engine";
 import { fixtureIdFromMatchId } from "./odds-mapper";
 
 type FormResult = "W" | "D" | "L";
@@ -379,6 +380,47 @@ function h2hForMatch(
   };
 }
 
+/** Two-legged ties are typically 7–21 days apart; 28d covers continental gaps. */
+const FIRST_LEG_MAX_DAYS = 28;
+
+/**
+ * Most recent finished meeting between the same two clubs before kickoff,
+ * mapped onto the current home/away sides.
+ */
+function firstLegScoreFor(
+  fixtures: LocalFixtureRow[],
+  homeName: string,
+  awayName: string,
+  kickoffIso: string
+): { currentHome: number; currentAway: number } | null {
+  const kickoff = Date.parse(kickoffIso);
+  if (!Number.isFinite(kickoff)) return null;
+  const minTs = kickoff - FIRST_LEG_MAX_DAYS * 24 * 60 * 60 * 1000;
+
+  let best: LocalFixtureRow | null = null;
+  let bestReversed = false;
+
+  for (const fx of fixtures) {
+    const ts = fx.matchDate.getTime();
+    if (!Number.isFinite(ts) || ts >= kickoff || ts < minTs) continue;
+    const sameVenue =
+      namesEqual(fx.homeTeam, homeName) && namesEqual(fx.awayTeam, awayName);
+    const reversed =
+      namesEqual(fx.homeTeam, awayName) && namesEqual(fx.awayTeam, homeName);
+    if (!sameVenue && !reversed) continue;
+    if (!best || ts > best.matchDate.getTime()) {
+      best = fx;
+      bestReversed = reversed;
+    }
+  }
+
+  if (!best) return null;
+  if (bestReversed) {
+    return { currentHome: best.awayGoals, currentAway: best.homeGoals };
+  }
+  return { currentHome: best.homeGoals, currentAway: best.awayGoals };
+}
+
 type CachedInjuryEnvelope = {
   response?: Array<{
     player?: {
@@ -540,6 +582,16 @@ export async function enrichMatchesFromLocalData(
       home,
       away,
       h2h: h2h ?? match.h2h,
+      firstLegScore:
+        match.firstLegScore ??
+        (isKnockoutFixtureText(match)
+          ? firstLegScoreFor(
+              fixtures,
+              match.home.name,
+              match.away.name,
+              match.kickoff
+            )
+          : null),
     };
   });
 }

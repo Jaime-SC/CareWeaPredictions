@@ -21,6 +21,7 @@ export interface HistoryBetLeg {
   market: MarketType;
   marketLabel: string;
   odds: number;
+  modelProbability?: number;
   /** Per-leg outcome from API evaluation */
   status: LegStatus;
   homeGoals?: number | null;
@@ -144,6 +145,7 @@ function mapLegs(legs: ParlayLeg[]): HistoryBetLeg[] {
       market: leg.market,
       marketLabel: leg.marketLabel,
       odds: leg.odds,
+      modelProbability: leg.modelProbability,
       status: "pending" as const,
       finalScore: null,
       statusShort: null,
@@ -302,7 +304,8 @@ export function purgeFakeHistory(): void {
 
 export function addBetFromParlay(
   parlay: GeneratedParlay,
-  date = chileDateString()
+  date = chileDateString(),
+  stakeCLP = 1
 ): HistoryBet | null {
   if (!parlay.legs.length) return null;
   purgeFakeHistory();
@@ -320,17 +323,16 @@ export function addBetFromParlay(
     );
   }
 
-  // Analytics use a fixed 1 Unit (1U) stake — ignore monetary parlay.stake
-  const unitStake = 1;
+  const stake = stakeCLP > 0 ? stakeCLP : 1;
   const bet: HistoryBet = {
     id: createId(),
     date,
     mode: modeFromStrategy(strategyMode),
     timeframe: "Combinada",
     strategyMode,
-    stakeCLP: unitStake,
+    stakeCLP: stake,
     totalOdds: parlay.totalOdds,
-    potentialReturn: unitStake * parlay.totalOdds,
+    potentialReturn: stake * parlay.totalOdds,
     legs,
     status: "pending",
     createdAt: new Date().toISOString(),
@@ -417,10 +419,10 @@ export function findExistingParlay(
   );
 }
 
-/** Register one individual safe pick as its own history ticket (1U stake). */
+/** Register one individual safe pick as its own history ticket. */
 export function addBetFromSinglePick(
   pick: SinglePickInput,
-  _stakeCLP = 1,
+  stakeCLP = 1,
   date = chileDateString()
 ): HistoryBet | null {
   purgeFakeHistory();
@@ -432,16 +434,16 @@ export function addBetFromSinglePick(
 
   const { homeTeam, awayTeam } = splitMatchLabel(pick.matchLabel);
   const odds = pick.odds > 0 ? pick.odds : 1;
-  const unitStake = 1;
+  const stake = stakeCLP > 0 ? stakeCLP : 1;
   const bet: HistoryBet = {
     id: createId(),
     date,
     mode: "Segura",
     timeframe: "Individual",
     strategyMode: "daily-safe",
-    stakeCLP: unitStake,
+    stakeCLP: stake,
     totalOdds: odds,
-    potentialReturn: unitStake * odds,
+    potentialReturn: stake * odds,
     legs: [
       {
         fixtureId,
@@ -454,6 +456,7 @@ export function addBetFromSinglePick(
         market: pick.market,
         marketLabel: pick.marketLabel,
         odds,
+        modelProbability: pick.modelProbability,
         status: "pending",
         finalScore: null,
         statusShort: null,
@@ -769,7 +772,6 @@ export function computeLeagueBreakdown(bets: HistoryBet[]): BreakdownItem[] {
     .slice(0, 8);
 }
 
-/** @deprecated Prefer formatSignedUnits — monetary UI is temporarily disabled */
 export function formatSignedCLP(value: number): string {
   const abs = Math.round(Math.abs(value)).toLocaleString("es-CL");
   if (value > 0) return `+$${abs} CLP`;

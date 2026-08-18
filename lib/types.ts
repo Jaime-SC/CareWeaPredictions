@@ -120,12 +120,38 @@ export interface NearbyTeamFixture {
   };
 }
 
+/** Two-legged / single-elimination status used by the knockout engine. */
+export type KnockoutLegStatus = "LEG_1" | "LEG_2" | "SINGLE_KNOCKOUT";
+
+/** Human-readable leg tag attached to generated selections. */
+export type KnockoutLegLabel = "1st Leg" | "2nd Leg" | "Single";
+
+/**
+ * Structural knockout metadata. All model markets are 90-minute regular time
+ * (never extra time, pens, or "to qualify").
+ */
+export interface KnockoutContext {
+  isKnockout: boolean;
+  leg: KnockoutLegLabel | null;
+  note: string;
+  status?: KnockoutLegStatus | null;
+  comebackRequired?: boolean;
+  firstLegScore?: { currentHome: number; currentAway: number } | null;
+}
+
 export interface Match {
   id: string;
   league: LeagueId;
   leagueName: string;
   /** API-Football league id when known (e.g. "39"). */
   leagueId?: string;
+  /** API-Football `league.round` / stage, e.g. "Play-offs - 1st Leg". */
+  round?: string | null;
+  /**
+   * First-leg goals from the current fixture's sides (2nd-leg home/away).
+   * Used to detect comeback pressure on the return leg.
+   */
+  firstLegScore?: { currentHome: number; currentAway: number } | null;
   kickoff: string;
   home: TeamStats;
   away: TeamStats;
@@ -160,6 +186,8 @@ export interface MarketPrediction {
   /** Context-engine multiplier applied to the raw Poisson probability. */
   confidenceModifier?: number;
   contextFlags?: string[];
+  /** Present on cup / two-legged ties; markets are always 90-minute FT. */
+  knockoutContext?: KnockoutContext;
 }
 
 export interface MatchPrediction {
@@ -170,6 +198,7 @@ export interface MatchPrediction {
   bestSafePick: MarketPrediction | null;
   contextFlags?: string[];
   contextNotes?: string[];
+  knockoutContext?: KnockoutContext;
 }
 
 export interface ParlayLeg {
@@ -189,6 +218,28 @@ export interface ParlayLeg {
   venue?: string | null;
   /** Set when monopoly anti-rotation was bypassed and a continental fixture is nearby. */
   warning?: "NEARBY_INTERNATIONAL_MATCH_PRESENT";
+  knockoutContext?: KnockoutContext;
+}
+
+export interface SafePickItem {
+  matchId: string;
+  matchLabel: string;
+  leagueName: string;
+  kickoff: string;
+  market: MarketType;
+  marketLabel: string;
+  odds: number;
+  modelProbability: number;
+  edge: number;
+  contextFlags?: string[];
+  contextNotes?: string[];
+  confidenceModifier?: number;
+  referee?: string | null;
+  venue?: string | null;
+  knockoutContext?: KnockoutContext;
+  /** Stake already saved in historial (CLP). */
+  stakeCLP?: number;
+  registered?: boolean;
 }
 
 export interface ParlayConfig {

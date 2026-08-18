@@ -29,14 +29,14 @@ import {
   isSafeStrategy,
 } from "@/lib/parlay-defaults";
 import {
-  type SafePickItem,
-  cleanupExpiredParlays,
-  loadStoredParlay,
-  loadStoredSafePicks,
-  saveParlay,
-  saveSafePicks,
-} from "@/lib/parlay-storage";
-import type { GeneratedParlay, StrategyMode } from "@/lib/types";
+  fetchBuilderTickets,
+  purgeLegacyBuilderLocalStorage,
+  selectParlayTicket,
+  selectSafeTickets,
+  ticketToParlay,
+  ticketsToSafePicks,
+} from "@/lib/builder-restore";
+import type { GeneratedParlay, SafePickItem, StrategyMode } from "@/lib/types";
 import { chileDateString, getWeeklyDateRange } from "@/lib/utils";
 import { CalendarDays, Loader2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -64,7 +64,6 @@ function emptyParlayFor(mode: StrategyMode): GeneratedParlay {
 export default function BuilderPage() {
   const todayCl = chileDateString();
   const week = useMemo(() => getWeeklyDateRange(), [todayCl]);
-  const monopolyWeekKey = week.fromYmd;
 
   const [strategyMode, setStrategyMode] =
     useState<StrategyMode>(DEFAULT_MODE);
@@ -87,72 +86,56 @@ export default function BuilderPage() {
   const isMonopoly = isMonopolyStrategy(strategyMode);
 
   useEffect(() => {
-    cleanupExpiredParlays(todayCl);
-  }, [todayCl]);
+    purgeLegacyBuilderLocalStorage();
+  }, []);
 
-  // Restore cache when mode or date changes
   useEffect(() => {
+    let cancelled = false;
     setError(null);
     setEmptyMessage(null);
-
-    if (isSafe) {
-      const cached = loadStoredSafePicks(selectedDate);
-      if (cached && cached.picks.length > 0) {
-        setSafePicks(cached.picks);
-        setParlay(emptyParlayFor("daily-safe"));
-        setClipboard("");
-        setGenerated(true);
-        setFromCache(true);
-        return;
-      }
-      setSafePicks([]);
-      setGenerated(false);
-      setFromCache(false);
-      return;
-    }
-
-    const cacheDate = isMonopoly ? monopolyWeekKey : selectedDate;
-    const cached = loadStoredParlay(strategyMode, cacheDate);
-    if (
-      cached &&
-      (!isMonopoly ||
-        (cached.parlay.ignoreRotationFilter === true) === ignoreRotationFilter)
-    ) {
-      setParlay(cached.parlay);
-      setClipboard(cached.clipboard);
-      setSafePicks([]);
-      setGenerated(true);
-      setFromCache(true);
-      return;
-    }
-    setParlay(emptyParlayFor(strategyMode));
+    setFromCache(false);
+    setGenerated(false);
     setClipboard("");
     setSafePicks([]);
-    setGenerated(false);
-    setFromCache(false);
-  }, [
-    strategyMode,
-    selectedDate,
-    isSafe,
-    isMonopoly,
-    monopolyWeekKey,
-    ignoreRotationFilter,
-  ]);
+    setParlay(emptyParlayFor(isSafe ? "daily-safe" : strategyMode));
+
+    if (isSafe) {
+      (async () => {
+        const tickets = await fetchBuilderTickets();
+        if (cancelled) return;
+        const picks = ticketsToSafePicks(
+          selectSafeTickets(tickets, selectedDate)
+        );
+        if (picks.length === 0) return;
+        setSafePicks(picks);
+        setGenerated(true);
+        setFromCache(true);
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const date = isMonopoly ? todayCl : selectedDate;
+    (async () => {
+      const tickets = await fetchBuilderTickets();
+      if (cancelled) return;
+      const ticket = selectParlayTicket(tickets, strategyMode, date);
+      if (!ticket) return;
+      setParlay(ticketToParlay(ticket));
+      setClipboard("");
+      setGenerated(true);
+      setFromCache(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [strategyMode, selectedDate, isSafe, isMonopoly, todayCl]);
 
   const loadSafePicks = useCallback(
     async (opts?: { force?: boolean }) => {
       const force = opts?.force === true;
-      if (!force) {
-        const cached = loadStoredSafePicks(selectedDate);
-        if (cached && cached.picks.length > 0) {
-          setSafePicks(cached.picks);
-          setGenerated(true);
-          setFromCache(true);
-          setError(null);
-          setEmptyMessage(null);
-          return;
-        }
-      }
 
       setLoading(true);
       setError(null);
@@ -160,8 +143,9 @@ export default function BuilderPage() {
       setFromCache(false);
 
       try {
+        const refresh = force ? "&refresh=1" : "";
         const res = await fetch(
-          `/api/predict?date=${encodeURIComponent(selectedDate)}&safeOnly=true&minProb=0.85&strategyMode=daily-safe`
+          `/api/predict?date=${encodeURIComponent(selectedDate)}&safeOnly=true&minProb=0.85&strategyMode=daily-safe${refresh}`
         );
         const data = await res.json().catch(() => ({}));
 
@@ -192,8 +176,6 @@ export default function BuilderPage() {
           setEmptyMessage(
             "No hay picks seguros (≥85%) para la fecha seleccionada."
           );
-        } else {
-          saveSafePicks(picks, selectedDate);
         }
       } catch {
         setSafePicks([]);
@@ -207,22 +189,7 @@ export default function BuilderPage() {
   );
 
   const generateFun = useCallback(
-    async (opts?: { force?: boolean }) => {
-      const force = opts?.force === true;
-
-      if (!force) {
-        const cached = loadStoredParlay("daily-fun", selectedDate);
-        if (cached) {
-          setParlay(cached.parlay);
-          setClipboard(cached.clipboard);
-          setGenerated(true);
-          setError(null);
-          setEmptyMessage(null);
-          setFromCache(true);
-          return;
-        }
-      }
-
+    async (_opts?: { force?: boolean }) => {
       setLoading(true);
       setError(null);
       setEmptyMessage(null);
@@ -269,7 +236,6 @@ export default function BuilderPage() {
         setGenerated(true);
 
         if (next.legs?.length) {
-          saveParlay("daily-fun", next, nextClipboard, selectedDate);
           setFromCache(false);
         } else {
           setEmptyMessage(EMPTY_MATCHES_MESSAGE);
@@ -286,25 +252,7 @@ export default function BuilderPage() {
   );
 
   const generateMonopoly = useCallback(
-    async (opts?: { force?: boolean }) => {
-      const force = opts?.force === true;
-
-      if (!force) {
-        const cached = loadStoredParlay("monopoly-asymmetry", monopolyWeekKey);
-        if (
-          cached &&
-          (cached.parlay.ignoreRotationFilter === true) === ignoreRotationFilter
-        ) {
-          setParlay(cached.parlay);
-          setClipboard(cached.clipboard);
-          setGenerated(true);
-          setError(null);
-          setEmptyMessage(null);
-          setFromCache(true);
-          return;
-        }
-      }
-
+    async (_opts?: { force?: boolean }) => {
       setLoading(true);
       setError(null);
       setEmptyMessage(null);
@@ -351,7 +299,6 @@ export default function BuilderPage() {
         setGenerated(true);
 
         if (next.legs?.length) {
-          saveParlay("monopoly-asymmetry", next, nextClipboard, monopolyWeekKey);
           setFromCache(false);
         } else {
           setEmptyMessage(
@@ -368,7 +315,7 @@ export default function BuilderPage() {
         setLoading(false);
       }
     },
-    [monopolyWeekKey, ignoreRotationFilter]
+    [ignoreRotationFilter]
   );
 
   const runPrimaryAction = useCallback(
@@ -497,7 +444,7 @@ export default function BuilderPage() {
 
             {generated && fromCache && (isSafe ? safePicks.length > 0 : parlay.legs.length > 0) && (
               <p role="status" className="text-center text-sm text-sky-200">
-                Datos recuperados para{" "}
+                {isSafe ? "Picks recuperados" : "Combinada recuperada"} desde Neon para{" "}
                 {isMonopoly
                   ? `${week.fromYmd} → ${week.toYmd}`
                   : selectedDate}{" "}

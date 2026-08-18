@@ -2,6 +2,8 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
@@ -21,11 +23,13 @@ import type { GeneratedParlay, ParlayLeg } from "@/lib/types";
 import {
   chileDateString,
   cn,
+  formatCLP,
   formatKickoffDayLabel,
   formatOdds,
   formatPercent,
+  formatStakeInput,
   groupByKey,
-  UNIT_STAKE,
+  parseStakeCLP,
 } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -40,7 +44,7 @@ import {
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   formatSlipExportText,
   SlipExporter,
@@ -89,6 +93,7 @@ export function ParlaySlip({
 }: ParlaySlipProps) {
   const [registered, setRegistered] = useState(false);
   const [registerMsg, setRegisterMsg] = useState<string | null>(null);
+  const [stakeInput, setStakeInput] = useState("");
   const [activeLegs, setActiveLegs] = useState<ParlayLeg[]>(parlay.legs);
   const [exitingKeys, setExitingKeys] = useState<Set<string>>(new Set());
   const [dbTickets, setDbTickets] = useState<HistoryBet[] | null>(null);
@@ -102,8 +107,17 @@ export function ParlaySlip({
     exitTimers.current.clear();
     setExitingKeys(new Set());
     setActiveLegs(parlay.legs);
-    setRegisterMsg(null);
-  }, [parlay]);
+    if (fromCache) {
+      setRegistered(true);
+      setRegisterMsg("Esta combinada ya está en tu historial.");
+      if (parlay.stake > 0) {
+        setStakeInput(formatStakeInput(String(Math.round(parlay.stake))));
+      }
+    } else {
+      setRegistered(false);
+      setRegisterMsg(null);
+    }
+  }, [parlay, fromCache]);
 
   useEffect(() => {
     return () => {
@@ -143,19 +157,83 @@ export function ParlaySlip({
     [keptLegs, parlay]
   );
 
-  useEffect(() => {
-    const localHit = findExistingParlay(activeParlay, loadBets());
-    const dbHit = dbTickets
-      ? findExistingParlay(activeParlay, dbTickets)
-      : undefined;
-    const hit = Boolean(localHit || dbHit);
-    setRegistered(hit);
-    if (hit) {
-      setRegisterMsg((prev) => prev ?? "Esta combinada ya está en tu historial.");
-    } else {
-      setRegisterMsg(null);
+  const stakeCLP = parseStakeCLP(stakeInput);
+  const potentialReturn = stakeCLP != null ? stakeCLP * activeParlay.totalOdds : null;
+
+  const persistToNeon = useCallback(async () => {
+    if (activeParlay.legs.length === 0) return;
+    const stake = parseStakeCLP(stakeInput);
+    if (stake == null) {
+      setRegisterMsg("Indica el monto a apostar en CLP.");
+      return;
     }
-  }, [activeParlay, dbTickets]);
+
+    const date = historyDate ?? chileDateString();
+    const already =
+      findExistingParlay(activeParlay, loadBets()) ||
+      (dbTickets ? findExistingParlay(activeParlay, dbTickets) : undefined);
+    if (already) {
+      setRegistered(true);
+      setRegisterMsg("Ticket ya registrado en el historial.");
+      return;
+    }
+
+    const local = addBetFromParlay(activeParlay, date, stake);
+
+    try {
+      const res = await fetch("/api/bets/record", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date,
+          strategyMode: activeParlay.strategyMode ?? "daily-fun",
+          stakeCLP: stake,
+          totalOdds: activeParlay.totalOdds,
+          payoutCLP: stake * activeParlay.totalOdds,
+          legs: activeParlay.legs.map((l) => ({
+            matchId: l.matchId,
+            matchLabel: l.matchLabel,
+            leagueName: l.leagueName,
+            kickoff: l.kickoff,
+            market: l.market,
+            marketLabel: l.marketLabel,
+            odds: l.odds,
+            modelProbability: l.modelProbability,
+          })),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setRegisterMsg(
+          typeof data.error === "string"
+            ? data.error
+            : local
+              ? "Guardada localmente; falló la base de datos."
+              : "No se pudo registrar la apuesta."
+        );
+        return;
+      }
+      setRegistered(true);
+      setRegisterMsg(
+        data.duplicate
+          ? "Ticket ya registrado en la base de datos."
+          : "Apuesta guardada en Neon."
+      );
+
+      if (local && typeof data.ticketId === "string") {
+        const bets = loadBets().map((b) =>
+          b.id === local.id ? { ...b, id: data.ticketId as string } : b
+        );
+        saveBets(bets);
+      }
+    } catch {
+      setRegisterMsg(
+        local
+          ? "Guardada localmente; sin conexión a Neon."
+          : "No se pudo registrar la apuesta."
+      );
+    }
+  }, [activeParlay, dbTickets, historyDate, stakeInput]);
 
   const isEdited = keptLegs.length !== parlay.legs.length;
   const originalCount = parlay.legs.length;
@@ -216,80 +294,6 @@ export function ParlaySlip({
     setExitingKeys(new Set());
     setActiveLegs(parlay.legs);
     setRegisterMsg(null);
-  }
-
-  async function handleRegister() {
-    if (activeParlay.legs.length === 0) return;
-
-    const date = historyDate ?? chileDateString();
-    const already =
-      findExistingParlay(activeParlay, loadBets()) ||
-      (dbTickets ? findExistingParlay(activeParlay, dbTickets) : undefined);
-    if (already) {
-      setRegistered(true);
-      setRegisterMsg("Ticket ya registrado en el historial.");
-      return;
-    }
-
-    // Keep localStorage for result-checker UX; primary persistence is Neon
-    const local = addBetFromParlay(activeParlay, date);
-
-    try {
-      const res = await fetch("/api/bets/record", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          date,
-          strategyMode: activeParlay.strategyMode ?? "daily-fun",
-          stakeCLP: UNIT_STAKE,
-          totalOdds: activeParlay.totalOdds,
-          payoutCLP: UNIT_STAKE * activeParlay.totalOdds,
-          legs: activeParlay.legs.map((l) => ({
-            matchId: l.matchId,
-            matchLabel: l.matchLabel,
-            leagueName: l.leagueName,
-            kickoff: l.kickoff,
-            market: l.market,
-            marketLabel: l.marketLabel,
-            odds: l.odds,
-            modelProbability: l.modelProbability,
-          })),
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) {
-        setRegisterMsg(
-          typeof data.error === "string"
-            ? data.error
-            : local
-              ? "Guardada localmente; falló la base de datos."
-              : "No se pudo registrar la apuesta."
-        );
-        if (local) setRegistered(true);
-        return;
-      }
-      setRegistered(true);
-      setRegisterMsg(
-        data.duplicate
-          ? "Ticket ya registrado en la base de datos."
-          : "Apuesta guardada en la base de datos + historial."
-      );
-
-      // Align localStorage id with Neon ticket id for outcome sync
-      if (local && typeof data.ticketId === "string") {
-        const bets = loadBets().map((b) =>
-          b.id === local.id ? { ...b, id: data.ticketId as string } : b
-        );
-        saveBets(bets);
-      }
-    } catch {
-      if (local) {
-        setRegistered(true);
-        setRegisterMsg("Guardada localmente; sin conexión a la DB.");
-      } else {
-        setRegisterMsg("No se pudo registrar la apuesta.");
-      }
-    }
   }
 
   let legNumber = 0;
@@ -461,12 +465,41 @@ export function ParlaySlip({
         </div>
 
         {activeParlay.legs.length > 0 && (
-          <div className="space-y-2">
+          <div className="space-y-3">
+            <div className="space-y-2 rounded-xl border border-slate-600 bg-slate-950/70 p-4">
+              <Label htmlFor="parlay-stake-clp" className="text-sm text-slate-100">
+                Monto a apostar ($ CLP)
+              </Label>
+              <div className="relative">
+                <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-slate-400">
+                  $
+                </span>
+                <Input
+                  id="parlay-stake-clp"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="Ej: 10.000"
+                  disabled={registered}
+                  value={stakeInput}
+                  onChange={(event) => {
+                    setStakeInput(formatStakeInput(event.target.value));
+                    if (registerMsg && !registered) setRegisterMsg(null);
+                  }}
+                  className="pl-7"
+                  aria-describedby="parlay-stake-help"
+                />
+              </div>
+              <p id="parlay-stake-help" className="text-sm text-slate-300">
+                {stakeCLP != null && potentialReturn != null
+                  ? `Apuesta ${formatCLP(stakeCLP)} · retorno potencial ${formatCLP(potentialReturn)}`
+                  : "Escribe el monto en pesos chilenos para habilitar el registro."}
+              </p>
+            </div>
             <Button
               className="w-full"
               variant={registered ? "secondary" : "default"}
-              disabled={registered}
-              onClick={handleRegister}
+              disabled={registered || stakeCLP == null}
+              onClick={() => void persistToNeon()}
             >
               {registered ? (
                 <>

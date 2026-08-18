@@ -22,7 +22,7 @@ import {
   generateParlay,
   singleDayShortfallNotice,
 } from "@/lib/parlay-generator";
-import type { Match } from "@/lib/types";
+import type { GeneratedParlay, Match } from "@/lib/types";
 import { chileDateOffset, chileDateString } from "@/lib/utils";
 import {
   getWeeklyDateRange,
@@ -30,7 +30,6 @@ import {
 } from "@/lib/monopoly-engine";
 
 /**
- * One-click fun accumulator generator for a specific date.
  * Body/query: { strategyMode, date, multiDay?: boolean }
  *
  * Default: STRICT single-date mode (no tomorrow leakage).
@@ -200,7 +199,6 @@ async function buildMonopolyParlayResponse(ignoreRotationFilter: boolean) {
   const insufficient =
     parlay.status === "INSUFFICIENT_MATCHES" ||
     parlay.legs.length < (preset.minLegs ?? 2);
-
   return NextResponse.json({
     success: true,
     status: insufficient ? "INSUFFICIENT_MATCHES" : "OK",

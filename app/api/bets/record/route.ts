@@ -32,7 +32,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const unitStake = 1;
+    const unitStake = Number(body.stakeCLP);
+    if (!Number.isFinite(unitStake) || unitStake <= 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Indica el monto a apostar en pesos chilenos (CLP).",
+        },
+        { status: 400 }
+      );
+    }
     const result = await recordBet({
       date: typeof body.date === "string" ? body.date : undefined,
       mode: body.mode,

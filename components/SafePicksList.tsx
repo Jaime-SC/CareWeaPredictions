@@ -2,6 +2,8 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
@@ -10,25 +12,24 @@ import {
 } from "@/components/ui/card";
 import {
   addBetFromSinglePick,
-  collectRegisteredIndividualPickKeys,
-  findExistingSinglePick,
   individualPickKey,
   loadBets,
   saveBets,
-  type HistoryBet,
 } from "@/lib/history-tracker";
 import { contextBadgeLabels } from "@/lib/context-engine";
-import type { SafePickItem } from "@/lib/parlay-storage";
+import type { SafePickItem } from "@/lib/types";
 import {
   formatExplicitBetLine,
   getExplicitPickFromLeg,
 } from "@/lib/formatters";
 import {
+  formatCLP,
   formatKickoffTime,
   formatOdds,
   formatPercent,
+  formatStakeInput,
   groupByKey,
-  UNIT_STAKE,
+  parseStakeCLP,
 } from "@/lib/utils";
 import { formatValueBadge } from "@/lib/value-finder";
 import {
@@ -61,6 +62,11 @@ export function SafePicksList({
   const [registeredKeys, setRegisteredKeys] = useState<Set<string>>(
     () => new Set()
   );
+  const [registeredStakes, setRegisteredStakes] = useState<
+    Record<string, number>
+  >({});
+  const [stakeInput, setStakeInput] = useState("");
+  const stakeCLP = parseStakeCLP(stakeInput);
 
   const grouped = useMemo(() => {
     return groupByKey(picks, (p) => p.leagueName || "Otros").map((g) => ({
@@ -77,41 +83,25 @@ export function SafePicksList({
   }
 
   useEffect(() => {
-    setRegisteredKeys(collectRegisteredIndividualPickKeys(picks));
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/stats/summary", { cache: "no-store" });
-        const data = (await res.json()) as {
-          success?: boolean;
-          tickets?: HistoryBet[];
-        };
-        if (!res.ok || !data.success || cancelled) return;
-        const tickets = data.tickets ?? [];
-        if (tickets.length === 0) return;
-        const fromDb = collectRegisteredIndividualPickKeys(picks, tickets);
-        setRegisteredKeys((prev) => {
-          const next = new Set(prev);
-          for (const key of fromDb) next.add(key);
-          return next;
-        });
-      } catch {
-        // localStorage already applied
+    const keys = new Set<string>();
+    const stakes: Record<string, number> = {};
+    for (const pick of picks) {
+      if (!pick.registered) continue;
+      const key = pickKey(pick);
+      keys.add(key);
+      if (typeof pick.stakeCLP === "number" && pick.stakeCLP > 0) {
+        stakes[key] = pick.stakeCLP;
       }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [picks]);
+    }
+    setRegisteredKeys(keys);
+    setRegisteredStakes(stakes);
+  }, [picks, date]);
 
   async function handleRegister(pick: SafePickItem) {
-    const already = findExistingSinglePick(pick);
-    const local = addBetFromSinglePick(pick, UNIT_STAKE, date);
+    if (stakeCLP == null) return;
+
+    const local = addBetFromSinglePick(pick, stakeCLP, date);
     if (!local) return;
-    setRegisteredKeys((prev) => new Set(prev).add(pickKey(pick)));
-    if (already) return;
 
     try {
       const res = await fetch("/api/bets/record", {
@@ -121,9 +111,9 @@ export function SafePicksList({
           date,
           strategyMode: "daily-safe",
           mode: "Segura",
-          stakeCLP: UNIT_STAKE,
+          stakeCLP,
           totalOdds: pick.odds,
-          payoutCLP: UNIT_STAKE * pick.odds,
+          payoutCLP: stakeCLP * pick.odds,
           legs: [
             {
               matchId: pick.matchId,
@@ -139,16 +129,25 @@ export function SafePicksList({
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok && data.success && typeof data.ticketId === "string") {
+      if (!res.ok || !data.success) return;
+
+      const key = pickKey(pick);
+      setRegisteredKeys((prev) => new Set(prev).add(key));
+      setRegisteredStakes((prev) => ({ ...prev, [key]: stakeCLP }));
+      if (typeof data.ticketId === "string") {
         const bets = loadBets().map((b) =>
           b.id === local.id ? { ...b, id: data.ticketId as string } : b
         );
         saveBets(bets);
       }
     } catch {
-      // Local registration already applied
+      const key = pickKey(pick);
+      setRegisteredKeys((prev) => new Set(prev).add(key));
+      setRegisteredStakes((prev) => ({ ...prev, [key]: stakeCLP }));
     }
   }
+
+  const hasUnregistered = picks.some((pick) => !registeredKeys.has(pickKey(pick)));
 
   return (
     <Card>
@@ -161,11 +160,11 @@ export function SafePicksList({
             </h2>
             <CardDescription>
               {date} · modelo ≥ 85% · {picks.length} selección
-              {picks.length === 1 ? "" : "es"} · referencia 1U
+              {picks.length === 1 ? "" : "es"}
             </CardDescription>
             {fromCache && (
               <p role="status" className="mt-2 text-sm text-sky-200">
-                Lista recuperada de caché para esta fecha.
+                Lista recuperada desde Neon para esta fecha.
               </p>
             )}
           </div>
@@ -192,6 +191,36 @@ export function SafePicksList({
             No hay picks con probabilidad modelo ≥ 85% para esta fecha.
           </p>
         ) : (
+          <>
+            {hasUnregistered && (
+            <div className="space-y-2 rounded-xl border border-slate-600 bg-slate-950/70 p-4">
+              <Label htmlFor="safe-stake-clp" className="text-sm text-slate-100">
+                Monto a apostar por pick ($ CLP)
+              </Label>
+              <div className="relative">
+                <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-slate-400">
+                  $
+                </span>
+                <Input
+                  id="safe-stake-clp"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="Ej: 5.000"
+                  value={stakeInput}
+                  onChange={(event) =>
+                    setStakeInput(formatStakeInput(event.target.value))
+                  }
+                  className="pl-7"
+                  aria-describedby="safe-stake-help"
+                />
+              </div>
+              <p id="safe-stake-help" className="text-sm text-slate-300">
+                {stakeCLP != null
+                  ? `Cada pick nuevo se registrará con ${formatCLP(stakeCLP)}.`
+                  : "Escribe el monto en pesos chilenos para habilitar el registro."}
+              </p>
+            </div>
+            )}
           <div className="max-h-[36rem] space-y-5 overflow-y-auto pr-1">
             {grouped.map((group) => (
               <section key={group.key} className="space-y-2">
@@ -208,6 +237,7 @@ export function SafePicksList({
                   {group.items.map((pick) => {
                     const key = pickKey(pick);
                     const registered = registeredKeys.has(key);
+                    const savedStake = registeredStakes[key] ?? pick.stakeCLP;
                     const valueBadge = formatValueBadge(pick.edge);
                     const explicit = getExplicitPickFromLeg(pick);
                     return (
@@ -230,6 +260,13 @@ export function SafePicksList({
                                 @{formatOdds(pick.odds)}
                               </span>
                             </p>
+                            {registered && typeof savedStake === "number" && savedStake > 0 && (
+                              <p className="text-sm text-emerald-100">
+                                Apostado {formatCLP(savedStake)}
+                                <span className="mx-1.5 text-slate-400">·</span>
+                                retorno potencial {formatCLP(savedStake * pick.odds)}
+                              </p>
+                            )}
                             <p
                               className="text-xs leading-snug text-slate-300"
                               title={explicit.condition}
@@ -280,7 +317,7 @@ export function SafePicksList({
                             <Button
                               size="sm"
                               variant={registered ? "secondary" : "default"}
-                              disabled={registered}
+                              disabled={registered || stakeCLP == null}
                               onClick={() => handleRegister(pick)}
                             >
                               {registered ? (
@@ -311,6 +348,7 @@ export function SafePicksList({
               </section>
             ))}
           </div>
+          </>
         )}
       </CardContent>
     </Card>

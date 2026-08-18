@@ -189,16 +189,16 @@ function effectiveOdds(
 }
 
 /**
- * Settle PENDING tickets whose kickoff is already in the past (kickoff < NOW).
- * Always force-refreshes API-Football so yesterday's FT/AET/PEN is not served
- * from a stale NS cache.
+ * Settle any ticket that still has PENDING legs (kickoff already in the past).
+ * Includes combinadas already WON/LOST/VOID: one lost leg closes the ticket,
+ * but remaining FT legs must still be evaluated for the history UI and accuracy.
  */
 export async function settlePendingTickets(): Promise<SettlementResult> {
   const nowMs = Date.now();
   const diagnostics: SettlementDiagnostic[] = [];
 
   const pendingTickets = await prisma.accumulatorTicket.findMany({
-    where: { status: "PENDING" },
+    where: { predictions: { some: { outcome: "PENDING" } } },
     include: {
       predictions: { include: { fixture: true } },
     },
@@ -432,6 +432,10 @@ export async function settlePendingTickets(): Promise<SettlementResult> {
     }
 
     const dbStatus = toDbOutcome(nextStatus);
+    if (ticket.status === dbStatus) {
+      continue;
+    }
+
     const odds = effectiveOdds(legStatuses);
     const stake = ticket.stakeCLP > 0 ? ticket.stakeCLP : UNIT_STAKE;
     const payout =

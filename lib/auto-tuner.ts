@@ -4,25 +4,66 @@ import type { TrainingFeatureRow } from "./bet-types";
 import { prisma } from "./db";
 import {
   DEFAULT_MODEL_WEIGHTS,
+  MIN_ODDS_CEILING,
+  MIN_ODDS_FLOOR,
+  PROBABILITY_SCALE_MAX,
+  PROBABILITY_SCALE_MIN,
+  RISK_PENALTY_MAX,
+  RISK_PENALTY_MIN,
   loadModelWeights,
+  resetModelWeights,
   saveModelWeights,
   type LeagueWeightConfig,
   type MarketWeightConfig,
   type ModelWeights,
 } from "./model-weights";
+import {
+  clampTuningMultiplier,
+  resetTuningConfig,
+  saveTuningConfig,
+  type TuningConfig,
+} from "./tuning-config";
 
-const MIN_LEAGUE_SAMPLE = 5;
-const MIN_MARKET_SAMPLE = 5;
+/** Below this, keep factory-neutral weights. */
+export const MIN_SAMPLE_PARTIAL = 5;
+/** Full target (before EMA). */
+export const MIN_SAMPLE_FULL = 15;
+/** Min picks settled in one settle run before auto-calibration fires. */
+export const MIN_SETTLEMENT_CALIBRATION_BATCH = 5;
+/** Backward-compatible alias used by older call sites / smokes. */
+export const MIN_TUNING_SAMPLE_SIZE = MIN_SAMPLE_PARTIAL;
+
+export const LEARNING_RATE = 0.25;
+
 const LOW_WIN_RATE = 0.7;
 const HIGH_WIN_RATE = 0.88;
+const LOW_ROI = -0.1;
+const HIGH_ROI = 0.08;
+const MARKET_BAD_ROI = -0.25;
+const MARKET_DISABLE_ROI = -0.45;
+const MARKET_GOOD_ROI = 0.15;
+const MARKET_GOOD_WR = 0.8;
 
 export interface HistoricalPickRow {
   league: string;
+  leagueId?: string;
   market: string;
   selection?: string;
   modelProbability: number;
   odds: number;
   outcome: "WON" | "LOST" | "PENDING" | "VOID" | string;
+}
+
+export interface TuningBucketStat {
+  key: string;
+  leagueId?: string;
+  leagueName?: string;
+  sampleSize: number;
+  won: number;
+  lost: number;
+  winRate: number;
+  roi: number;
+  multiplier: number;
 }
 
 export interface CalibrationResult {
@@ -32,6 +73,14 @@ export interface CalibrationResult {
   marketsAdjusted: number;
   sampleSize: number;
   over15MinProbability: number;
+  skippedLowSample: number;
+  leagues: TuningBucketStat[];
+  markets: TuningBucketStat[];
+}
+
+export interface RecalibrationResult extends CalibrationResult {
+  config: TuningConfig;
+  totalBetsAnalyzed: number;
 }
 
 type Agg = {
@@ -40,10 +89,60 @@ type Agg = {
   staked: number;
   returned: number;
   probSum: number;
+  leagueId?: string;
+  leagueName?: string;
 };
 
 function emptyAgg(): Agg {
   return { won: 0, lost: 0, staked: 0, returned: 0, probSum: 0 };
+}
+
+export function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+export function clampProbabilityScale(value: number): number {
+  return clamp(value, PROBABILITY_SCALE_MIN, PROBABILITY_SCALE_MAX);
+}
+
+export function clampRiskPenalty(value: number): number {
+  return clamp(value, RISK_PENALTY_MIN, RISK_PENALTY_MAX);
+}
+
+export function clampMinOdds(value: number): number {
+  return clamp(value, MIN_ODDS_FLOOR, MIN_ODDS_CEILING);
+}
+
+/** α from sample size: 0 / 0.5 / 1.0 */
+export function sampleAdjustmentAlpha(n: number): number {
+  if (n < MIN_SAMPLE_PARTIAL) return 0;
+  if (n < MIN_SAMPLE_FULL) return 0.5;
+  return 1;
+}
+
+/** EMA: (1 − lr) · old + lr · target */
+export function emaBlend(
+  previous: number,
+  target: number,
+  learningRate: number = LEARNING_RATE
+): number {
+  const prev = Number.isFinite(previous) ? previous : target;
+  const next = Number.isFinite(target) ? target : prev;
+  const lr = clamp(learningRate, 0, 1);
+  return (1 - lr) * prev + lr * next;
+}
+
+function applySampleAndEma(
+  previous: number,
+  target: number,
+  neutral: number,
+  n: number,
+  clampFn: (value: number) => number
+): number {
+  const alpha = sampleAdjustmentAlpha(n);
+  const damped = (1 - alpha) * neutral + alpha * target;
+  return clampFn(emaBlend(previous, damped, LEARNING_RATE));
 }
 
 function pushOutcome(agg: Agg, row: HistoricalPickRow): void {
@@ -51,7 +150,6 @@ function pushOutcome(agg: Agg, row: HistoricalPickRow): void {
   if (outcome !== "WON" && outcome !== "LOST") return;
 
   const odds = row.odds > 1 ? row.odds : 1;
-  // Unit stake per pick for ROI
   agg.staked += 1;
   agg.probSum += row.modelProbability || 0;
 
@@ -77,6 +175,129 @@ function sampleSize(agg: Agg): number {
   return agg.won + agg.lost;
 }
 
+function round3(n: number): number {
+  return Number(n.toFixed(3));
+}
+
+function round4(n: number): number {
+  return Number(n.toFixed(4));
+}
+
+function leagueBucketKey(row: HistoricalPickRow): string {
+  const id = String(row.leagueId ?? "").trim();
+  if (id && id.toLowerCase() !== "unknown") return id;
+  return (row.league || "Otros").trim() || "Otros";
+}
+
+function marketKey(row: HistoricalPickRow): string {
+  return String(row.market || "unknown").trim() || "unknown";
+}
+
+function leagueSeverity(wr: number, marketRoi: number): number {
+  const wrDeficit = Math.max(0, LOW_WIN_RATE - wr);
+  const roiDeficit = Math.max(0, LOW_ROI - marketRoi);
+  return clamp(Math.max(wrDeficit / 0.2, roiDeficit / 0.35), 0, 1);
+}
+
+type LeagueBand = "low" | "high" | "neutral";
+
+function leagueBand(wr: number, marketRoi: number): LeagueBand {
+  if (wr < LOW_WIN_RATE || marketRoi < LOW_ROI) return "low";
+  if (wr > HIGH_WIN_RATE && marketRoi > HIGH_ROI) return "high";
+  return "neutral";
+}
+
+function leagueTargets(
+  wr: number,
+  marketRoi: number,
+  defaultMinOdds: number
+): Pick<
+  LeagueWeightConfig,
+  "riskPenalty" | "probabilityScale" | "minOdds" | "minProbabilityBoost"
+> {
+  const band = leagueBand(wr, marketRoi);
+  if (band === "low") {
+    const severity = leagueSeverity(wr, marketRoi);
+    return {
+      riskPenalty: 1.1 + severity * 0.15,
+      probabilityScale: 0.95 - severity * 0.07,
+      minOdds: defaultMinOdds + 0.03 + severity * 0.02,
+      minProbabilityBoost: 0.02 + severity * 0.06,
+    };
+  }
+  if (band === "high") {
+    return {
+      riskPenalty: 0.97,
+      probabilityScale: 1.02,
+      minOdds: defaultMinOdds - 0.02,
+      minProbabilityBoost: -0.02,
+    };
+  }
+  return {
+    riskPenalty: 1,
+    probabilityScale: 1,
+    minOdds: defaultMinOdds,
+    minProbabilityBoost: 0,
+  };
+}
+
+function marketTargets(
+  wr: number,
+  marketRoi: number,
+  n: number,
+  strictMin: number
+): Pick<MarketWeightConfig, "weight" | "minProbability" | "disabled"> {
+  if (n >= MIN_SAMPLE_FULL && marketRoi < MARKET_DISABLE_ROI) {
+    return {
+      weight: 0.35,
+      minProbability: Math.min(0.92, strictMin + 0.08),
+      disabled: true,
+    };
+  }
+  if (n >= MIN_SAMPLE_FULL && marketRoi < MARKET_BAD_ROI) {
+    return {
+      weight: 0.35,
+      minProbability: Math.min(0.92, strictMin + 0.08),
+      disabled: false,
+    };
+  }
+  if (marketRoi > MARKET_GOOD_ROI && wr >= MARKET_GOOD_WR) {
+    return {
+      weight: 1.15,
+      minProbability: Math.max(0.8, strictMin - 0.02),
+      disabled: false,
+    };
+  }
+  return {
+    weight: 1,
+    minProbability: strictMin,
+    disabled: false,
+  };
+}
+
+function poissonMultiplierFromScale(scale: number): number {
+  return clampTuningMultiplier(scale);
+}
+
+function poissonMultiplierFromMarket(cfg: MarketWeightConfig): number {
+  if (cfg.disabled) return clampTuningMultiplier(0.95);
+  const t = (cfg.weight - 0.35) / (1.15 - 0.35);
+  return clampTuningMultiplier(0.95 + clamp(t, 0, 1) * 0.1);
+}
+
+function defaultLeague(
+  previous: ModelWeights,
+  extra?: Partial<LeagueWeightConfig>
+): LeagueWeightConfig {
+  return {
+    riskPenalty: 1,
+    probabilityScale: 1,
+    minOdds: previous.global.defaultMinOdds,
+    minProbabilityBoost: 0,
+    ...extra,
+  };
+}
+
 /**
  * Core calibration: derive league penalties, market weights and global
  * probability thresholds from historical WON/LOST picks.
@@ -94,148 +315,235 @@ export function calibrateModelParameters(
   });
 
   for (const row of evaluated) {
-    const league = (row.league || "Otros").trim() || "Otros";
-    const market = String(row.market || "unknown");
+    const lk = leagueBucketKey(row);
+    const mk = marketKey(row);
 
-    const lAgg = leagueMap.get(league) ?? emptyAgg();
+    const lAgg = leagueMap.get(lk) ?? emptyAgg();
     pushOutcome(lAgg, row);
-    leagueMap.set(league, lAgg);
+    lAgg.leagueId = String(row.leagueId ?? lAgg.leagueId ?? lk);
+    lAgg.leagueName = (row.league || lAgg.leagueName || lk).trim() || lk;
+    leagueMap.set(lk, lAgg);
 
-    const mAgg = marketMap.get(market) ?? emptyAgg();
+    const mAgg = marketMap.get(mk) ?? emptyAgg();
     pushOutcome(mAgg, row);
-    marketMap.set(market, mAgg);
+    marketMap.set(mk, mAgg);
   }
 
   const leagues: Record<string, LeagueWeightConfig> = {
     ...previous.leagues,
   };
+  const leagueStats: TuningBucketStat[] = [];
   let leaguesAdjusted = 0;
+  let skippedLowSample = 0;
 
-  for (const [league, agg] of leagueMap) {
+  for (const [key, agg] of leagueMap) {
     const n = sampleSize(agg);
-    if (n < MIN_LEAGUE_SAMPLE) continue;
-
     const wr = winRate(agg);
-    let riskPenalty = 1;
-    let probabilityScale = 1;
-    let minOdds = previous.global.defaultMinOdds;
-    let minProbabilityBoost = 0;
+    const r = roi(agg);
+    const band = leagueBand(wr, r);
 
-    if (wr < LOW_WIN_RATE) {
-      // Underperforming → raise risk penalty / require higher confidence
-      const deficit = LOW_WIN_RATE - wr;
-      riskPenalty = Number((1 + Math.min(0.25, deficit * 0.8)).toFixed(3));
-      probabilityScale = Number(
-        (1 - Math.min(0.12, deficit * 0.5)).toFixed(3)
-      );
-      minProbabilityBoost = Number(
-        Math.min(0.08, 0.03 + deficit * 0.2).toFixed(3)
-      );
-      minOdds = Number((previous.global.defaultMinOdds + 0.03).toFixed(3));
-      leaguesAdjusted += 1;
-    } else if (wr > HIGH_WIN_RATE) {
-      // Highly predictable → ease odds floor slightly
-      riskPenalty = 0.97;
-      probabilityScale = 1.02;
-      minProbabilityBoost = -0.02;
-      minOdds = Number(
-        Math.max(1.08, previous.global.defaultMinOdds - 0.04).toFixed(3)
-      );
-      leaguesAdjusted += 1;
-    } else {
-      // Stable band — keep mild defaults but still record stats
-      riskPenalty = 1;
-      probabilityScale = 1;
-      minProbabilityBoost = 0;
-      minOdds = previous.global.defaultMinOdds;
+    if (n < MIN_SAMPLE_PARTIAL) {
+      skippedLowSample += 1;
+      leagueStats.push({
+        key,
+        leagueId: agg.leagueId,
+        leagueName: agg.leagueName,
+        sampleSize: n,
+        won: agg.won,
+        lost: agg.lost,
+        winRate: round4(wr),
+        roi: round4(r),
+        multiplier: 1,
+      });
+      continue;
     }
 
-    leagues[league] = {
-      riskPenalty,
-      probabilityScale,
-      minOdds,
-      minProbabilityBoost,
-      winRate: Number(wr.toFixed(4)),
+    const prev =
+      lookupPreviousLeague(previous, key, agg) ?? defaultLeague(previous);
+    const target = leagueTargets(wr, r, previous.global.defaultMinOdds);
+
+    const next: LeagueWeightConfig = {
+      riskPenalty: round3(
+        applySampleAndEma(
+          prev.riskPenalty,
+          target.riskPenalty,
+          1,
+          n,
+          clampRiskPenalty
+        )
+      ),
+      probabilityScale: round3(
+        applySampleAndEma(
+          prev.probabilityScale,
+          target.probabilityScale,
+          1,
+          n,
+          clampProbabilityScale
+        )
+      ),
+      minOdds: round3(
+        applySampleAndEma(
+          prev.minOdds,
+          target.minOdds,
+          previous.global.defaultMinOdds,
+          n,
+          clampMinOdds
+        )
+      ),
+      minProbabilityBoost: round3(
+        applySampleAndEma(
+          prev.minProbabilityBoost,
+          target.minProbabilityBoost,
+          0,
+          n,
+          (v) => clamp(v, -0.08, 0.12)
+        )
+      ),
+      leagueId: agg.leagueId,
+      leagueName: agg.leagueName,
+      winRate: round4(wr),
+      roi: round4(r),
       sampleSize: n,
     };
+
+    leagues[key] = next;
+    if (agg.leagueName && agg.leagueName !== key) {
+      leagues[agg.leagueName] = next;
+    }
+
+    if (band !== "neutral") leaguesAdjusted += 1;
+
+    leagueStats.push({
+      key,
+      leagueId: agg.leagueId,
+      leagueName: agg.leagueName,
+      sampleSize: n,
+      won: agg.won,
+      lost: agg.lost,
+      winRate: round4(wr),
+      roi: round4(r),
+      multiplier: poissonMultiplierFromScale(next.probabilityScale),
+    });
   }
 
   const markets: Record<string, MarketWeightConfig> = {
     ...previous.markets,
   };
+  const marketStats: TuningBucketStat[] = [];
   let marketsAdjusted = 0;
 
   for (const [market, agg] of marketMap) {
     const n = sampleSize(agg);
-    if (n < MIN_MARKET_SAMPLE) continue;
-
     const wr = winRate(agg);
-    const marketRoi = roi(agg);
-    let weight = 1;
-    let minProbability = previous.global.strictMinProbability;
-    let disabled = false;
+    const r = roi(agg);
 
-    if (marketRoi < -0.25) {
-      weight = 0.35;
-      minProbability = Math.min(0.92, previous.global.strictMinProbability + 0.08);
-      disabled = marketRoi < -0.45;
-      marketsAdjusted += 1;
-    } else if (marketRoi < 0) {
-      weight = 0.65;
-      minProbability = Math.min(0.9, previous.global.strictMinProbability + 0.04);
-      marketsAdjusted += 1;
-    } else if (marketRoi > 0.15 && wr >= 0.8) {
-      weight = 1.15;
-      minProbability = Math.max(0.8, previous.global.strictMinProbability - 0.02);
-      marketsAdjusted += 1;
-    } else {
-      weight = 1;
-      minProbability = previous.global.strictMinProbability;
+    if (n < MIN_SAMPLE_PARTIAL) {
+      skippedLowSample += 1;
+      marketStats.push({
+        key: market,
+        sampleSize: n,
+        won: agg.won,
+        lost: agg.lost,
+        winRate: round4(wr),
+        roi: round4(r),
+        multiplier: 1,
+      });
+      continue;
     }
 
-    markets[market] = {
-      weight: Number(weight.toFixed(3)),
-      minProbability: Number(minProbability.toFixed(4)),
-      disabled,
-      roi: Number((marketRoi * 100).toFixed(2)),
-      winRate: Number(wr.toFixed(4)),
+    const prev = previous.markets[market] ?? {
+      weight: 1,
+      minProbability: previous.global.strictMinProbability,
+      disabled: false,
+    };
+    const target = marketTargets(wr, r, n, previous.global.strictMinProbability);
+    const next: MarketWeightConfig = {
+      weight: round3(
+        applySampleAndEma(prev.weight, target.weight, 1, n, (v) =>
+          clamp(v, 0.2, 1.3)
+        )
+      ),
+      minProbability: round4(
+        applySampleAndEma(
+          prev.minProbability || previous.global.strictMinProbability,
+          target.minProbability,
+          previous.global.strictMinProbability,
+          n,
+          (v) => clamp(v, 0.5, 0.95)
+        )
+      ),
+      disabled:
+        n >= MIN_SAMPLE_FULL ? target.disabled : Boolean(prev.disabled),
+      roi: Number((r * 100).toFixed(2)),
+      winRate: round4(wr),
       sampleSize: n,
     };
+
+    markets[market] = next;
+    if (
+      next.disabled ||
+      next.weight !== 1 ||
+      (n >= MIN_SAMPLE_FULL && (r < MARKET_BAD_ROI || (r > MARKET_GOOD_ROI && wr >= MARKET_GOOD_WR)))
+    ) {
+      marketsAdjusted += 1;
+    }
+
+    marketStats.push({
+      key: market,
+      sampleSize: n,
+      won: agg.won,
+      lost: agg.lost,
+      winRate: round4(wr),
+      roi: round4(r),
+      multiplier: poissonMultiplierFromMarket(next),
+    });
   }
 
-  // Global +1.5 goals threshold from over_1_5 performance
   let over15MinProbability = previous.global.over15MinProbability;
   const overAgg = marketMap.get("over_1_5");
-  if (overAgg && sampleSize(overAgg) >= MIN_MARKET_SAMPLE) {
+  if (overAgg && sampleSize(overAgg) >= MIN_SAMPLE_PARTIAL) {
+    const n = sampleSize(overAgg);
     const wr = winRate(overAgg);
     const r = roi(overAgg);
+    let target = previous.global.over15MinProbability;
     if (r < 0 || wr < 0.75) {
-      over15MinProbability = Number(
-        Math.min(0.9, 0.78 + (0.75 - Math.min(wr, 0.75)) * 0.4 + 0.03).toFixed(
-          3
-        )
-      );
+      target = Math.min(0.9, 0.78 + (0.75 - Math.min(wr, 0.75)) * 0.4 + 0.03);
     } else if (wr >= 0.88) {
-      over15MinProbability = 0.76;
+      target = 0.76;
     } else {
-      over15MinProbability = 0.78 + (wr < 0.82 ? 0.03 : 0);
-      over15MinProbability = Number(over15MinProbability.toFixed(3));
+      target = 0.78 + (wr < 0.82 ? 0.03 : 0);
     }
+    over15MinProbability = round3(
+      applySampleAndEma(
+        previous.global.over15MinProbability,
+        target,
+        DEFAULT_MODEL_WEIGHTS.global.over15MinProbability,
+        n,
+        (v) => clamp(v, 0.7, 0.92)
+      )
+    );
   }
 
-  // Global strict gate: blend previous with empirical hit rate
   let strictMinProbability = previous.global.strictMinProbability;
-  if (evaluated.length >= 15) {
+  if (evaluated.length >= MIN_SAMPLE_PARTIAL) {
     const overall = emptyAgg();
     for (const row of evaluated) pushOutcome(overall, row);
     const wr = winRate(overall);
+    let target = previous.global.strictMinProbability;
     if (wr < 0.72) {
-      strictMinProbability = Number(
-        Math.min(0.9, 0.78 + (0.72 - wr) * 0.5).toFixed(3)
-      );
+      target = Math.min(0.9, 0.78 + (0.72 - wr) * 0.5);
     } else if (wr > 0.88) {
-      strictMinProbability = 0.76;
+      target = 0.76;
     }
+    strictMinProbability = round3(
+      applySampleAndEma(
+        previous.global.strictMinProbability,
+        target,
+        DEFAULT_MODEL_WEIGHTS.global.strictMinProbability,
+        evaluated.length,
+        (v) => clamp(v, 0.5, 0.95)
+      )
+    );
   }
 
   const message = buildMessage({
@@ -244,6 +552,9 @@ export function calibrateModelParameters(
     over15MinProbability,
     sampleSize: evaluated.length,
   });
+
+  leagueStats.sort((a, b) => b.sampleSize - a.sampleSize);
+  marketStats.sort((a, b) => b.sampleSize - a.sampleSize);
 
   const weights: ModelWeights = {
     version: Math.max(1, previous.version) + (evaluated.length > 0 ? 1 : 0),
@@ -271,7 +582,22 @@ export function calibrateModelParameters(
     marketsAdjusted,
     sampleSize: evaluated.length,
     over15MinProbability,
+    skippedLowSample,
+    leagues: leagueStats,
+    markets: marketStats,
   };
+}
+
+function lookupPreviousLeague(
+  previous: ModelWeights,
+  key: string,
+  agg: Agg
+): LeagueWeightConfig | undefined {
+  return (
+    previous.leagues[key] ??
+    (agg.leagueId ? previous.leagues[agg.leagueId] : undefined) ??
+    (agg.leagueName ? previous.leagues[agg.leagueName] : undefined)
+  );
 }
 
 function buildMessage(opts: {
@@ -302,7 +628,26 @@ function buildMessage(opts: {
   return `Parámetros actualizados: ${parts.join(", ")}`;
 }
 
-/** Load training rows from Prisma SQLite (WON/LOST + PENDING for completeness). */
+export function deriveTuningConfig(weights: ModelWeights): TuningConfig {
+  const leagueMultipliers: Record<string, number> = {};
+  const marketMultipliers: Record<string, number> = {};
+
+  for (const [key, cfg] of Object.entries(weights.leagues)) {
+    leagueMultipliers[key] = poissonMultiplierFromScale(cfg.probabilityScale);
+  }
+  for (const [key, cfg] of Object.entries(weights.markets)) {
+    marketMultipliers[key] = poissonMultiplierFromMarket(cfg);
+  }
+
+  return {
+    lastCalibratedAt: weights.calibratedAt ?? new Date().toISOString(),
+    totalBetsAnalyzed: weights.sampleSize,
+    leagueMultipliers,
+    marketMultipliers,
+  };
+}
+
+/** Load training rows from Prisma (WON/LOST + PENDING for completeness). */
 export async function loadHistoricalDataFromDb(): Promise<HistoricalPickRow[]> {
   const predictions = await prisma.prediction.findMany({
     include: { fixture: true },
@@ -311,6 +656,7 @@ export async function loadHistoricalDataFromDb(): Promise<HistoricalPickRow[]> {
 
   return predictions.map((p) => ({
     league: p.fixture.leagueName,
+    leagueId: p.fixture.leagueId,
     market: p.market,
     selection: p.selection,
     modelProbability: p.modelProbability,
@@ -331,7 +677,12 @@ export function normalizeTrainingRows(
       const odds = Number(r.odds);
       const modelProbability = Number(r.modelProbability ?? 0);
       if (!Number.isFinite(odds)) return null;
-      return {
+      const leagueIdRaw = r.leagueId;
+      const leagueId =
+        leagueIdRaw != null && String(leagueIdRaw).trim()
+          ? String(leagueIdRaw)
+          : undefined;
+      const row: HistoricalPickRow = {
         league: String(r.league ?? "Otros"),
         market: String(r.market ?? "unknown"),
         selection:
@@ -341,7 +692,9 @@ export function normalizeTrainingRows(
           : 0,
         odds,
         outcome: String(r.outcome ?? "PENDING"),
-      } satisfies HistoricalPickRow;
+      };
+      if (leagueId) row.leagueId = leagueId;
+      return row;
     })
     .filter((r): r is HistoricalPickRow => r !== null);
 }
@@ -381,24 +734,67 @@ export function loadHistoricalDataFromJsonFile(
 }
 
 /**
- * Full pipeline: load DB (+ optional JSON), calibrate, persist weights.
+ * Unified pipeline: load settled WON/LOST picks, calibrate model-weights
+ * and sync Poisson tuning multipliers.
  */
+export async function recalibrateModel(options?: {
+  extraRows?: HistoricalPickRow[] | TrainingFeatureRow[];
+  jsonPath?: string;
+}): Promise<RecalibrationResult> {
+  const fromDb = await loadHistoricalDataFromDb();
+  const fromJson = loadHistoricalDataFromJsonFile(options?.jsonPath);
+  const extra = normalizeTrainingRows(options?.extraRows ?? []);
+  const merged = [...fromDb, ...fromJson, ...extra];
+
+  const result = calibrateModelParameters(merged, loadModelWeights());
+  saveModelWeights(result.weights);
+  const config = saveTuningConfig(deriveTuningConfig(result.weights));
+
+  return {
+    ...result,
+    config,
+    totalBetsAnalyzed: result.sampleSize,
+  };
+}
+
+/** @deprecated Use `recalibrateModel()`. */
 export async function runAutoCalibration(options?: {
   extraRows?: HistoricalPickRow[] | TrainingFeatureRow[];
   jsonPath?: string;
 }): Promise<CalibrationResult> {
-  const fromDb = await loadHistoricalDataFromDb();
-  const fromJson = loadHistoricalDataFromJsonFile(options?.jsonPath);
-  const extra = normalizeTrainingRows(options?.extraRows ?? []);
+  return recalibrateModel(options);
+}
 
-  // Merge preferring DB ids uniqueness by league|market|odds|outcome|prob
-  const merged = [...fromDb, ...fromJson, ...extra];
-  const previous =
-    loadModelWeights().sampleSize > 0
-      ? loadModelWeights()
-      : structuredClone(DEFAULT_MODEL_WEIGHTS);
+/**
+ * Hook for settlement: recalibrate only when a batch of ≥5 picks
+ * was settled in the current run. Never throws — settlement must
+ * succeed even if calibration fails.
+ */
+export async function maybeRecalibrateAfterSettlement(
+  settledCount: number
+): Promise<RecalibrationResult | null> {
+  if (settledCount < MIN_SETTLEMENT_CALIBRATION_BATCH) return null;
 
-  const result = calibrateModelParameters(merged, previous);
-  saveModelWeights(result.weights);
-  return result;
+  try {
+    const result = await recalibrateModel();
+    const ts = result.weights.calibratedAt ?? new Date().toISOString();
+    console.info(
+      `[AUTO-CALIBRATION] Recalibrated weights across ${result.leaguesAdjusted} leagues and ${result.marketsAdjusted} markets at ${ts}`
+    );
+    return result;
+  } catch (err) {
+    console.error("[AUTO-CALIBRATION] Failed:", err);
+    return null;
+  }
+}
+
+/** Restore factory-neutral model-weights + Poisson multipliers. */
+export function resetCalibration(): {
+  weights: ModelWeights;
+  config: TuningConfig;
+} {
+  return {
+    weights: resetModelWeights(),
+    config: resetTuningConfig(),
+  };
 }

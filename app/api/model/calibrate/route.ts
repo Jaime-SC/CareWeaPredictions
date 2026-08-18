@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   normalizeTrainingRows,
-  runAutoCalibration,
+  recalibrateModel,
 } from "@/lib/auto-tuner";
 import { loadModelWeights } from "@/lib/model-weights";
 
@@ -11,7 +11,16 @@ import { loadModelWeights } from "@/lib/model-weights";
 export async function GET() {
   try {
     const weights = loadModelWeights();
-    return NextResponse.json({ success: true, weights });
+    return NextResponse.json({
+      success: true,
+      autoCalibration: true,
+      calibratedAt: weights.calibratedAt,
+      sampleSize: weights.sampleSize,
+      leaguesAdjusted: weights.summary.leaguesAdjusted,
+      marketsAdjusted: weights.summary.marketsAdjusted,
+      message: weights.summary.message,
+      weights,
+    });
   } catch (error) {
     console.error("[api/model/calibrate GET]", error);
     return NextResponse.json(
@@ -29,7 +38,7 @@ export async function GET() {
 
 /**
  * POST /api/model/calibrate
- * Recalibrate from SQLite (+ optional exported featureVectors in body).
+ * Force-recalibrate from SQLite (+ optional exported featureVectors in body).
  */
 export async function POST(request: NextRequest) {
   try {
@@ -38,7 +47,7 @@ export async function POST(request: NextRequest) {
       body?.featureVectors ?? body?.rows ?? body?.trainingExport ?? []
     );
 
-    const result = await runAutoCalibration({
+    const result = await recalibrateModel({
       extraRows,
       jsonPath:
         typeof body?.jsonPath === "string" ? body.jsonPath : undefined,
@@ -46,10 +55,12 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      autoCalibration: true,
       message: result.message,
       leaguesAdjusted: result.leaguesAdjusted,
       marketsAdjusted: result.marketsAdjusted,
       sampleSize: result.sampleSize,
+      calibratedAt: result.weights.calibratedAt,
       over15MinProbability: result.over15MinProbability,
       weights: result.weights,
     });

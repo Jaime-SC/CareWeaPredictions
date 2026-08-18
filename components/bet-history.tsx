@@ -17,7 +17,7 @@ import {
   type HistoryBetLeg,
   type LegStatus,
   countLegHits,
-  formatSignedUnits,
+  formatSignedCLP,
 } from "@/lib/history-tracker";
 import { formatLegMatchStatus } from "@/lib/result-checker";
 import {
@@ -26,7 +26,7 @@ import {
 } from "@/lib/formatters";
 import { computePerformanceMetrics } from "@/lib/stats";
 import { resolveStrategyMode } from "@/lib/parlay-defaults";
-import { cn, formatOdds, formatPercent } from "@/lib/utils";
+import { cn, formatCLP, formatOdds, formatPercent } from "@/lib/utils";
 import {
   Check,
   CheckCircle2,
@@ -287,7 +287,7 @@ export function BetHistory({
           <KpiBadge
             icon={<Wallet className="h-3.5 w-3.5 text-sky-300" aria-hidden />}
             label="Total jugado"
-            value={`${kpis.totalJugado.toFixed(2)}U`}
+            value={formatCLP(kpis.totalJugado)}
             hint="Suma de stakes del filtro"
           />
           <KpiBadge
@@ -763,6 +763,7 @@ function BetRow({
   removing?: boolean;
   onDelete: () => void;
 }) {
+  const isSingle = bet.legs.length === 1 || bet.timeframe === "Individual";
   const [expanded, setExpanded] = useState(false);
 
   const hits = countLegHits(bet.legs);
@@ -807,7 +808,7 @@ function BetRow({
           </div>
           <p className="text-sm text-slate-200">
             {bet.legs.length} legs · Multiplicador {formatOdds(bet.totalOdds)}x
-            · 1U
+            · {formatCLP(bet.stakeCLP)}
           </p>
           {(bet.status === "won" || bet.status === "lost") && (
             <p
@@ -815,35 +816,15 @@ function BetRow({
                 unitPnl >= 0 ? "text-emerald-400" : "text-rose-400"
               }`}
             >
-              Resultado {formatSignedUnits(unitPnl)}
+              Resultado {formatSignedCLP(unitPnl)}
             </p>
           )}
         </div>
       </div>
 
       <div className="border-t border-slate-800/80 px-2 pb-2">
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="flex min-h-11 w-full items-center justify-between gap-2 rounded-lg px-2 py-2.5 text-left text-sm text-slate-200 transition hover:bg-slate-800 hover:text-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
-          aria-expanded={expanded}
-          disabled={removing}
-        >
-          <span className="inline-flex flex-wrap items-center gap-2">
-            Desglose de legs
-            <LegHitsInline hits={hits} className="text-slate-300" />
-          </span>
-          <ChevronDown
-            aria-hidden
-            className={cn(
-              "h-4 w-4 shrink-0 text-slate-300 transition-transform motion-reduce:transition-none",
-              expanded && "rotate-180"
-            )}
-          />
-        </button>
-
-        {expanded && (
-          <ul className="space-y-2 px-1 pb-2 pt-1">
+        {isSingle ? (
+          <ul className="space-y-2 px-1 py-2">
             {bet.legs.map((leg, idx) => (
               <LegDetailRow
                 key={`${leg.fixtureId}-${leg.market}-${idx}`}
@@ -851,6 +832,39 @@ function BetRow({
               />
             ))}
           </ul>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="flex min-h-11 w-full items-center justify-between gap-2 rounded-lg px-2 py-2.5 text-left text-sm text-slate-200 transition hover:bg-slate-800 hover:text-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+              aria-expanded={expanded}
+              disabled={removing}
+            >
+              <span className="inline-flex flex-wrap items-center gap-2">
+                Desglose de legs
+                <LegHitsInline hits={hits} className="text-slate-300" />
+              </span>
+              <ChevronDown
+                aria-hidden
+                className={cn(
+                  "h-4 w-4 shrink-0 text-slate-300 transition-transform motion-reduce:transition-none",
+                  expanded && "rotate-180"
+                )}
+              />
+            </button>
+
+            {expanded && (
+              <ul className="space-y-2 px-1 pb-2 pt-1">
+                {bet.legs.map((leg, idx) => (
+                  <LegDetailRow
+                    key={`${leg.fixtureId}-${leg.market}-${idx}`}
+                    leg={leg}
+                  />
+                ))}
+              </ul>
+            )}
+          </>
         )}
       </div>
     </div>

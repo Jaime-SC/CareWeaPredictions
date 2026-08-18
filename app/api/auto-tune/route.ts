@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { recalibrateModel } from "@/lib/auto-tuning";
-import { resetTuningConfig } from "@/lib/tuning-config";
+import { recalibrateModel, resetCalibration } from "@/lib/auto-tuner";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -11,8 +10,7 @@ const NO_STORE_HEADERS = {
 
 /**
  * POST /api/auto-tune
- * Recalibrate ultra-conservative multipliers from settled SQLite bets
- * and persist them to /data/tuning-config.json (never source files).
+ * Unified recalibration: model-weights.json + Poisson tuning-config.json.
  */
 export async function POST() {
   try {
@@ -27,6 +25,8 @@ export async function POST() {
         skippedLowSample: result.skippedLowSample,
         leagueMultipliers: result.config.leagueMultipliers,
         marketMultipliers: result.config.marketMultipliers,
+        over15MinProbability: result.over15MinProbability,
+        message: result.message,
         leagues: result.leagues,
         markets: result.markets,
       },
@@ -49,11 +49,11 @@ export async function POST() {
 
 /**
  * DELETE /api/auto-tune
- * Emergency reset: wipe all custom multipliers back to factory 1.0.
+ * Emergency reset: wipe model-weights and Poisson multipliers to factory 1.0.
  */
 export async function DELETE() {
   try {
-    const config = resetTuningConfig();
+    const { weights, config } = resetCalibration();
     return NextResponse.json(
       {
         success: true,
@@ -62,6 +62,7 @@ export async function DELETE() {
         totalBetsAnalyzed: config.totalBetsAnalyzed,
         leagueMultipliers: config.leagueMultipliers,
         marketMultipliers: config.marketMultipliers,
+        weights,
       },
       { headers: NO_STORE_HEADERS }
     );

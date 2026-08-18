@@ -92,6 +92,14 @@ const FLAG_NOTES: Record<string, string> = {
   FATIGUE_AWAY: "Fatiga del visitante (calendario apretado)",
   NEARBY_INTERNATIONAL_MATCH_PRESENT:
     "Partido continental cercano — riesgo de rotación (filtro desactivado)",
+  KNOCKOUT_LEG_1:
+    "Ida de eliminatoria — conservadurismo táctico (90 min reglamentarios)",
+  KNOCKOUT_LEG_2:
+    "Vuelta de eliminatoria — válido solo 90 min reglamentarios",
+  KNOCKOUT_SINGLE:
+    "Eliminación directa — válido solo 90 min reglamentarios",
+  KNOCKOUT_COMEBACK:
+    "Favorito va perdiendo el global — más goles esperados (90 min)",
 };
 
 /** Short UI badges (match cards / parlay legs). */
@@ -119,6 +127,10 @@ export const CONTEXT_BADGE_LABELS: Record<string, string> = {
   FATIGUE_AWAY: "Fatiga Visita",
   NEARBY_INTERNATIONAL_MATCH_PRESENT:
     "⚠️ RIESGO DE ROTACIÓN (Filtro Desactivado)",
+  KNOCKOUT_LEG_1: "Ida (90 min)",
+  KNOCKOUT_LEG_2: "Vuelta (90 min)",
+  KNOCKOUT_SINGLE: "KO 90 min",
+  KNOCKOUT_COMEBACK: "Remontada (Overs)",
 };
 
 /** Friendlies / pre-season: raise eligibility floor from 80% → 85%. */

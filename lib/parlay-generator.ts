@@ -28,6 +28,10 @@ import {
   notesForFlags,
   resolveContextMinProbability,
 } from "./context-engine";
+import {
+  evaluateKnockoutContext,
+  toKnockoutContext,
+} from "./knockout-engine";
 import { rejectMatchesWithoutRealOdds } from "./filters";
 import {
   getLeagueWeight,
@@ -214,7 +218,17 @@ function riskAssessment(
 }
 
 function toLeg(match: Match, pick: MarketPrediction): ParlayLeg {
-  const flags = pick.contextFlags ?? [];
+  const knockoutEval = evaluateKnockoutContext(match);
+  const knockoutContext = pick.knockoutContext ?? toKnockoutContext(knockoutEval);
+  const flags = [
+    ...(pick.contextFlags ?? []),
+    ...knockoutEval.flags,
+  ];
+  const uniqueFlags = [...new Set(flags)];
+  const notes = notesForFlags(uniqueFlags);
+  if (knockoutContext?.note && !notes.includes(knockoutContext.note)) {
+    notes.push(knockoutContext.note);
+  }
   return {
     matchId: match.id,
     matchLabel: `${match.home.name} vs ${match.away.name}`,
@@ -225,10 +239,11 @@ function toLeg(match: Match, pick: MarketPrediction): ParlayLeg {
     odds: pick.odds,
     modelProbability: pick.modelProbability,
     edge: pick.edge,
-    contextFlags: flags,
-    contextNotes: notesForFlags(flags),
+    contextFlags: uniqueFlags,
+    contextNotes: notes,
     referee: match.referee ?? null,
     venue: match.venue ?? null,
+    knockoutContext,
   };
 }
 
@@ -320,8 +335,14 @@ export function collectSafePicks(
   for (const match of matches) {
     if (!hasBookmakerOdds(match.odds)) continue;
     const resolved = match;
+    // Knockout detection before Poisson so λ / 1X / overs use 1st vs 2nd-leg rules.
+    void evaluateKnockoutContext(resolved);
 
-    const leagueCfg = getLeagueWeight(resolved.leagueName, weights);
+    const leagueCfg = getLeagueWeight(
+      resolved.leagueName,
+      weights,
+      resolved.leagueId
+    );
     const leagueMinOdds = Math.max(
       config.minOdds,
       leagueCfg.minOdds || config.minOdds
@@ -337,14 +358,15 @@ export function collectSafePicks(
       if (!isMarketAllowed(m.market, strategyMode, resolved)) return false;
       if (!(m.odds > 1)) return false;
       // Hard floor 80% — friendlies raise to 85% via context guardrail
-      let minProb = Math.max(
+      const minProb = Math.max(
         MIN_LEG_PROBABILITY,
         resolveContextMinProbability(
           resolveMinProbability(
             baseMinProb,
             m.market,
             resolved.leagueName,
-            weights
+            weights,
+            resolved.leagueId
           ),
           resolved
         )
@@ -962,6 +984,7 @@ export function buildMatchPredictions(
 ): MatchPrediction[] {
   return rejectMatchesWithoutRealOdds(filterEliteWhitelistMatches(matches)).map(
     (match) => {
+      const knockoutEval = evaluateKnockoutContext(match);
       const { expectedGoals, markets: allMarkets, contextFlags, contextNotes } =
         predictMatchMarkets(match, {
           minSafeProbability: resolveContextMinProbability(
@@ -1000,6 +1023,9 @@ export function buildMatchPredictions(
         bestSafePick: safe[0] ?? null,
         contextFlags,
         contextNotes,
+        knockoutContext:
+          toKnockoutContext(knockoutEval) ??
+          markets[0]?.knockoutContext,
       };
     }
   );
@@ -1035,10 +1061,14 @@ export function formatParlayClipboard(
       n += 1;
       const dayLabel = formatKickoffDayLabel(l.kickoff, ref);
       const explicit = getExplicitPickFromLeg(l);
+      const knockoutLine = l.knockoutContext?.isKnockout
+        ? `     ⚠️ ${l.knockoutContext.note} (${l.knockoutContext.leg})`
+        : undefined;
       legLines.push(
         `  ${n}. [${dayLabel} CL] ${l.matchLabel}`,
         `     Apuesta: ${formatExplicitBetLine(explicit)} @ ${l.odds.toFixed(2)} (${(l.modelProbability * 100).toFixed(1)}%)`,
         `     Condición: ${explicit.condition}`,
+        ...(knockoutLine ? [knockoutLine] : []),
         ...formatMarketGuideLines(explicit).map((line) =>
           line.replace(/^   /, "     ")
         )

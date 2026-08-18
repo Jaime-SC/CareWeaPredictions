@@ -7,6 +7,13 @@ import {
   isMarketBlockedByDerby,
 } from "./context-engine";
 import {
+  applyKnockoutLambdaAdjustments,
+  applyKnockoutMarketAdjustments,
+  evaluateKnockoutContext,
+  knockoutMarketLabel,
+  toKnockoutContext,
+} from "./knockout-engine";
+import {
   getLeagueWeight,
   getMarketWeight,
   loadModelWeights,
@@ -26,6 +33,12 @@ export {
   isHighRiskDerby,
   isMarketBlockedByDerby,
 } from "./context-engine";
+
+export {
+  evaluateKnockoutContext,
+  applyKnockoutLambdaAdjustments,
+  applyKnockoutMarketAdjustments,
+} from "./knockout-engine";
 
 function leagueAvgGoals(): number {
   return loadModelWeights().global.leagueAvgGoals;
@@ -151,6 +164,13 @@ export function estimateExpectedGoals(match: Match): {
   const h2hAwayGoals = match.h2h.avgGoals - h2hHomeGoals;
   lambdaHome = lambdaHome * (1 - h2hShare) + h2hHomeGoals * h2hShare;
   lambdaAway = lambdaAway * (1 - h2hShare) + h2hAwayGoals * h2hShare;
+
+  const knockoutLambda = applyKnockoutLambdaAdjustments(match, {
+    home: lambdaHome,
+    away: lambdaAway,
+  });
+  lambdaHome = knockoutLambda.home;
+  lambdaAway = knockoutLambda.away;
 
   return {
     home: Math.max(0.2, Math.min(4.5, Number(lambdaHome.toFixed(3)))),
@@ -433,6 +453,8 @@ export function predictMatchMarkets(
   contextNotes: string[];
 } {
   const derby = isHighRiskDerby(match);
+  const knockoutEval = evaluateKnockoutContext(match);
+  const knockoutContext = toKnockoutContext(knockoutEval);
 
   if (!hasBookmakerOdds(match.odds)) {
     const xg = estimateExpectedGoals(match);
@@ -440,14 +462,23 @@ export function predictMatchMarkets(
       expectedGoals: xg,
       markets: [],
       isDerby: derby,
-      contextFlags: ["UNAVAILABLE_NO_REAL_ODDS"],
-      contextNotes: ["Sin cuotas reales de casa de apuestas"],
+      contextFlags: [
+        "UNAVAILABLE_NO_REAL_ODDS",
+        ...knockoutEval.flags,
+      ],
+      contextNotes: knockoutContext
+        ? ["Sin cuotas reales de casa de apuestas", knockoutContext.note]
+        : ["Sin cuotas reales de casa de apuestas"],
     };
   }
 
   const resolved = match;
   const weights = loadModelWeights();
-  const leagueCfg = getLeagueWeight(resolved.leagueName, weights);
+  const leagueCfg = getLeagueWeight(
+    resolved.leagueName,
+    weights,
+    resolved.leagueId
+  );
   const baseMinProb = options?.minSafeProbability ?? 0.8;
   const minOdds = Math.max(
     options?.minSafeOdds ?? weights.global.defaultMinOdds,
@@ -483,7 +514,12 @@ export function predictMatchMarkets(
   };
 
   const ctx = applyContextToMarkets(resolved, baseProbs);
-  const probs = ctx.probs;
+  const probs = applyKnockoutMarketAdjustments(resolved, ctx.probs);
+  const knockoutFlags = knockoutEval.flags;
+  const mergedFlags = [...new Set([...ctx.contextFlags, ...knockoutFlags])];
+  const mergedNotes = knockoutContext
+    ? [...ctx.contextNotes, knockoutContext.note]
+    : ctx.contextNotes;
 
   const markets: MarketPrediction[] = (
     Object.keys(probs) as MarketType[]
@@ -503,13 +539,18 @@ export function predictMatchMarkets(
       baseMinProb,
       market,
       resolved.leagueName,
-      weights
+      weights,
+      resolved.leagueId
     );
     const marketCtx = ctx.perMarket[market];
+    const marketFlags = [
+      ...(marketCtx?.contextFlags ?? []),
+      ...knockoutFlags,
+    ];
 
     return {
       market,
-      label: MARKET_LABELS[market],
+      label: knockoutMarketLabel(MARKET_LABELS[market], knockoutEval),
       odds,
       modelProbability,
       impliedProbability: implied,
@@ -523,7 +564,8 @@ export function predictMatchMarkets(
         odds <= maxOdds,
       expectedGoals: xg,
       confidenceModifier: marketCtx?.confidenceModifier,
-      contextFlags: marketCtx?.contextFlags,
+      contextFlags: [...new Set(marketFlags)],
+      knockoutContext,
     };
   });
 
@@ -531,8 +573,8 @@ export function predictMatchMarkets(
     expectedGoals: xg,
     markets,
     isDerby: derby,
-    contextFlags: ctx.contextFlags,
-    contextNotes: ctx.contextNotes,
+    contextFlags: mergedFlags,
+    contextNotes: mergedNotes,
   };
 }
 

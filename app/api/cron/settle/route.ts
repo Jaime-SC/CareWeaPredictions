@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { settlePendingTickets } from "@/lib/settlement";
+import {
+  MIN_SETTLEMENT_CALIBRATION_BATCH,
+  maybeRecalibrateAfterSettlement,
+} from "@/lib/auto-tuner";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,6 +26,19 @@ function authorize(request: NextRequest): boolean {
   return q === secret;
 }
 
+function calibrationPayload(
+  result: Awaited<ReturnType<typeof maybeRecalibrateAfterSettlement>>
+) {
+  if (!result) return null;
+  return {
+    leaguesAdjusted: result.leaguesAdjusted,
+    marketsAdjusted: result.marketsAdjusted,
+    sampleSize: result.sampleSize,
+    calibratedAt: result.weights.calibratedAt,
+    message: result.message,
+  };
+}
+
 async function handle(request: NextRequest) {
   if (!authorize(request)) {
     return NextResponse.json(
@@ -32,11 +49,30 @@ async function handle(request: NextRequest) {
 
   try {
     const result = await settlePendingTickets();
+    const newlySettledCount = result.updatedLegsCount;
+
+    let calibration: Awaited<
+      ReturnType<typeof maybeRecalibrateAfterSettlement>
+    > = null;
+
+    if (newlySettledCount >= MIN_SETTLEMENT_CALIBRATION_BATCH) {
+      console.log(
+        `[SETTLE] ${newlySettledCount} bets settled. Threshold reached (>= ${MIN_SETTLEMENT_CALIBRATION_BATCH}). Running auto-calibration...`
+      );
+      calibration = await maybeRecalibrateAfterSettlement(newlySettledCount);
+    } else {
+      console.log(
+        `[SETTLE] ${newlySettledCount} bets settled. Skipping auto-calibration (requires >= ${MIN_SETTLEMENT_CALIBRATION_BATCH} settled bets).`
+      );
+    }
+
     return NextResponse.json({
       success: result.ok,
       ...result,
+      newlySettledCount,
       winRatePct: Number((result.winRate * 100).toFixed(2)),
       roiPct: Number(result.roi.toFixed(2)),
+      calibration: calibrationPayload(calibration),
     });
   } catch (error) {
     console.error("[api/cron/settle]", error);

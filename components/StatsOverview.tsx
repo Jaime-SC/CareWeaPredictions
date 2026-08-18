@@ -67,7 +67,7 @@ export function StatsOverview({ summary }: StatsOverviewProps) {
         icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
         label="ROI % / Rendimiento"
         value={`${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}
-        hint="1U por ticket liquidado · pendientes excluidos"
+        hint="Ganancia neta / stake liquidado · pendientes excluidos"
         valueClass={roiPositive ? "text-emerald-200" : "text-rose-200"}
       />
     </div>

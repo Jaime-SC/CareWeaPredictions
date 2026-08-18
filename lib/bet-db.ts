@@ -1,5 +1,4 @@
 import { prisma } from "./db";
-import type { Prisma } from "@prisma/client";
 import {
   modeFromStrategy,
   marketGroupLabel,
@@ -109,16 +108,20 @@ function strategyFromMode(mode: string): StrategyMode {
     : "daily-safe";
 }
 
-async function upsertFixtureInTx(
-  tx: Prisma.TransactionClient,
-  leg: RecordBetLegInput
-) {
+function legsFingerprint(legs: Array<{ matchId?: string; market?: string }>): string {
+  return legs
+    .map((leg) => `${parseFixtureId(String(leg.matchId ?? ""))}:${String(leg.market ?? "")}`)
+    .sort()
+    .join("|");
+}
+
+async function upsertFixture(leg: RecordBetLegInput) {
   const apiFixtureId = parseFixtureId(leg.matchId);
   const { homeTeam, awayTeam } = splitMatchLabel(leg.matchLabel);
   const matchDate = leg.kickoff ? new Date(leg.kickoff) : new Date();
 
   if (apiFixtureId > 0) {
-    return tx.matchFixture.upsert({
+    return prisma.matchFixture.upsert({
       where: { apiFixtureId },
       create: {
         apiFixtureId,
@@ -138,7 +141,7 @@ async function upsertFixtureInTx(
     });
   }
 
-  return tx.matchFixture.create({
+  return prisma.matchFixture.create({
     data: {
       apiFixtureId: -(Date.now() + Math.floor(Math.random() * 100_000)),
       homeTeam: homeTeam || "Unknown",
@@ -151,6 +154,67 @@ async function upsertFixtureInTx(
   });
 }
 
+async function attachLegsToTicket(
+  ticketId: string,
+  legs: RecordBetLegInput[]
+) {
+  for (const leg of legs) {
+    const fixture = await upsertFixture(leg);
+    await prisma.prediction.create({
+      data: {
+        fixtureId: fixture.id,
+        ticketId,
+        market: String(leg.market),
+        selection: leg.marketLabel,
+        odds: leg.odds,
+        modelProbability: leg.modelProbability ?? 0,
+        outcome: "PENDING",
+      },
+    });
+  }
+}
+
+function ticketFingerprint(
+  predictions: Array<{ fixture: { apiFixtureId: number }; market: string }>
+): string {
+  return predictions
+    .map((p) => `${p.fixture.apiFixtureId}:${p.market}`)
+    .sort()
+    .join("|");
+}
+
+/** Existing individual (Segura) ticket for this fixture+market, any status. */
+async function findExistingIndividualTicketId(
+  leg: RecordBetLegInput,
+  date: string
+): Promise<string | null> {
+  const apiFixtureId = parseFixtureId(leg.matchId);
+  if (apiFixtureId > 0) {
+    const found = await prisma.prediction.findFirst({
+      where: {
+        market: String(leg.market),
+        ticketId: { not: null },
+        fixture: { apiFixtureId },
+        ticket: { mode: "Segura" },
+      },
+      select: { ticketId: true },
+    });
+    return found?.ticketId ?? null;
+  }
+
+  const { homeTeam, awayTeam } = splitMatchLabel(leg.matchLabel);
+  const found = await prisma.prediction.findFirst({
+    where: {
+      market: String(leg.market),
+      ticketId: { not: null },
+      ticket: { mode: "Segura", date },
+      fixture: { homeTeam, awayTeam },
+    },
+    select: { ticketId: true },
+  });
+  return found?.ticketId ?? null;
+}
+
 /** Persist an accumulator or single-pick ticket + predictions. */
 export async function recordBet(input: RecordBetInput) {
   if (!input.legs.length) {
@@ -160,58 +224,101 @@ export async function recordBet(input: RecordBetInput) {
   const date = input.date ?? chileDateString();
   const strategyMode = input.strategyMode ?? "daily-fun";
   const mode = input.mode ?? modeFromStrategy(strategyMode);
+  const isCombinada = input.legs.length >= 2;
+  const stakeCLP = Number(input.stakeCLP);
+  if (!Number.isFinite(stakeCLP) || stakeCLP <= 0) {
+    throw new Error("El monto a apostar debe ser mayor a 0.");
+  }
+  const payoutCLP = stakeCLP * input.totalOdds;
 
-  const existing = await prisma.accumulatorTicket.findFirst({
+  if (!isCombinada) {
+    const existingId = await findExistingIndividualTicketId(input.legs[0], date);
+    if (existingId) {
+      return { ticketId: existingId, duplicate: true as const };
+    }
+  }
+
+  const wanted = legsFingerprint(input.legs);
+  const pending = await prisma.accumulatorTicket.findMany({
     where: {
       date,
       mode: String(mode),
       status: "PENDING",
     },
-    include: { predictions: true },
+    include: {
+      predictions: { include: { fixture: true } },
+    },
+    orderBy: { createdAt: "asc" },
   });
 
-  if (
-    existing &&
-    existing.predictions.length === input.legs.length &&
-    Math.abs(existing.totalOdds - input.totalOdds) < 0.001
-  ) {
-    return { ticketId: existing.id, duplicate: true as const };
+  const existingSame = pending.find(
+    (ticket) => ticketFingerprint(ticket.predictions) === wanted
+  );
+  const pendingCombinadas = pending.filter(
+    (ticket) => ticket.predictions.length >= 2 || ticket.predictions.length === 0
+  );
+
+  if (existingSame) {
+    if (isCombinada) {
+      const extras = pendingCombinadas.filter((t) => t.id !== existingSame.id);
+      for (const extra of extras) {
+        await prisma.accumulatorTicket.delete({ where: { id: extra.id } });
+      }
+    }
+    return { ticketId: existingSame.id, duplicate: true as const };
   }
 
-  const ticket = await prisma.$transaction(async (tx) => {
-    const created = await tx.accumulatorTicket.create({
+  // One pending combinada per day+mode: overwrite the original ticket.
+  if (isCombinada && pendingCombinadas.length > 0) {
+    const keep = pendingCombinadas[0];
+    await prisma.prediction.deleteMany({ where: { ticketId: keep.id } });
+    await prisma.accumulatorTicket.update({
+      where: { id: keep.id },
       data: {
-        date,
-        mode: String(mode),
-        // Always persist 1 Unit (1U) for analytics — ignore monetary stake
-        stakeCLP: UNIT_STAKE,
+        stakeCLP,
         totalOdds: input.totalOdds,
-        payoutCLP: UNIT_STAKE * input.totalOdds,
+        payoutCLP,
         status: "PENDING",
       },
     });
 
-    for (const leg of input.legs) {
-      const fixture = await upsertFixtureInTx(tx, leg);
-      await tx.prediction.create({
-        data: {
-          fixtureId: fixture.id,
-          ticketId: created.id,
-          market: String(leg.market),
-          selection: leg.marketLabel,
-          odds: leg.odds,
-          modelProbability: leg.modelProbability ?? 0,
-          outcome: "PENDING",
-        },
-      });
+    try {
+      await attachLegsToTicket(keep.id, input.legs);
+    } catch (err) {
+      await prisma.prediction.deleteMany({ where: { ticketId: keep.id } });
+      throw err;
     }
 
-    return created;
+    for (const extra of pendingCombinadas.slice(1)) {
+      await prisma.accumulatorTicket.delete({ where: { id: extra.id } });
+    }
+
+    return { ticketId: keep.id, duplicate: false as const };
+  }
+
+  const ticket = await prisma.accumulatorTicket.create({
+    data: {
+      date,
+      mode: String(mode),
+      stakeCLP,
+      totalOdds: input.totalOdds,
+      payoutCLP,
+      status: "PENDING",
+    },
   });
+
+  try {
+    await attachLegsToTicket(ticket.id, input.legs);
+  } catch (err) {
+    await prisma.prediction.deleteMany({ where: { ticketId: ticket.id } });
+    await prisma.accumulatorTicket.delete({ where: { id: ticket.id } });
+    throw err;
+  }
 
   return { ticketId: ticket.id, duplicate: false as const };
 }
 
+/** Persist a combinada; overwrites the pending ticket for that date+mode. */
 export async function recordBetFromParlay(
   parlay: GeneratedParlay,
   date = chileDateString()
@@ -235,6 +342,29 @@ export async function recordBetFromParlay(
       modelProbability: leg.modelProbability,
     })),
   });
+}
+
+/** Insert only new individual picks; already registered fixture+market rows are kept. */
+export async function recordSafePicks(
+  picks: RecordBetLegInput[],
+  date = chileDateString()
+) {
+  let saved = 0;
+  let duplicates = 0;
+  for (const pick of picks) {
+    const result = await recordBet({
+      date,
+      strategyMode: "daily-safe",
+      mode: "Segura",
+      stakeCLP: UNIT_STAKE,
+      totalOdds: pick.odds,
+      payoutCLP: UNIT_STAKE * pick.odds,
+      legs: [pick],
+    });
+    if (result.duplicate) duplicates += 1;
+    else saved += 1;
+  }
+  return { saved, duplicates };
 }
 
 function mapTicketToHistory(row: {
@@ -291,6 +421,7 @@ function mapTicketToHistory(row: {
       market: p.market as MarketType,
       marketLabel: p.selection,
       odds: p.odds,
+      modelProbability: p.modelProbability,
       status: fromDbOutcome(p.outcome),
       homeGoals: Number.isFinite(homeGoals) ? homeGoals : null,
       awayGoals: Number.isFinite(awayGoals) ? awayGoals : null,
@@ -316,6 +447,20 @@ function mapTicketToHistory(row: {
         ? undefined
         : row.updatedAt.toISOString(),
   };
+}
+
+export async function listSafeHistoryForDate(date: string): Promise<HistoryBet[]> {
+  const rows = await prisma.accumulatorTicket.findMany({
+    where: { date, mode: "Segura" },
+    include: {
+      predictions: { include: { fixture: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return rows
+    .filter((row) => row.predictions.length === 1)
+    .map(mapTicketToHistory);
 }
 
 export async function listTicketsAsHistory(): Promise<HistoryBet[]> {

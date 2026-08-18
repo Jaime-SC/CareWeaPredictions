@@ -170,7 +170,7 @@ type ApiFixture = {
     referee?: string | null;
     venue?: { id?: number; name?: string | null; city?: string | null };
   };
-  league: { id: number; name: string; season?: number };
+  league: { id: number; name: string; season?: number; round?: string | null };
   teams: {
     home: { id: number; name: string };
     away: { id: number; name: string };
@@ -535,6 +535,7 @@ function toMatch(item: ApiFixture): Match {
     league: mapLeagueSlug(item.league.id),
     leagueName: item.league.name,
     leagueId: String(item.league.id),
+    round: item.league.round?.trim() || null,
     kickoff,
     home: {
       id: item.teams.home.id,

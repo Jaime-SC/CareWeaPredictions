@@ -20,6 +20,22 @@ export function formatCLP(value: number): string {
   return `$${Math.round(value).toLocaleString("es-CL")} CLP`;
 }
 
+/** Parse a CLP amount from user input (digits, dots, commas, $). */
+export function parseStakeCLP(raw: string): number | null {
+  const digits = raw.replace(/[^\d]/g, "");
+  if (!digits) return null;
+  const value = Number(digits);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return value;
+}
+
+/** Format a digit string as Chilean thousands (10.000). */
+export function formatStakeInput(raw: string): string {
+  const parsed = parseStakeCLP(raw);
+  if (parsed == null) return "";
+  return parsed.toLocaleString("es-CL");
+}
+
 /** Standardized unit stake for analytics (1U per ticket). */
 export const UNIT_STAKE = 1;
 

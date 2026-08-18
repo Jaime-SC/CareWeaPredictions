@@ -37,7 +37,6 @@ type PredictSuccessBody = {
 };
 
 /**
- * GET /api/predict?date=YYYY-MM-DD&safeOnly=true&minProb=0.85
  * Optional: &refresh=1 to bypass the computed-payload SQLite cache.
  */
 export async function GET(request: NextRequest) {
@@ -71,7 +70,10 @@ export async function GET(request: NextRequest) {
     const hit = await getCachedPayload<PredictSuccessBody>(cacheKey);
     if (hit?.success && Array.isArray(hit.predictions)) {
       console.log(`[CACHE HIT] Returning data for key=${cacheKey}`);
-      return NextResponse.json({ ...hit, cached: true });
+      return NextResponse.json({
+        ...hit,
+        cached: true,
+      });
     }
   }
 
@@ -124,6 +126,7 @@ export async function GET(request: NextRequest) {
             confidenceModifier: m.confidenceModifier,
             referee: p.match.referee ?? null,
             venue: p.match.venue ?? null,
+            knockoutContext: m.knockoutContext ?? p.knockoutContext,
           }))
       )
       .sort((a, b) => b.modelProbability - a.modelProbability);

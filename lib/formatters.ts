@@ -1,4 +1,4 @@
-import type { MarketType } from "./types";
+import type { KnockoutContext, MarketType } from "./types";
 
 /**
  * Bookmaker-facing copy so the user opens the correct tab
@@ -379,14 +379,28 @@ export function getExplicitPickFromLeg(leg: {
   matchLabel: string;
   market: MarketType | string;
   marketLabel?: string;
+  knockoutContext?: KnockoutContext;
 }): ExplicitPickLabel {
   const { homeTeam, awayTeam } = parseTeamsFromMatchLabel(leg.matchLabel);
-  return getExplicitPickLabel(
+  const pick = getExplicitPickLabel(
     leg.market,
     leg.marketLabel,
     homeTeam,
     awayTeam
   );
+  const ko = leg.knockoutContext;
+  if (!ko?.isKnockout) return pick;
+  const note = ko.note || "Válido solo 90 min reglamentarios";
+  const conditionBase = pick.condition.replace(/\.\s*$/, "");
+  const already =
+    pick.warningNote.includes(note) || pick.warningNote.includes("90 min");
+  return {
+    ...pick,
+    condition: `${conditionBase}. ${note}.`,
+    warningNote: already
+      ? `${pick.warningNote} (${ko.leg ?? "KO"}: ${note})`
+      : `${pick.warningNote} ${note}. No uses alargue, penales ni «Se clasifica».`,
+  };
 }
 
 /** Alias kept for UI that wants the MarketGuide shape by name. */

@@ -1,15 +1,10 @@
 import { PrismaClient } from "@prisma/client";
-import { PrismaNeon } from "@prisma/adapter-neon";
-import { Pool, neonConfig } from "@neondatabase/serverless";
-import ws from "ws";
-
-neonConfig.webSocketConstructor = ws;
-// Queries go over HTTPS (port 443). Needed on networks that block Postgres 5432.
-neonConfig.poolQueryViaFetch = true;
+import { PrismaNeonHTTP } from "@prisma/adapter-neon";
+import { neon } from "@neondatabase/serverless";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
-  neonPool: Pool | undefined;
+  neonSql: ReturnType<typeof neon> | undefined;
 };
 
 function assertPostgresUrl(url: string | undefined): asserts url is string {
@@ -22,14 +17,13 @@ function assertPostgresUrl(url: string | undefined): asserts url is string {
 
 assertPostgresUrl(process.env.DATABASE_URL);
 
-const pool =
-  globalForPrisma.neonPool ??
-  new Pool({ connectionString: process.env.DATABASE_URL });
+const neonSql =
+  globalForPrisma.neonSql ?? neon(process.env.DATABASE_URL);
 
 export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
-    adapter: new PrismaNeon(pool),
+    adapter: new PrismaNeonHTTP(neonSql),
     log:
       process.env.NODE_ENV === "development"
         ? ["error", "warn"]
@@ -38,5 +32,5 @@ export const prisma =
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
-  globalForPrisma.neonPool = pool;
+  globalForPrisma.neonSql = neonSql;
 }

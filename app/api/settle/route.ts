@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { maybeRecalibrateAfterSettlement } from "@/lib/auto-tuner";
 import { settlePendingTickets } from "@/lib/settlement";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,9 @@ const NO_STORE_HEADERS = {
 export async function POST() {
   try {
     const result = await settlePendingTickets();
+    const calibration = await maybeRecalibrateAfterSettlement(
+      result.updatedLegsCount
+    );
     return NextResponse.json(
       {
         success: result.ok,
@@ -34,6 +38,15 @@ export async function POST() {
         error: result.error,
         winRatePct: Number((result.winRate * 100).toFixed(2)),
         roiPct: Number(result.roi.toFixed(2)),
+        calibration: calibration
+          ? {
+              leaguesAdjusted: calibration.leaguesAdjusted,
+              marketsAdjusted: calibration.marketsAdjusted,
+              sampleSize: calibration.sampleSize,
+              calibratedAt: calibration.weights.calibratedAt,
+              message: calibration.message,
+            }
+          : null,
       },
       { headers: NO_STORE_HEADERS }
     );

@@ -1,5 +1,6 @@
 "use client";
 
+import { AutoTuningCard, parseCalibrationSnapshot, type CalibrationSnapshot } from "@/components/auto-tuning-card";
 import { BetHistory } from "@/components/bet-history";
 import { StatsOverview } from "@/components/StatsOverview";
 import { Badge } from "@/components/ui/badge";
@@ -29,7 +30,7 @@ import {
   countSettledByStrategy,
   marketGroupLabel,
   deleteBetById,
-  formatSignedUnits,
+  formatSignedCLP,
   loadBets,
   purgeFakeHistory,
   replaceBets,
@@ -147,15 +148,31 @@ export default function StatsPage() {
     useState<StatsApiPayload["summary"]>(undefined);
   const [hydrated, setHydrated] = useState(false);
   const [updating, setUpdating] = useState(false);
-  const [calibrating, setCalibrating] = useState(false);
   const [calibrateMsg, setCalibrateMsg] = useState<string | null>(null);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
+  const [calibration, setCalibration] = useState<CalibrationSnapshot | null>(
+    null
+  );
 
   const refreshFromDb = useCallback(async (): Promise<StatsApiPayload | null> => {
     purgeFakeHistory();
     const local = loadBets();
+
+    const refreshCalibration = async () => {
+      try {
+        const calRes = await fetch("/api/model/calibrate", {
+          cache: "no-store",
+        });
+        const calData = await calRes.json().catch(() => ({}));
+        const parsed = parseCalibrationSnapshot(calData);
+        if (parsed) setCalibration(parsed);
+      } catch {
+        // keep last snapshot
+      }
+    };
+
     try {
       const res = await fetch("/api/stats/summary", { cache: "no-store" });
       const data = (await res.json()) as StatsApiPayload;
@@ -173,6 +190,7 @@ export default function StatsPage() {
         setTrainingExport(data.trainingExport ?? []);
         setApiSummary(data.summary);
         setHydrated(true);
+        await refreshCalibration();
         return data;
       }
     } catch {
@@ -185,6 +203,7 @@ export default function StatsPage() {
     setTrainingExport([]);
     setApiSummary(undefined);
     setHydrated(true);
+    await refreshCalibration();
     return null;
   }, []);
 
@@ -212,6 +231,7 @@ export default function StatsPage() {
       if (!settle) return;
 
       const n = settle.settledTicketsCount ?? 0;
+      const legs = settle.updatedLegsCount ?? 0;
       const won = settle.ticketsWon ?? 0;
       const lost = settle.ticketsLost ?? 0;
       const voided = settle.ticketsVoided ?? 0;
@@ -224,6 +244,7 @@ export default function StatsPage() {
 
       console.info("[settle] Sincronización de marcadores", {
         settledTicketsCount: n,
+        updatedLegsCount: legs,
         ticketsWon: won,
         ticketsLost: lost,
         ticketsVoided: voided,
@@ -234,12 +255,16 @@ export default function StatsPage() {
         errors: settle.errors,
       });
 
-      if (n > 0) {
+      if (n > 0 || legs > 0) {
         const voidPart =
           voided > 0 ? `, ${voided} Anulados` : "";
-        setUpdateMsg(
-          `Sincronización completada: ${n} boletos actualizados (${won} Ganados, ${lost} Perdidos${voidPart}).`
-        );
+        const ticketPart =
+          n > 0
+            ? `${n} boletos actualizados (${won} Ganados, ${lost} Perdidos${voidPart})`
+            : "boleto ya cerrado";
+        const legPart =
+          legs > 0 ? `; ${legs} selecciones evaluadas` : "";
+        setUpdateMsg(`Sincronización completada: ${ticketPart}${legPart}.`);
         if (visibleUnresolved.length > 0) {
           setUpdateError(
             visibleUnresolved
@@ -499,41 +524,6 @@ export default function StatsPage() {
     URL.revokeObjectURL(url);
   }
 
-  async function handleCalibrateModel() {
-    setCalibrating(true);
-    setCalibrateMsg(null);
-    setUpdateError(null);
-    try {
-      const res = await fetch("/api/model/calibrate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          featureVectors: trainingExport.length
-            ? trainingExport
-            : undefined,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) {
-        setUpdateError(
-          typeof data.error === "string"
-            ? data.error
-            : "No se pudo recalibrar el modelo."
-        );
-        return;
-      }
-      setCalibrateMsg(
-        typeof data.message === "string"
-          ? data.message
-          : `Parámetros actualizados: ${data.leaguesAdjusted ?? 0} ligas ajustadas, umbral de goles ajustado a ${Math.round((data.over15MinProbability ?? 0.78) * 100)}%`
-      );
-    } catch {
-      setUpdateError("Error de red al recalibrar el modelo.");
-    } finally {
-      setCalibrating(false);
-    }
-  }
-
   if (!hydrated) {
     return (
       <div
@@ -629,6 +619,14 @@ export default function StatsPage() {
           </CardContent>
         </Card>
       )}
+
+      <AutoTuningCard
+        snapshot={calibration}
+        trainingExport={trainingExport}
+        onError={setUpdateError}
+        onMessage={setCalibrateMsg}
+        onCalibrated={setCalibration}
+      />
 
       {bets.length === 0 ? (
         <Card className="border-dashed border-slate-700">
@@ -820,44 +818,11 @@ export default function StatsPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-amber-500/25 bg-amber-950/10">
-            <CardHeader>
-              <CardTitle>Motor de autoajuste</CardTitle>
-              <CardDescription>
-                Recalcula multiplicadores por liga, pesos de mercado y umbrales
-                de probabilidad a partir del historial (base de datos / JSON). Los
-                nuevos pesos se aplican automáticamente a futuras predicciones.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="max-w-xl text-sm text-slate-200">
-                Ligas &lt;70% WR → mayor penalización · Ligas &gt;88% → umbral de
-                cuota más flexible · Mercados con ROI negativo → cutoff más alto.
-              </p>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={handleCalibrateModel}
-                disabled={calibrating}
-                aria-busy={calibrating}
-              >
-                {calibrating ? (
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                ) : (
-                  <Settings2 className="h-4 w-4" aria-hidden />
-                )}
-                {calibrating
-                  ? "Recalibrando…"
-                  : "Recalibrar modelo con datos históricos"}
-              </Button>
-            </CardContent>
-          </Card>
-
           <Card>
             <CardHeader>
-              <CardTitle>Rendimiento acumulado (unidades)</CardTitle>
+              <CardTitle>Rendimiento acumulado (CLP)</CardTitle>
               <CardDescription>
-                P&amp;L en unidades (1U por ticket resuelto)
+                Ganancia o pérdida neta acumulada de boletos liquidados
               </CardDescription>
             </CardHeader>
             <CardContent className="h-72 pt-2 sm:h-80">
@@ -905,12 +870,15 @@ export default function StatsPage() {
                     />
                     <YAxis
                       tick={{ fill: "#cbd5e1", fontSize: 12 }}
-                      tickFormatter={(v: number) =>
-                        `${v >= 0 ? "" : "−"}${Math.abs(Number(v.toFixed(1)))}U`
-                      }
+                      tickFormatter={(v: number) => {
+                        const abs = Math.round(Math.abs(v)).toLocaleString(
+                          "es-CL"
+                        );
+                        return `${v < 0 ? "−" : ""}$${abs}`;
+                      }}
                       axisLine={false}
                       tickLine={false}
-                      width={48}
+                      width={72}
                     />
                     <Tooltip
                       contentStyle={{
@@ -922,8 +890,8 @@ export default function StatsPage() {
                       }}
                       labelStyle={{ color: "#cbd5e1" }}
                       formatter={(value) => [
-                        formatSignedUnits(Number(value ?? 0)),
-                        "Unidades",
+                        formatSignedCLP(Number(value ?? 0)),
+                        "P&L acumulado",
                       ]}
                     />
                     <Area
