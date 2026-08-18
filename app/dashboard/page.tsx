@@ -2,6 +2,7 @@
 
 import { MatchCard } from "@/components/MatchCard";
 import { LivePicksOverview } from "@/components/StatsOverview";
+import { SingleStakeBadge } from "@/components/stake-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -333,20 +334,26 @@ export default function DashboardPage() {
                           </Badge>
                         </div>
                       </CardHeader>
-                      <CardContent className="flex items-end justify-between gap-3">
-                        <div>
-                          <p className="text-sm text-slate-100">
-                            {market.label}
-                          </p>
-                          <p className="text-xs text-slate-300">
-                            Edge {formatPercent(market.edge)} · xG{" "}
-                            {prediction.expectedGoals.home.toFixed(2)}–
-                            {prediction.expectedGoals.away.toFixed(2)}
+                      <CardContent className="space-y-3">
+                        <div className="flex items-end justify-between gap-3">
+                          <div>
+                            <p className="text-sm text-slate-100">
+                              {market.label}
+                            </p>
+                            <p className="text-xs text-slate-300">
+                              Edge {formatPercent(market.edge)} · xG{" "}
+                              {prediction.expectedGoals.home.toFixed(2)}–
+                              {prediction.expectedGoals.away.toFixed(2)}
+                            </p>
+                          </div>
+                          <p className="font-mono text-2xl font-bold text-emerald-200">
+                            @{formatOdds(market.odds)}
                           </p>
                         </div>
-                        <p className="font-mono text-2xl font-bold text-emerald-200">
-                          @{formatOdds(market.odds)}
-                        </p>
+                        <SingleStakeBadge
+                          modelProbability={market.modelProbability}
+                          odds={market.odds}
+                        />
                       </CardContent>
                     </Card>
                   ))}

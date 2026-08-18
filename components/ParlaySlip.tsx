@@ -10,6 +10,8 @@ import {
   CardDescription,
   CardHeader,
 } from "@/components/ui/card";
+import { ParlayStakeBadge, useParlayStakeRecommendation } from "@/components/stake-badge";
+import { DEFAULT_BANKROLL_SETTINGS } from "@/lib/bankroll-store";
 import {
   addBetFromParlay,
   findExistingParlay,
@@ -97,6 +99,7 @@ export function ParlaySlip({
   const [activeLegs, setActiveLegs] = useState<ParlayLeg[]>(parlay.legs);
   const [exitingKeys, setExitingKeys] = useState<Set<string>>(new Set());
   const [dbTickets, setDbTickets] = useState<HistoryBet[] | null>(null);
+  const lastAutoStake = useRef("");
   const exitTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map()
   );
@@ -110,12 +113,19 @@ export function ParlaySlip({
     if (fromCache) {
       setRegistered(true);
       setRegisterMsg("Esta combinada ya está en tu historial.");
-      if (parlay.stake > 0) {
-        setStakeInput(formatStakeInput(String(Math.round(parlay.stake))));
+      if (parlay.stake >= DEFAULT_BANKROLL_SETTINGS.minBookmakerStake) {
+        const formatted = formatStakeInput(String(Math.round(parlay.stake)));
+        lastAutoStake.current = formatted;
+        setStakeInput(formatted);
+      } else {
+        lastAutoStake.current = "";
+        setStakeInput("");
       }
     } else {
       setRegistered(false);
       setRegisterMsg(null);
+      lastAutoStake.current = "";
+      setStakeInput("");
     }
   }, [parlay, fromCache]);
 
@@ -159,6 +169,19 @@ export function ParlaySlip({
 
   const stakeCLP = parseStakeCLP(stakeInput);
   const potentialReturn = stakeCLP != null ? stakeCLP * activeParlay.totalOdds : null;
+  const suggested = useParlayStakeRecommendation(
+    activeParlay.totalOdds,
+    activeParlay.jointProbability
+  );
+
+  useEffect(() => {
+    if (registered || suggested.amountCLP <= 0) return;
+    const formatted = formatStakeInput(String(suggested.amountCLP));
+    if (stakeInput === "" || stakeInput === lastAutoStake.current) {
+      lastAutoStake.current = formatted;
+      setStakeInput(formatted);
+    }
+  }, [registered, suggested.amountCLP, stakeInput]);
 
   const persistToNeon = useCallback(async () => {
     if (activeParlay.legs.length === 0) return;
@@ -407,6 +430,13 @@ export function ParlaySlip({
             value={`${activeParlay.legs.length} partidos`}
           />
         </div>
+
+        {activeParlay.legs.length > 0 && (
+          <ParlayStakeBadge
+            totalOdds={activeParlay.totalOdds}
+            combinedProbability={activeParlay.jointProbability}
+          />
+        )}
 
         {activeParlay.legs.length > 0 && (
           <p className="text-sm leading-relaxed text-slate-300">

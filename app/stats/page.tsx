@@ -2,6 +2,7 @@
 
 import { AutoTuningCard, parseCalibrationSnapshot, type CalibrationSnapshot } from "@/components/auto-tuning-card";
 import { BetHistory } from "@/components/bet-history";
+import { ReadinessSummaryCard } from "@/components/readiness-gate";
 import { StatsOverview } from "@/components/StatsOverview";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -17,6 +18,7 @@ import type {
   LeagueStatsRow,
   TrainingFeatureRow,
 } from "@/lib/bet-types";
+import type { ReadinessReport } from "@/lib/pro-metrics";
 import {
   type BreakdownItem,
   type HistoryBet,
@@ -108,6 +110,7 @@ type StatsApiPayload = {
   byLeague?: LeagueStatsRow[];
   byDateMarket?: DateMarketStatsRow[];
   trainingExport?: TrainingFeatureRow[];
+  readiness?: ReadinessReport;
   error?: string;
 };
 
@@ -144,6 +147,7 @@ export default function StatsPage() {
   const [trainingExport, setTrainingExport] = useState<TrainingFeatureRow[]>(
     []
   );
+  const [readiness, setReadiness] = useState<ReadinessReport | null>(null);
   const [apiSummary, setApiSummary] =
     useState<StatsApiPayload["summary"]>(undefined);
   const [hydrated, setHydrated] = useState(false);
@@ -188,6 +192,7 @@ export default function StatsPage() {
         setByLeague(data.byLeague ?? []);
         setByDateMarket(data.byDateMarket ?? []);
         setTrainingExport(data.trainingExport ?? []);
+        setReadiness(data.readiness ?? null);
         setApiSummary(data.summary);
         setHydrated(true);
         await refreshCalibration();
@@ -201,6 +206,7 @@ export default function StatsPage() {
     setByLeague([]);
     setByDateMarket([]);
     setTrainingExport([]);
+    setReadiness(null);
     setApiSummary(undefined);
     setHydrated(true);
     await refreshCalibration();
@@ -424,6 +430,7 @@ export default function StatsPage() {
     setByLeague([]);
     setByDateMarket([]);
     setTrainingExport([]);
+    setReadiness(null);
     setApiSummary(undefined);
     setUpdateMsg(null);
     setUpdateError(null);
@@ -644,6 +651,8 @@ export default function StatsPage() {
       ) : (
         <>
           <StatsOverview summary={summary} />
+
+          {readiness && <ReadinessSummaryCard report={readiness} />}
 
           <BetHistory
             bets={bets}

@@ -333,7 +333,7 @@ const MARKET_LABELS: Record<MarketType, string> = {
   dnb_away: "Apuesta sin empate (2)",
 };
 
-function oddsForMarket(odds: MatchOdds, market: MarketType): number {
+export function oddsForMarket(odds: MatchOdds, market: MarketType): number {
   const value = (() => {
     switch (market) {
       case "home":

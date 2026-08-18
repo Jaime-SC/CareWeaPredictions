@@ -10,6 +10,9 @@ import {
   CardDescription,
   CardHeader,
 } from "@/components/ui/card";
+import { SingleStakeBadge } from "@/components/stake-badge";
+import { calculateSingleStake } from "@/lib/stake-engine";
+import { useBankrollSettings } from "@/lib/bankroll-store";
 import {
   addBetFromSinglePick,
   individualPickKey,
@@ -42,7 +45,7 @@ import {
   Target,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 interface SafePicksListProps {
   picks: SafePickItem[];
@@ -67,6 +70,8 @@ export function SafePicksList({
   >({});
   const [stakeInput, setStakeInput] = useState("");
   const stakeCLP = parseStakeCLP(stakeInput);
+  const settings = useBankrollSettings();
+  const lastAutoStake = useRef("");
 
   const grouped = useMemo(() => {
     return groupByKey(picks, (p) => p.leagueName || "Otros").map((g) => ({
@@ -96,6 +101,27 @@ export function SafePicksList({
     setRegisteredKeys(keys);
     setRegisteredStakes(stakes);
   }, [picks, date]);
+
+  const suggestedStake = useMemo(() => {
+    const pick = picks.find((item) => item.odds > 1 && item.modelProbability > 0);
+    if (!pick) return null;
+    const rec = calculateSingleStake(
+      settings.totalBankroll,
+      pick.modelProbability,
+      pick.odds,
+      settings
+    );
+    return rec.amountCLP > 0 ? rec.amountCLP : null;
+  }, [picks, settings]);
+
+  useEffect(() => {
+    if (suggestedStake == null) return;
+    const formatted = formatStakeInput(String(suggestedStake));
+    if (stakeInput === "" || stakeInput === lastAutoStake.current) {
+      lastAutoStake.current = formatted;
+      setStakeInput(formatted);
+    }
+  }, [suggestedStake, stakeInput]);
 
   async function handleRegister(pick: SafePickItem) {
     if (stakeCLP == null) return;
@@ -216,7 +242,7 @@ export function SafePicksList({
               </div>
               <p id="safe-stake-help" className="text-sm text-slate-300">
                 {stakeCLP != null
-                  ? `Cada pick nuevo se registrará con ${formatCLP(stakeCLP)}.`
+                  ? `Cada pick nuevo se registrará con ${formatCLP(stakeCLP)}. El badge de cada card muestra el Kelly 25% sugerido para esa cuota.`
                   : "Escribe el monto en pesos chilenos para habilitar el registro."}
               </p>
             </div>
@@ -312,6 +338,10 @@ export function SafePicksList({
                                 </Badge>
                               )}
                             </div>
+                            <SingleStakeBadge
+                              modelProbability={pick.modelProbability}
+                              odds={pick.odds}
+                            />
                           </div>
                           <div className="flex flex-col items-stretch gap-1 sm:items-end">
                             <Button

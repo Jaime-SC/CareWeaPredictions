@@ -8,7 +8,9 @@ import {
   CardDescription,
   CardHeader,
 } from "@/components/ui/card";
+import { ReadinessGate } from "@/components/readiness-gate";
 import type { BiasBucket } from "@/lib/algorithm-health";
+import type { ReadinessReport } from "@/lib/pro-metrics";
 import { cn, formatPercent } from "@/lib/utils";
 import {
   Activity,
@@ -29,6 +31,7 @@ type HealthPayload = {
   byMarket?: BiasBucket[];
   byLeague?: BiasBucket[];
   generatedAt?: string;
+  readiness?: ReadinessReport;
   error?: string;
 };
 
@@ -72,7 +75,8 @@ export default function HealthPage() {
             Salud del algoritmo
           </h1>
           <p className="mt-2 text-base leading-relaxed text-slate-200">
-            Sesgo y calibración por mercado y liga (modelo vs resultado real).
+            Umbrales profesionales (CLV, ROI, p-valor, drawdown) más sesgo y
+            calibración por mercado y liga.
           </p>
         </header>
         <Button
@@ -105,6 +109,12 @@ export default function HealthPage() {
 
       {data?.success && (
         <>
+          {data.readiness && <ReadinessGate report={data.readiness} />}
+
+          <h2 className="text-lg font-semibold tracking-tight text-slate-50">
+            Calibración del modelo
+          </h2>
+
           <section aria-label="Resumen de calibración" className="grid gap-3 sm:grid-cols-3">
             <Metric
               label="Legs evaluadas"

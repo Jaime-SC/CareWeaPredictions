@@ -35,6 +35,9 @@ model Prediction {
   selection        String
   odds             Float
   modelProbability Float
+  /// Book line captured at pick time is `odds`. Closing line (pre-kickoff).
+  closingOdds      Float?
+  closingOddsAt    DateTime?
   /// WON | LOST | PENDING | VOID
   outcome          String   @default("PENDING")
   createdAt        DateTime @default(now())

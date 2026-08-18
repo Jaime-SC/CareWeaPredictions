@@ -36,6 +36,7 @@ import {
 } from "../config/allowed-leagues";
 import { CHILE_TIMEZONE, chileDateApiWindow, chileDateOffset, chileDateRange, chileDateString } from "./utils";
 import { purgeStaleOddsAndFixtureCache } from "./cache";
+import { snapshotClosingOdds } from "./clv-tracker";
 import { enrichMatchContextFeatures } from "./context-enrichment";
 import {
   getMonopolyTeams,
@@ -857,9 +858,18 @@ function oddsCacheKey(fixtureId: number, page = 1): string {
   return `odds_fixture_${fixtureId}_p${page}`;
 }
 
+const IMMINENT_KICKOFF_MS = 4 * 60 * 60 * 1000;
+
+function isImminentKickoff(kickoffIso: string): boolean {
+  const ms = new Date(kickoffIso).getTime() - Date.now();
+  return Number.isFinite(ms) && ms > -15 * 60_000 && ms <= IMMINENT_KICKOFF_MS;
+}
+
 function ttlMinutesForOdds(kickoffIso: string): number | null {
   const ymd = chileCivilDateFromKickoff(kickoffIso);
   if (ymd && ymd < chileDateString()) return null;
+  // Shorter TTL in the closing-line window so CLV can recapture the book.
+  if (isImminentKickoff(kickoffIso)) return 60;
   return CACHE_TTL_MINUTES.ODDS;
 }
 
@@ -901,14 +911,22 @@ function oddsFromEnvelope(
   return best;
 }
 
-async function readCachedFixtureOdds(
+async function readCachedFixtureOddsMeta(
   fixtureId: number
-): Promise<MatchOdds | null> {
-  const cached = await getCachedPayload<OddsPageEnvelope>(
-    oddsCacheKey(fixtureId, 1)
-  );
-  if (!cached) return null;
-  return oddsFromEnvelope(cached);
+): Promise<{ odds: MatchOdds; remainingMs: number } | null> {
+  try {
+    const row = await prisma.cachedApiResponse.findUnique({
+      where: { id: oddsCacheKey(fixtureId, 1) },
+    });
+    if (!row) return null;
+    const remainingMs = new Date(row.expiresAt).getTime() - Date.now();
+    if (remainingMs <= 0) return null;
+    const odds = oddsFromEnvelope(JSON.parse(row.payload) as OddsPageEnvelope);
+    if (!odds) return null;
+    return { odds, remainingMs };
+  } catch {
+    return null;
+  }
 }
 
 async function fetchOddsForFixtureLive(
@@ -1013,14 +1031,24 @@ async function fetchOddsForEliteFixtures(
         priority: number;
       } => row != null
     )
-    .sort((a, b) => b.priority - a.priority || a.id - b.id);
+    .sort((a, b) => {
+      const imminentDelta =
+        Number(isImminentKickoff(b.match.kickoff)) -
+        Number(isImminentKickoff(a.match.kickoff));
+      if (imminentDelta !== 0) return imminentDelta;
+      return b.priority - a.priority || a.id - b.id;
+    });
 
   const uncached: typeof jobs = [];
 
   for (const job of jobs) {
-    const cached = await readCachedFixtureOdds(job.id);
+    const cached = await readCachedFixtureOddsMeta(job.id);
     if (cached) {
-      map.set(job.id, cached);
+      map.set(job.id, cached.odds);
+      // 12h leftovers in the closing window must be refreshed once (new TTL = 60m).
+      const staleForClose =
+        isImminentKickoff(job.match.kickoff) && cached.remainingMs > 90 * 60_000;
+      if (staleForClose) uncached.push(job);
       continue;
     }
     uncached.push(job);
@@ -1133,6 +1161,7 @@ async function fetchFromApiFootball(
   if (includeOdds) {
     const oddsByFixture = await fetchOddsForEliteFixtures(results, apiKey);
     results = attachOddsToMatches(results, oddsByFixture);
+    await snapshotClosingOdds(oddsByFixture);
   }
 
   // Injuries / H2H / venue splits (cache-first; tiny live budget under Free plan)

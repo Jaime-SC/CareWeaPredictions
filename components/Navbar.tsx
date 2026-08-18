@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ApiQuotaBadge } from "@/components/ApiQuotaBadge";
+import { BankrollHeader } from "@/components/bankroll-header";
 import { cn } from "@/lib/utils";
 import {
   Activity,
@@ -49,6 +50,7 @@ export function Navbar() {
         </Link>
 
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <BankrollHeader className="shrink-0" />
           <ApiQuotaBadge className="hidden md:inline-flex" />
           <nav aria-label="Principal">
             <ul className="flex items-center gap-1">
@@ -78,7 +80,7 @@ export function Navbar() {
           </nav>
         </div>
       </div>
-      <div className="border-t border-white/10 px-4 py-2 md:hidden">
+      <div className="flex flex-wrap items-center justify-center gap-2 border-t border-white/10 px-4 py-2 md:hidden">
         <ApiQuotaBadge className="w-full justify-center" />
       </div>
     </header>

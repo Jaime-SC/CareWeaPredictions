@@ -4,6 +4,7 @@ import {
   clearAllBets,
   deleteTicketById,
 } from "@/lib/bet-db";
+import { buildReadinessReport } from "@/lib/readiness";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -15,11 +16,15 @@ export const revalidate = 0;
  */
 export async function GET() {
   try {
-    const payload = await buildStatsSummary();
+    const [payload, readiness] = await Promise.all([
+      buildStatsSummary(),
+      buildReadinessReport(),
+    ]);
     return NextResponse.json(
       {
         success: true,
         ...payload,
+        readiness,
       },
       {
         headers: {

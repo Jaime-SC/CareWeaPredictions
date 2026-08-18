@@ -3,6 +3,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SingleStakeBadge } from "@/components/stake-badge";
 import { contextBadgeLabels } from "@/lib/context-engine";
 import type { MatchPrediction } from "@/lib/types";
 import { formatKickoff, formatOdds, formatPercent } from "@/lib/utils";
@@ -102,6 +103,12 @@ export function MatchCard({ prediction, onAddPick }: MatchCardProps) {
               </div>
             </div>
           ))}
+          {bestSafePick && (
+            <SingleStakeBadge
+              modelProbability={bestSafePick.modelProbability}
+              odds={bestSafePick.odds}
+            />
+          )}
         </div>
 
         <button
