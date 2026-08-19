@@ -12,7 +12,11 @@ import {
 } from "@/components/ui/card";
 import { SingleStakeBadge } from "@/components/stake-badge";
 import { calculateSingleStake } from "@/lib/stake-engine";
-import { useBankrollSettings } from "@/lib/bankroll-store";
+import {
+  debitBankroll,
+  refundBankroll,
+  useBankrollSettings,
+} from "@/lib/bankroll-store";
 import {
   addBetFromSinglePick,
   individualPickKey,
@@ -31,7 +35,7 @@ import {
   formatOdds,
   formatPercent,
   formatStakeInput,
-  groupByKey,
+  groupByKeyThenKickoff,
   parseStakeCLP,
 } from "@/lib/utils";
 import { formatValueBadge } from "@/lib/value-finder";
@@ -71,17 +75,19 @@ export function SafePicksList({
   const [stakeInput, setStakeInput] = useState("");
   const stakeCLP = parseStakeCLP(stakeInput);
   const settings = useBankrollSettings();
+  const exceedsBankroll =
+    stakeCLP != null && stakeCLP > settings.totalBankroll;
   const lastAutoStake = useRef("");
 
-  const grouped = useMemo(() => {
-    return groupByKey(picks, (p) => p.leagueName || "Otros").map((g) => ({
-      ...g,
-      items: [...g.items].sort(
-        (a, b) =>
-          new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime()
+  const grouped = useMemo(
+    () =>
+      groupByKeyThenKickoff(
+        picks,
+        (p) => p.leagueName || "Otros",
+        (p) => p.kickoff
       ),
-    }));
-  }, [picks]);
+    [picks]
+  );
 
   function pickKey(p: SafePickItem) {
     return individualPickKey(p.matchId, p.market);
@@ -125,9 +131,25 @@ export function SafePicksList({
 
   async function handleRegister(pick: SafePickItem) {
     if (stakeCLP == null) return;
+    if (stakeCLP > settings.totalBankroll) return;
 
+    const debit = debitBankroll(stakeCLP);
+    if (!debit.ok) return;
+
+    const existingIds = new Set(loadBets().map((b) => b.id));
     const local = addBetFromSinglePick(pick, stakeCLP, date);
-    if (!local) return;
+    if (!local || existingIds.has(local.id)) {
+      refundBankroll(stakeCLP);
+      if (local) {
+        const key = pickKey(pick);
+        setRegisteredKeys((prev) => new Set(prev).add(key));
+        setRegisteredStakes((prev) => ({
+          ...prev,
+          [key]: local.stakeCLP,
+        }));
+      }
+      return;
+    }
 
     try {
       const res = await fetch("/api/bets/record", {
@@ -242,7 +264,9 @@ export function SafePicksList({
               </div>
               <p id="safe-stake-help" className="text-sm text-slate-300">
                 {stakeCLP != null
-                  ? `Cada pick nuevo se registrará con ${formatCLP(stakeCLP)}. El badge de cada card muestra el Kelly 25% sugerido para esa cuota.`
+                  ? exceedsBankroll
+                    ? `El monto supera la banca disponible (${formatCLP(settings.totalBankroll)}).`
+                    : `Cada pick nuevo se registrará con ${formatCLP(stakeCLP)} y se descuenta de la banca. El badge de cada card muestra el Kelly 25% sugerido para esa cuota.`
                   : "Escribe el monto en pesos chilenos para habilitar el registro."}
               </p>
             </div>
@@ -347,7 +371,9 @@ export function SafePicksList({
                             <Button
                               size="sm"
                               variant={registered ? "secondary" : "default"}
-                              disabled={registered || stakeCLP == null}
+                              disabled={
+                                registered || stakeCLP == null || exceedsBankroll
+                              }
                               onClick={() => handleRegister(pick)}
                             >
                               {registered ? (

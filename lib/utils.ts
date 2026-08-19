@@ -240,3 +240,34 @@ export function groupByKey<T>(
     items: groupItems,
   }));
 }
+
+/** Kickoff ISO → ms. Invalid dates sort last. */
+export function kickoffTimestamp(iso: string | undefined | null): number {
+  if (!iso) return Number.POSITIVE_INFINITY;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Group by key, sort items by kickoff within each group,
+ * then sort groups by earliest kickoff (early → late).
+ */
+export function groupByKeyThenKickoff<T>(
+  items: T[],
+  keyFn: (item: T) => string,
+  kickoffFn: (item: T) => string | undefined | null
+): { key: string; items: T[] }[] {
+  const groups = groupByKey(items, keyFn).map((g) => ({
+    key: g.key,
+    items: [...g.items].sort(
+      (a, b) => kickoffTimestamp(kickoffFn(a)) - kickoffTimestamp(kickoffFn(b))
+    ),
+  }));
+  groups.sort((a, b) => {
+    const ta = kickoffTimestamp(kickoffFn(a.items[0]));
+    const tb = kickoffTimestamp(kickoffFn(b.items[0]));
+    if (ta !== tb) return ta - tb;
+    return a.key.localeCompare(b.key, "es");
+  });
+  return groups;
+}

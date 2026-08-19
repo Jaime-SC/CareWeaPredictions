@@ -145,6 +145,33 @@ export function adjustBankroll(deltaCLP: number): BankrollSettings {
   return setTotalBankroll(current.totalBankroll + deltaCLP);
 }
 
+export type DebitBankrollResult =
+  | { ok: true; remaining: number }
+  | { ok: false; remaining: number; reason: "invalid" | "insufficient" };
+
+/** Resta el stake al colocar un ticket. No deja la banca en negativo. */
+export function debitBankroll(amountCLP: number): DebitBankrollResult {
+  const amount = Math.round(amountCLP);
+  const remaining = getClientSnapshot().totalBankroll;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, remaining, reason: "invalid" };
+  }
+  if (amount > remaining) {
+    return { ok: false, remaining, reason: "insufficient" };
+  }
+  const next = setTotalBankroll(remaining - amount);
+  return { ok: true, remaining: next.totalBankroll };
+}
+
+/** Devuelve el stake si se cancela un ticket pendiente o anulado. */
+export function refundBankroll(amountCLP: number): BankrollSettings {
+  const amount = Math.round(amountCLP);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return getClientSnapshot();
+  }
+  return adjustBankroll(amount);
+}
+
 function subscribe(onStoreChange: () => void): () => void {
   if (typeof window === "undefined") return () => {};
   const onStorage = (event: StorageEvent) => {

@@ -26,7 +26,13 @@ import {
 } from "@/lib/formatters";
 import { computePerformanceMetrics } from "@/lib/stats";
 import { resolveStrategyMode } from "@/lib/parlay-defaults";
-import { cn, formatCLP, formatOdds, formatPercent } from "@/lib/utils";
+import {
+  cn,
+  formatCLP,
+  formatOdds,
+  formatPercent,
+  groupByKeyThenKickoff,
+} from "@/lib/utils";
 import {
   Check,
   CheckCircle2,
@@ -754,6 +760,26 @@ function LegDetailRow({ leg }: { leg: HistoryBetLeg }) {
   );
 }
 
+function HistoryLegGroup({
+  group,
+}: {
+  group: { key: string; items: HistoryBetLeg[] };
+}) {
+  return (
+    <section className="space-y-2">
+      <p className="px-1 text-xs font-semibold text-slate-300">{group.key}</p>
+      <ul className="space-y-2">
+        {group.items.map((leg, idx) => (
+          <LegDetailRow
+            key={`${leg.fixtureId}-${leg.market}-${idx}`}
+            leg={leg}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function BetRow({
   bet,
   removing = false,
@@ -770,6 +796,11 @@ function BetRow({
   const hitsVariant = legHitsBadgeVariant(bet.status);
   const statusBadge = ticketStatusBadge(bet.status);
   const unitPnl = ticketProfit(bet);
+  const groupedLegs = groupByKeyThenKickoff(
+    bet.legs,
+    (leg) => leg.leagueName || "Otros",
+    (leg) => leg.kickoff
+  );
 
   return (
     <div
@@ -824,14 +855,11 @@ function BetRow({
 
       <div className="border-t border-slate-800/80 px-2 pb-2">
         {isSingle ? (
-          <ul className="space-y-2 px-1 py-2">
-            {bet.legs.map((leg, idx) => (
-              <LegDetailRow
-                key={`${leg.fixtureId}-${leg.market}-${idx}`}
-                leg={leg}
-              />
+          <div className="space-y-3 px-1 py-2">
+            {groupedLegs.map((group) => (
+              <HistoryLegGroup key={group.key} group={group} />
             ))}
-          </ul>
+          </div>
         ) : (
           <>
             <button
@@ -855,14 +883,11 @@ function BetRow({
             </button>
 
             {expanded && (
-              <ul className="space-y-2 px-1 pb-2 pt-1">
-                {bet.legs.map((leg, idx) => (
-                  <LegDetailRow
-                    key={`${leg.fixtureId}-${leg.market}-${idx}`}
-                    leg={leg}
-                  />
+              <div className="space-y-3 px-1 pb-2 pt-1">
+                {groupedLegs.map((group) => (
+                  <HistoryLegGroup key={group.key} group={group} />
                 ))}
-              </ul>
+              </div>
             )}
           </>
         )}

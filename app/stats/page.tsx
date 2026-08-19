@@ -38,6 +38,7 @@ import {
   replaceBets,
 } from "@/lib/history-tracker";
 import { updatePendingBets } from "@/lib/result-checker";
+import { refundBankroll } from "@/lib/bankroll-store";
 import { cn, chileDateString, formatPercent } from "@/lib/utils";
 import {
   Download,
@@ -449,7 +450,17 @@ export default function StatsPage() {
 
     // Smooth exit, then drop from state so KPIs recompute immediately
     window.setTimeout(async () => {
+      const removed =
+        bets.find((b) => b.id === betId) ??
+        loadBets().find((b) => b.id === betId);
       deleteBetById(betId);
+      if (
+        removed &&
+        (removed.status === "pending" || removed.status === "void") &&
+        removed.stakeCLP > 0
+      ) {
+        refundBankroll(removed.stakeCLP);
+      }
 
       setBets((prev) => prev.filter((b) => b.id !== betId));
       setApiSummary(undefined);

@@ -181,7 +181,8 @@ export function BankrollHeader({ className }: { className?: string }) {
           <div className="mt-4 space-y-2 border-t border-slate-600 pt-3">
             <Label htmlFor="bankroll-payout">Reajustar tras cobro</Label>
             <p className="text-xs text-slate-400">
-              Suma el retorno cobrado en la casa de apuestas a tu banca.
+              Al registrar un ticket se descuenta el stake. Aquí suma el retorno
+              cobrado en la casa (incluye la apuesta recuperada si ganaste).
             </p>
             <div className="relative">
               <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-slate-400">

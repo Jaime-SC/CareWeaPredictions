@@ -1,22 +1,152 @@
 {
-  "version": 1,
-  "calibratedAt": null,
-  "sampleSize": 0,
+  "version": 3,
+  "calibratedAt": "2026-08-19T12:44:06.560Z",
+  "sampleSize": 81,
   "global": {
     "strictMinProbability": 0.8,
     "backfillMinProbability": 0.8,
-    "over15MinProbability": 0.8,
+    "over15MinProbability": 0.782,
     "defaultMinOdds": 1.12,
     "homeAdvantage": 1.12,
     "leagueAvgGoals": 1.35,
     "leagueAvgHomeGoals": 1.45,
     "leagueAvgAwayGoals": 1.15
   },
-  "leagues": {},
-  "markets": {},
+  "leagues": {
+    "CONMEBOL Sudamericana": {
+      "riskPenalty": 1.028,
+      "probabilityScale": 0.986,
+      "minOdds": 1.127,
+      "minProbabilityBoost": 0.007,
+      "leagueId": "unknown",
+      "leagueName": "CONMEBOL Sudamericana",
+      "winRate": 0.6667,
+      "roi": -0.15,
+      "sampleSize": 6
+    },
+    "UEFA Champions League": {
+      "riskPenalty": 0.993,
+      "probabilityScale": 1.004,
+      "minOdds": 1.116,
+      "minProbabilityBoost": -0.005,
+      "leagueId": "unknown",
+      "leagueName": "UEFA Champions League",
+      "winRate": 1,
+      "roi": 0.2233,
+      "sampleSize": 6
+    },
+    "Coppa Italia": {
+      "riskPenalty": 0.993,
+      "probabilityScale": 1.004,
+      "minOdds": 1.116,
+      "minProbabilityBoost": -0.005,
+      "leagueId": "unknown",
+      "leagueName": "Coppa Italia",
+      "winRate": 1,
+      "roi": 0.2429,
+      "sampleSize": 7
+    },
+    "UEFA Europa League": {
+      "riskPenalty": 0.993,
+      "probabilityScale": 1.004,
+      "minOdds": 1.116,
+      "minProbabilityBoost": -0.005,
+      "leagueId": "unknown",
+      "leagueName": "UEFA Europa League",
+      "winRate": 1,
+      "roi": 0.1939,
+      "sampleSize": 8
+    },
+    "Primera B": {
+      "riskPenalty": 1.035,
+      "probabilityScale": 0.983,
+      "minOdds": 1.128,
+      "minProbabilityBoost": 0.009,
+      "leagueId": "unknown",
+      "leagueName": "Primera B",
+      "winRate": 0.625,
+      "roi": -0.2159,
+      "sampleSize": 8
+    },
+    "UEFA Europa Conference League": {
+      "riskPenalty": 1,
+      "probabilityScale": 1,
+      "minOdds": 1.12,
+      "minProbabilityBoost": 0,
+      "leagueId": "unknown",
+      "leagueName": "UEFA Europa Conference League",
+      "winRate": 0.8333,
+      "roi": 0.0247,
+      "sampleSize": 12
+    },
+    "CONMEBOL Libertadores": {
+      "riskPenalty": 0.993,
+      "probabilityScale": 1.004,
+      "minOdds": 1.116,
+      "minProbabilityBoost": -0.005,
+      "leagueId": "unknown",
+      "leagueName": "CONMEBOL Libertadores",
+      "winRate": 0.9,
+      "roi": 0.1659,
+      "sampleSize": 10
+    },
+    "Friendlies Clubs": {
+      "riskPenalty": 1.032,
+      "probabilityScale": 0.984,
+      "minOdds": 1.128,
+      "minProbabilityBoost": 0.009,
+      "leagueId": "unknown",
+      "leagueName": "Friendlies Clubs",
+      "winRate": 0.6364,
+      "roi": -0.203,
+      "sampleSize": 11
+    }
+  },
+  "markets": {
+    "over_1_5": {
+      "weight": 1,
+      "minProbability": 0.8,
+      "disabled": false,
+      "roi": 11.49,
+      "winRate": 0.8966,
+      "sampleSize": 29
+    },
+    "1x": {
+      "weight": 1,
+      "minProbability": 0.8,
+      "disabled": false,
+      "roi": 1.88,
+      "winRate": 0.8235,
+      "sampleSize": 17
+    },
+    "under_3_5": {
+      "weight": 1,
+      "minProbability": 0.8,
+      "disabled": false,
+      "roi": 8.43,
+      "winRate": 0.8462,
+      "sampleSize": 13
+    },
+    "home_scores": {
+      "weight": 1,
+      "minProbability": 0.8,
+      "disabled": false,
+      "roi": 3.56,
+      "winRate": 0.8,
+      "sampleSize": 5
+    },
+    "under_4_5": {
+      "weight": 1,
+      "minProbability": 0.8,
+      "disabled": false,
+      "roi": -12,
+      "winRate": 0.7333,
+      "sampleSize": 15
+    }
+  },
   "summary": {
-    "leaguesAdjusted": 0,
+    "leaguesAdjusted": 7,
     "marketsAdjusted": 0,
-    "message": "Pesos por defecto (sin calibración)."
+    "message": "Parámetros actualizados: 7 ligas ajustadas, umbral de goles ajustado a 78%"
   }
 }

@@ -27,7 +27,7 @@ import {
   formatKickoff,
   formatOdds,
   formatPercent,
-  groupByKey,
+  groupByKeyThenKickoff,
 } from "@/lib/utils";
 import { Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import Link from "next/link";
@@ -172,29 +172,21 @@ export default function DashboardPage() {
 
   const safePicksByLeague = useMemo(
     () =>
-      groupByKey(safePicks.slice(0, 10), (p) => p.prediction.match.leagueName).map(
-        (group) => ({
-          ...group,
-          items: [...group.items].sort(
-            (a, b) =>
-              new Date(a.prediction.match.kickoff).getTime() -
-              new Date(b.prediction.match.kickoff).getTime()
-          ),
-        })
+      groupByKeyThenKickoff(
+        safePicks.slice(0, 10),
+        (p) => p.prediction.match.leagueName,
+        (p) => p.prediction.match.kickoff
       ),
     [safePicks]
   );
 
   const predictionsByLeague = useMemo(
     () =>
-      groupByKey(predictions, (p) => p.match.leagueName).map((group) => ({
-        ...group,
-        items: [...group.items].sort(
-          (a, b) =>
-            new Date(a.match.kickoff).getTime() -
-            new Date(b.match.kickoff).getTime()
-        ),
-      })),
+      groupByKeyThenKickoff(
+        predictions,
+        (p) => p.match.leagueName,
+        (p) => p.match.kickoff
+      ),
     [predictions]
   );
 

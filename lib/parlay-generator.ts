@@ -39,7 +39,11 @@ import {
   loadModelWeights,
   resolveMinProbability,
 } from "./model-weights";
-import { chileDateString, formatKickoffDayLabel } from "./utils";
+import {
+  chileDateString,
+  formatKickoffDayLabel,
+  groupByKeyThenKickoff,
+} from "./utils";
 import { isAllowedCompetition } from "../config/allowed-leagues";
 import { prioritizeValueLegs, valueRankBonus } from "./value-finder";
 import {
@@ -1042,21 +1046,16 @@ export function formatParlayClipboard(
 
   const ref = referenceYmd ?? chileDateString();
 
-  const groups = new Map<string, typeof parlay.legs>();
-  for (const leg of parlay.legs) {
-    const key = leg.leagueName || "Otros";
-    const bucket = groups.get(key);
-    if (bucket) bucket.push(leg);
-    else groups.set(key, [leg]);
-  }
+  const groups = groupByKeyThenKickoff(
+    parlay.legs,
+    (leg) => leg.leagueName || "Otros",
+    (leg) => leg.kickoff
+  );
 
   let n = 0;
   const legLines: string[] = [];
-  for (const [league, legs] of groups) {
+  for (const { key: league, items: ordered } of groups) {
     legLines.push(`▸ ${league}`);
-    const ordered = [...legs].sort(
-      (a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime()
-    );
     for (const l of ordered) {
       n += 1;
       const dayLabel = formatKickoffDayLabel(l.kickoff, ref);

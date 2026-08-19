@@ -11,7 +11,12 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 import { ParlayStakeBadge, useParlayStakeRecommendation } from "@/components/stake-badge";
-import { DEFAULT_BANKROLL_SETTINGS } from "@/lib/bankroll-store";
+import {
+  DEFAULT_BANKROLL_SETTINGS,
+  debitBankroll,
+  refundBankroll,
+  useBankrollSettings,
+} from "@/lib/bankroll-store";
 import {
   addBetFromParlay,
   findExistingParlay,
@@ -30,7 +35,7 @@ import {
   formatOdds,
   formatPercent,
   formatStakeInput,
-  groupByKey,
+  groupByKeyThenKickoff,
   parseStakeCLP,
 } from "@/lib/utils";
 import {
@@ -167,8 +172,11 @@ export function ParlaySlip({
     [keptLegs, parlay]
   );
 
+  const bankroll = useBankrollSettings();
   const stakeCLP = parseStakeCLP(stakeInput);
   const potentialReturn = stakeCLP != null ? stakeCLP * activeParlay.totalOdds : null;
+  const exceedsBankroll =
+    stakeCLP != null && stakeCLP > bankroll.totalBankroll;
   const suggested = useParlayStakeRecommendation(
     activeParlay.totalOdds,
     activeParlay.jointProbability
@@ -201,7 +209,28 @@ export function ParlaySlip({
       return;
     }
 
+    const debit = debitBankroll(stake);
+    if (!debit.ok) {
+      setRegisterMsg(
+        debit.reason === "insufficient"
+          ? `Banca insuficiente. Disponible: ${formatCLP(debit.remaining)}.`
+          : "Indica el monto a apostar en CLP."
+      );
+      return;
+    }
+
+    const existingIds = new Set(loadBets().map((b) => b.id));
     const local = addBetFromParlay(activeParlay, date, stake);
+    if (!local || existingIds.has(local.id)) {
+      refundBankroll(stake);
+      if (local) {
+        setRegistered(true);
+        setRegisterMsg("Ticket ya registrado en el historial.");
+      } else {
+        setRegisterMsg("No se pudo registrar la apuesta.");
+      }
+      return;
+    }
 
     try {
       const res = await fetch("/api/bets/record", {
@@ -261,16 +290,15 @@ export function ParlaySlip({
   const isEdited = keptLegs.length !== parlay.legs.length;
   const originalCount = parlay.legs.length;
 
-  const groupedLegs = useMemo(() => {
-    const groups = groupByKey(activeLegs, (leg) => leg.leagueName);
-    return groups.map((group) => ({
-      ...group,
-      items: [...group.items].sort(
-        (a, b) =>
-          new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime()
+  const groupedLegs = useMemo(
+    () =>
+      groupByKeyThenKickoff(
+        activeLegs,
+        (leg) => leg.leagueName || "Otros",
+        (leg) => leg.kickoff
       ),
-    }));
-  }, [activeLegs]);
+    [activeLegs]
+  );
 
   const riskVariant =
     activeParlay.riskLevel === "low"
@@ -521,14 +549,16 @@ export function ParlaySlip({
               </div>
               <p id="parlay-stake-help" className="text-sm text-slate-300">
                 {stakeCLP != null && potentialReturn != null
-                  ? `Apuesta ${formatCLP(stakeCLP)} · retorno potencial ${formatCLP(potentialReturn)}`
+                  ? exceedsBankroll
+                    ? `El monto supera la banca disponible (${formatCLP(bankroll.totalBankroll)}).`
+                    : `Apuesta ${formatCLP(stakeCLP)} · se descuenta de la banca · retorno potencial ${formatCLP(potentialReturn)}`
                   : "Escribe el monto en pesos chilenos para habilitar el registro."}
               </p>
             </div>
             <Button
               className="w-full"
               variant={registered ? "secondary" : "default"}
-              disabled={registered || stakeCLP == null}
+              disabled={registered || stakeCLP == null || exceedsBankroll}
               onClick={() => void persistToNeon()}
             >
               {registered ? (

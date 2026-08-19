@@ -8,7 +8,7 @@ import {
 } from "@/lib/formatters";
 import type { GeneratedParlay, ParlayLeg } from "@/lib/types";
 import { formatValueBadge } from "@/lib/value-finder";
-import { cn } from "@/lib/utils";
+import { cn, groupByKeyThenKickoff } from "@/lib/utils";
 import { Check, Copy } from "lucide-react";
 import { useState } from "react";
 
@@ -16,16 +16,26 @@ import { useState } from "react";
  * Plain-text slip for WhatsApp / Telegram / quick bookmaker search.
  */
 export function formatSlipExportText(parlay: GeneratedParlay): string {
-  const n = parlay.legs.length;
+  const legCount = parlay.legs.length;
   const lines: string[] = [
-    `CareWeaPredictions — Accumulator (${n} Legs)`,
+    `CareWeaPredictions — Accumulator (${legCount} Legs)`,
     `Multiplicador Total: ${parlay.totalOdds.toFixed(2)}x | Prob. Conjunta: ${(parlay.jointProbability * 100).toFixed(1)}%`,
     "────────────────────────",
   ];
 
-  parlay.legs.forEach((leg, i) => {
-    lines.push(...formatSlipLegLines(i + 1, leg));
-  });
+  const groups = groupByKeyThenKickoff(
+    parlay.legs,
+    (leg) => leg.leagueName || "Otros",
+    (leg) => leg.kickoff
+  );
+  let n = 0;
+  for (const group of groups) {
+    lines.push(`▸ ${group.key}`);
+    for (const leg of group.items) {
+      n += 1;
+      lines.push(...formatSlipLegLines(n, leg));
+    }
+  }
 
   lines.push("────────────────────────");
   if (parlay.strategyLabel) {
