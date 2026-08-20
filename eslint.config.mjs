@@ -13,6 +13,12 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    rules: {
+      // Ponytail: no loose types; prefer unknown + narrow at trust boundaries
+      "@typescript-eslint/no-explicit-any": "error",
+    },
+  },
 ]);
 
 export default eslintConfig;

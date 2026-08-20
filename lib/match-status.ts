@@ -36,9 +36,6 @@ export const LIVE_STATUSES = [
   "LIVE",
 ] as const;
 
-/** @deprecated Kickoff-in-the-past is enough; kept at 0 for callers. */
-export const SETTLE_DELAY_MS = 0;
-
 /**
  * Chile civil days after kickoff before a missing API payload is treated as
  * unrecoverable (orphaned tickets from a previous DB / machine).

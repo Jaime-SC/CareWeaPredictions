@@ -130,6 +130,19 @@ npm run db:import-sqlite # Copiar historial local (prisma/dev.db) a Neon
 
 ---
 
+## 🧭 Estándares de código (Ponytail)
+
+El repo incluye reglas YAGNI para Cursor/agentes. Detalle en [`RULES.md`](./RULES.md) y [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+
+Archivos que deben versionarse (para que funcionen en casa u otro PC):
+
+- `.cursor/rules/ponytail.mdc`
+- `.cursorrules`
+- `RULES.md`
+- `CONTRIBUTING.md`
+
+---
+
 ## 📄 Licencia
 
 Proyecto de portfolio / uso educativo. Todos los derechos reservados salvo que se indique lo contrario.

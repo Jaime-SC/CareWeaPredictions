@@ -24,40 +24,6 @@ import { applyTuningToProbability } from "./tuning-config";
 const FATIGUE_XG_FACTOR = 0.9;
 const MAX_GOALS = 8;
 
-export {
-  applyContextModifiers,
-  daysSinceLastMatch,
-  derbyPreferredMarkets,
-  hasWinStreak,
-  isFatigued,
-  isHighRiskDerby,
-  isMarketBlockedByDerby,
-} from "./context-engine";
-
-export {
-  evaluateKnockoutContext,
-  applyKnockoutLambdaAdjustments,
-  applyKnockoutMarketAdjustments,
-} from "./knockout-engine";
-
-function leagueAvgGoals(): number {
-  return loadModelWeights().global.leagueAvgGoals;
-}
-
-function leagueAvgHomeGoals(): number {
-  const g = loadModelWeights().global;
-  return g.leagueAvgHomeGoals ?? g.leagueAvgGoals;
-}
-
-function leagueAvgAwayGoals(): number {
-  const g = loadModelWeights().global;
-  return g.leagueAvgAwayGoals ?? g.leagueAvgGoals;
-}
-
-function homeAdvantage(): number {
-  return loadModelWeights().global.homeAdvantage;
-}
-
 /** Avoid divide-by-zero / empty stub averages collapsing every match to the same λ. */
 function safeRatio(value: number, leagueAvg: number): number {
   if (!Number.isFinite(value) || value <= 0) return 1;
@@ -65,21 +31,31 @@ function safeRatio(value: number, leagueAvg: number): number {
   return value / leagueAvg;
 }
 
-/** Factorial with memoization for Poisson PMF */
-const factorialCache: number[] = [1];
-function factorial(n: number): number {
-  if (n < 0) return 0;
-  while (factorialCache.length <= n) {
-    const i = factorialCache.length;
-    factorialCache[i] = factorialCache[i - 1] * i;
-  }
-  return factorialCache[n];
+/**
+ * Poisson PMF via recurrence: P(0)=e^{-λ}, P(k)=P(k-1)·λ/k.
+ * Avoids factorial + Math.pow allocations on the hot path.
+ */
+export function poissonPmf(k: number, lambda: number): number {
+  if (k < 0) return 0;
+  if (lambda <= 0) return k === 0 ? 1 : 0;
+  let p = Math.exp(-lambda);
+  for (let i = 1; i <= k; i++) p = (p * lambda) / i;
+  return p;
 }
 
-/** Poisson probability mass function: P(X = k) */
-export function poissonPmf(k: number, lambda: number): number {
-  if (lambda <= 0) return k === 0 ? 1 : 0;
-  return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
+/** Precompute P(0..maxK) once per λ for score-matrix builds. */
+function poissonPmfArray(lambda: number, maxK: number): number[] {
+  const out = new Array<number>(maxK + 1);
+  if (lambda <= 0) {
+    out[0] = 1;
+    for (let k = 1; k <= maxK; k++) out[k] = 0;
+    return out;
+  }
+  out[0] = Math.exp(-lambda);
+  for (let k = 1; k <= maxK; k++) {
+    out[k] = (out[k - 1] * lambda) / k;
+  }
+  return out;
 }
 
 /** Soft form factor from recent points (kept mild so streak rule stays primary). */
@@ -104,9 +80,10 @@ export function estimateExpectedGoals(match: Match): {
   home: number;
   away: number;
 } {
-  const homeAvg = leagueAvgHomeGoals();
-  const awayAvg = leagueAvgAwayGoals();
-  const homeAdv = homeAdvantage();
+  const g = loadModelWeights().global;
+  const homeAvg = g.leagueAvgHomeGoals ?? g.leagueAvgGoals;
+  const awayAvg = g.leagueAvgAwayGoals ?? g.leagueAvgGoals;
+  const homeAdv = g.homeAdvantage;
 
   const homeAttackPower =
     match.home.homeAttackStrength ??
@@ -209,30 +186,89 @@ export function buildScoreMatrix(
   lambdaHome: number,
   lambdaAway: number
 ): number[][] {
-  const matrix: number[][] = [];
+  const homePmf = poissonPmfArray(lambdaHome, MAX_GOALS);
+  const awayPmf = poissonPmfArray(lambdaAway, MAX_GOALS);
+  const matrix: number[][] = new Array(MAX_GOALS + 1);
   let total = 0;
 
   for (let h = 0; h <= MAX_GOALS; h++) {
-    matrix[h] = [];
+    const row = new Array<number>(MAX_GOALS + 1);
+    const ph = homePmf[h];
     for (let a = 0; a <= MAX_GOALS; a++) {
       const raw =
-        poissonPmf(h, lambdaHome) *
-        poissonPmf(a, lambdaAway) *
-        dixonColesTau(h, a, lambdaHome, lambdaAway);
-      matrix[h][a] = Math.max(0, raw);
-      total += matrix[h][a];
+        ph * awayPmf[a] * dixonColesTau(h, a, lambdaHome, lambdaAway);
+      const cell = Math.max(0, raw);
+      row[a] = cell;
+      total += cell;
     }
+    matrix[h] = row;
   }
 
   if (total > 0) {
+    const inv = 1 / total;
     for (let h = 0; h <= MAX_GOALS; h++) {
       for (let a = 0; a <= MAX_GOALS; a++) {
-        matrix[h][a] /= total;
+        matrix[h][a] *= inv;
       }
     }
   }
 
   return matrix;
+}
+
+/** Single 9×9 pass → all market base probabilities. */
+function marketProbsFromMatrix(matrix: number[][]): Record<MarketType, number> {
+  let home = 0;
+  let draw = 0;
+  let away = 0;
+  let over05 = 0;
+  let over15 = 0;
+  let over25 = 0;
+  let under35 = 0;
+  let under45 = 0;
+  let homeScores = 0;
+  let awayScores = 0;
+  let homeOver15 = 0;
+  let awayOver15 = 0;
+
+  for (let h = 0; h <= MAX_GOALS; h++) {
+    for (let a = 0; a <= MAX_GOALS; a++) {
+      const p = matrix[h][a];
+      const goals = h + a;
+      if (h > a) home += p;
+      else if (h === a) draw += p;
+      else away += p;
+      if (goals > 0.5) over05 += p;
+      if (goals > 1.5) over15 += p;
+      if (goals > 2.5) over25 += p;
+      if (goals <= 3.5) under35 += p;
+      if (goals <= 4.5) under45 += p;
+      if (h >= 1) homeScores += p;
+      if (a >= 1) awayScores += p;
+      if (h > 1.5) homeOver15 += p;
+      if (a > 1.5) awayOver15 += p;
+    }
+  }
+
+  const decisive = home + away;
+  return {
+    home,
+    draw,
+    away,
+    "1x": home + draw,
+    x2: away + draw,
+    over_0_5: over05,
+    over_1_5: over15,
+    over_2_5: over25,
+    under_3_5: under35,
+    under_4_5: under45,
+    home_scores: homeScores,
+    away_scores: awayScores,
+    home_over_1_5: homeOver15,
+    away_over_1_5: awayOver15,
+    dnb_home: decisive > 0 ? home / decisive : 0.5,
+    dnb_away: decisive > 0 ? away / decisive : 0.5,
+  };
 }
 
 export function matchOutcomeProbabilities(matrix: number[][]): {
@@ -243,7 +279,6 @@ export function matchOutcomeProbabilities(matrix: number[][]): {
   let home = 0;
   let draw = 0;
   let away = 0;
-
   for (let h = 0; h <= MAX_GOALS; h++) {
     for (let a = 0; a <= MAX_GOALS; a++) {
       const p = matrix[h][a];
@@ -252,7 +287,6 @@ export function matchOutcomeProbabilities(matrix: number[][]): {
       else away += p;
     }
   }
-
   return { home, draw, away };
 }
 
@@ -333,43 +367,27 @@ const MARKET_LABELS: Record<MarketType, string> = {
   dnb_away: "Apuesta sin empate (2)",
 };
 
+const MARKET_ODDS_KEY: Record<MarketType, keyof MatchOdds> = {
+  home: "home",
+  draw: "draw",
+  away: "away",
+  "1x": "doubleChance1X",
+  x2: "doubleChanceX2",
+  over_0_5: "over05",
+  over_1_5: "over15",
+  over_2_5: "over25",
+  under_3_5: "under35",
+  under_4_5: "under45",
+  home_scores: "homeScores",
+  away_scores: "awayScores",
+  home_over_1_5: "homeOver15",
+  away_over_1_5: "awayOver15",
+  dnb_home: "dnbHome",
+  dnb_away: "dnbAway",
+};
+
 export function oddsForMarket(odds: MatchOdds, market: MarketType): number {
-  const value = (() => {
-    switch (market) {
-      case "home":
-        return odds.home;
-      case "draw":
-        return odds.draw;
-      case "away":
-        return odds.away;
-      case "1x":
-        return odds.doubleChance1X;
-      case "x2":
-        return odds.doubleChanceX2;
-      case "over_0_5":
-        return odds.over05;
-      case "over_1_5":
-        return odds.over15;
-      case "over_2_5":
-        return odds.over25;
-      case "under_3_5":
-        return odds.under35;
-      case "under_4_5":
-        return odds.under45;
-      case "home_scores":
-        return odds.homeScores;
-      case "away_scores":
-        return odds.awayScores;
-      case "home_over_1_5":
-        return odds.homeOver15 ?? 0;
-      case "away_over_1_5":
-        return odds.awayOver15 ?? 0;
-      case "dnb_home":
-        return odds.dnbHome;
-      case "dnb_away":
-        return odds.dnbAway;
-    }
-  })();
+  const value = odds[MARKET_ODDS_KEY[market]] ?? 0;
   // Reject sentinel / missing book lines so they never look like valid 1.28 stubs
   return Number.isFinite(value) && value > 1 ? value : 0;
 }
@@ -397,45 +415,26 @@ export function fairDecimalOdds(probability: number, margin = 1.03): number {
 export function buildFairMatchOdds(match: Match): MatchOdds {
   const xg = estimateExpectedGoals(match);
   const matrix = buildScoreMatrix(xg.home, xg.away);
-  const outcomes = matchOutcomeProbabilities(matrix);
-  const decisive = outcomes.home + outcomes.away;
-  const dnbHome = decisive > 0 ? outcomes.home / decisive : 0.5;
-  const dnbAway = decisive > 0 ? outcomes.away / decisive : 0.5;
+  const probs = marketProbsFromMatrix(matrix);
 
   return {
-    home: fairDecimalOdds(outcomes.home),
-    draw: fairDecimalOdds(outcomes.draw),
-    away: fairDecimalOdds(outcomes.away),
-    doubleChance1X: fairDecimalOdds(outcomes.home + outcomes.draw),
-    doubleChanceX2: fairDecimalOdds(outcomes.away + outcomes.draw),
-    over05: fairDecimalOdds(overUnderProbability(matrix, 0.5)),
-    over15: fairDecimalOdds(overUnderProbability(matrix, 1.5)),
-    over25: fairDecimalOdds(overUnderProbability(matrix, 2.5)),
-    under35: fairDecimalOdds(underProbability(matrix, 3.5)),
-    under45: fairDecimalOdds(underProbability(matrix, 4.5)),
-    homeScores: fairDecimalOdds(teamScoresProbability(matrix, "home")),
-    awayScores: fairDecimalOdds(teamScoresProbability(matrix, "away")),
-    homeOver15: fairDecimalOdds(teamOverProbability(matrix, "home", 1.5)),
-    awayOver15: fairDecimalOdds(teamOverProbability(matrix, "away", 1.5)),
-    dnbHome: fairDecimalOdds(dnbHome),
-    dnbAway: fairDecimalOdds(dnbAway),
+    home: fairDecimalOdds(probs.home),
+    draw: fairDecimalOdds(probs.draw),
+    away: fairDecimalOdds(probs.away),
+    doubleChance1X: fairDecimalOdds(probs["1x"]),
+    doubleChanceX2: fairDecimalOdds(probs.x2),
+    over05: fairDecimalOdds(probs.over_0_5),
+    over15: fairDecimalOdds(probs.over_1_5),
+    over25: fairDecimalOdds(probs.over_2_5),
+    under35: fairDecimalOdds(probs.under_3_5),
+    under45: fairDecimalOdds(probs.under_4_5),
+    homeScores: fairDecimalOdds(probs.home_scores),
+    awayScores: fairDecimalOdds(probs.away_scores),
+    homeOver15: fairDecimalOdds(probs.home_over_1_5),
+    awayOver15: fairDecimalOdds(probs.away_over_1_5),
+    dnbHome: fairDecimalOdds(probs.dnb_home),
+    dnbAway: fairDecimalOdds(probs.dnb_away),
   };
-}
-
-/** Pass-through. Never invents a Poisson fair board for missing books. */
-export function ensureMatchOdds(match: Match): Match {
-  return match;
-}
-
-/**
- * Apply Context Engine multipliers (venue, injuries, friendlies, H2H,
- * win-streak and derby policy) on top of the Poisson matrix probabilities.
- */
-export function applyContextProbabilityRules(
-  match: Match,
-  probs: Record<MarketType, number>
-): Record<MarketType, number> {
-  return applyContextToMarkets(match, probs).probs;
 }
 
 export function predictMatchMarkets(
@@ -488,30 +487,7 @@ export function predictMatchMarkets(
 
   const xg = estimateExpectedGoals(resolved);
   const matrix = buildScoreMatrix(xg.home, xg.away);
-  const outcomes = matchOutcomeProbabilities(matrix);
-
-  const decisive = outcomes.home + outcomes.away;
-  const dnbHome = decisive > 0 ? outcomes.home / decisive : 0.5;
-  const dnbAway = decisive > 0 ? outcomes.away / decisive : 0.5;
-
-  const baseProbs: Record<MarketType, number> = {
-    home: outcomes.home,
-    draw: outcomes.draw,
-    away: outcomes.away,
-    "1x": outcomes.home + outcomes.draw,
-    x2: outcomes.away + outcomes.draw,
-    over_0_5: overUnderProbability(matrix, 0.5),
-    over_1_5: overUnderProbability(matrix, 1.5),
-    over_2_5: overUnderProbability(matrix, 2.5),
-    under_3_5: underProbability(matrix, 3.5),
-    under_4_5: underProbability(matrix, 4.5),
-    home_scores: teamScoresProbability(matrix, "home"),
-    away_scores: teamScoresProbability(matrix, "away"),
-    home_over_1_5: teamOverProbability(matrix, "home", 1.5),
-    away_over_1_5: teamOverProbability(matrix, "away", 1.5),
-    dnb_home: dnbHome,
-    dnb_away: dnbAway,
-  };
+  const baseProbs = marketProbsFromMatrix(matrix);
 
   const ctx = applyContextToMarkets(resolved, baseProbs);
   const probs = applyKnockoutMarketAdjustments(resolved, ctx.probs);
@@ -578,4 +554,4 @@ export function predictMatchMarkets(
   };
 }
 
-export { MARKET_LABELS, leagueAvgGoals };
+export { MARKET_LABELS };

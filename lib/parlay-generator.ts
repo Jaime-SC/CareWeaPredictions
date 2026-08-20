@@ -18,13 +18,13 @@ import {
   resolveStrategyMode,
 } from "./parlay-defaults";
 import {
-  derbyPreferredMarkets,
-  isHighRiskDerby,
-  isMarketBlockedByDerby,
   predictMatchMarkets,
   hasBookmakerOdds,
 } from "./poisson";
 import {
+  derbyPreferredMarkets,
+  isHighRiskDerby,
+  isMarketBlockedByDerby,
   notesForFlags,
   resolveContextMinProbability,
 } from "./context-engine";

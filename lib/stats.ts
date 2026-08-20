@@ -45,32 +45,6 @@ export function normalizeTicketStatus(status: string): StatsTicketStatus {
   }
 }
 
-export function isSettledStatus(status: string): boolean {
-  const s = normalizeTicketStatus(status);
-  return s === "won" || s === "lost";
-}
-
-export function isPendingStatus(status: string): boolean {
-  return normalizeTicketStatus(status) === "pending";
-}
-
-export function partitionBySettlement<T extends { status: string }>(
-  tickets: T[]
-): { settled: T[]; pending: T[]; voided: T[] } {
-  const settled: T[] = [];
-  const pending: T[] = [];
-  const voided: T[] = [];
-
-  for (const ticket of tickets) {
-    const status = normalizeTicketStatus(ticket.status);
-    if (status === "won" || status === "lost") settled.push(ticket);
-    else if (status === "void") voided.push(ticket);
-    else pending.push(ticket);
-  }
-
-  return { settled, pending, voided };
-}
-
 /**
  * Win Rate % = GANADOS / (GANADOS + PERDIDOS)
  * ROI % = netProfit / stakeSettled

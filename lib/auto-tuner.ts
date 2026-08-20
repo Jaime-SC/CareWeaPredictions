@@ -647,10 +647,10 @@ export function deriveTuningConfig(weights: ModelWeights): TuningConfig {
   };
 }
 
-/** Load training rows from Prisma (WON/LOST + PENDING for completeness). */
+/** Load settled training rows from Prisma (WON/LOST only). */
 export async function loadHistoricalDataFromDb(): Promise<HistoricalPickRow[]> {
   const predictions = await prisma.prediction.findMany({
-    where: { outcome: { in: ["WON", "LOST", "PENDING", "VOID"] } },
+    where: { outcome: { in: ["WON", "LOST"] } },
     select: {
       market: true,
       selection: true,
@@ -754,6 +754,7 @@ export async function recalibrateModel(options?: {
   const extra = normalizeTrainingRows(options?.extraRows ?? []);
   const merged = [...fromDb, ...fromJson, ...extra];
 
+  // ponytail: dual weights+tuning JSON stores, merge when one config file is enough
   const result = calibrateModelParameters(merged, loadModelWeights());
   saveModelWeights(result.weights);
   const config = saveTuningConfig(deriveTuningConfig(result.weights));
@@ -763,14 +764,6 @@ export async function recalibrateModel(options?: {
     config,
     totalBetsAnalyzed: result.sampleSize,
   };
-}
-
-/** @deprecated Use `recalibrateModel()`. */
-export async function runAutoCalibration(options?: {
-  extraRows?: HistoricalPickRow[] | TrainingFeatureRow[];
-  jsonPath?: string;
-}): Promise<CalibrationResult> {
-  return recalibrateModel(options);
 }
 
 /**
@@ -784,8 +777,7 @@ export async function maybeRecalibrateAfterSettlement(
   if (settledCount < MIN_SETTLEMENT_CALIBRATION_BATCH) return null;
 
   try {
-    const result = await recalibrateModel();
-    return result;
+    return await recalibrateModel();
   } catch (err) {
     console.error("[AUTO-CALIBRATION] Failed:", err);
     return null;

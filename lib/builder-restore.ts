@@ -126,20 +126,3 @@ export function ticketsToSafePicks(tickets: HistoryBet[]): SafePickItem[] {
   }
   return picks;
 }
-
-/** Keep already-registered picks and overlay freshly generated ones (new + updated odds). */
-export function mergeSafePicks(
-  registered: SafePickItem[],
-  generated: SafePickItem[]
-): SafePickItem[] {
-  const byKey = new Map<string, SafePickItem>();
-  for (const pick of registered) {
-    byKey.set(individualPickKey(pick.matchId, pick.market), pick);
-  }
-  for (const pick of generated) {
-    byKey.set(individualPickKey(pick.matchId, pick.market), pick);
-  }
-  return Array.from(byKey.values()).sort(
-    (a, b) => b.modelProbability - a.modelProbability
-  );
-}

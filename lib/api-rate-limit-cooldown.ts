@@ -61,10 +61,6 @@ export function clearApiRateLimitCooldown() {
   writeReadyAt(0);
 }
 
-export function getApiRateLimitReadyAt(): number {
-  return readReadyAt();
-}
-
 export function remainingCooldownMs(now = Date.now()): number {
   return Math.max(0, readReadyAt() - now);
 }

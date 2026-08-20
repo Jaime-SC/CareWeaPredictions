@@ -85,9 +85,6 @@ export const DEFAULT_AUTO_PARLAY_CONFIG: ParlayConfig = {
  */
 export const FUN_MAX_DAYS_AHEAD = 5;
 
-/** @deprecated Prefer single-date wide pool; kept for opt-in multi-day. */
-export const FUN_MIN_MATCH_POOL = 25;
-
 export const STRATEGY_DAYS_AHEAD: Record<StrategyMode, number> = {
   "daily-safe": 0,
   "daily-fun": 0,
@@ -129,9 +126,4 @@ export function isFunStrategy(mode: StrategyMode): boolean {
 
 export function isMonopolyStrategy(mode: StrategyMode): boolean {
   return resolveStrategyMode(mode) === "monopoly-asymmetry";
-}
-
-/** @deprecated Use isSafeStrategy */
-export function isUltraSafeStrategy(mode: StrategyMode): boolean {
-  return isSafeStrategy(mode);
 }

@@ -80,10 +80,6 @@ export function ttlMinutesForFixtureDate(dateYmd: string): number | null {
   return null;
 }
 
-export function isPermanentExpiry(expiresAt: Date): boolean {
-  return expiresAt.getTime() >= PERMANENT_EXPIRES_AT.getTime() - 86_400_000;
-}
-
 export async function getCachedPayload<T>(cacheKey: string): Promise<T | null> {
   try {
     const row = await prisma.cachedApiResponse.findUnique({

@@ -4,12 +4,14 @@
  */
 import {
   estimateExpectedGoals,
+  predictMatchMarkets,
+} from "../lib/poisson";
+import {
   hasWinStreak,
   isFatigued,
   isHighRiskDerby,
   isMarketBlockedByDerby,
-  predictMatchMarkets,
-} from "../lib/poisson";
+} from "../lib/context-engine";
 import type { Match } from "../lib/types";
 
 const base: Match = {

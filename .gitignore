@@ -55,6 +55,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# local agent / IDE helper files
+# Cursor: ignore local IDE state; keep shared project rules (Ponytail)
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
+
+# local agent helpers (Next regenerates AGENTS.md; Claude uses CLAUDE.md)
 AGENTS.md
 CLAUDE.md

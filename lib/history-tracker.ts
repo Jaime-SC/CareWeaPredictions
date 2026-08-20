@@ -840,14 +840,6 @@ export function formatSignedCLP(value: number): string {
   return `$0 CLP`;
 }
 
-/** Signed unit P&L (1U stake reference). */
-export function formatSignedUnits(value: number, digits = 2): string {
-  const abs = Math.abs(value).toFixed(digits);
-  if (value > 0) return `+${abs}U`;
-  if (value < 0) return `−${abs}U`;
-  return `0.00U`;
-}
-
 /** Count won vs total legs for the "X / Y Acertadas" badge. */
 export function countLegHits(legs: HistoryBetLeg[]): {
   won: number;

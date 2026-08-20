@@ -402,13 +402,3 @@ export function getExplicitPickFromLeg(leg: {
       : `${pick.warningNote} ${note}. No uses alargue, penales ni «Se clasifica».`,
   };
 }
-
-/** Alias kept for UI that wants the MarketGuide shape by name. */
-export function getMarketGuide(
-  market: MarketType | string,
-  selection: string | undefined,
-  homeTeam: string,
-  awayTeam: string
-): MarketGuide {
-  return getExplicitPickLabel(market, selection, homeTeam, awayTeam);
-}

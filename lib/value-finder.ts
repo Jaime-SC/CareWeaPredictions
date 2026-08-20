@@ -10,15 +10,6 @@ import type { ParlayLeg } from "./types";
 /** Minimum edge (5pp) to flag a value bet. */
 export const VALUE_EDGE_THRESHOLD = 0.05;
 
-export type ValueFlag = {
-  isValue: boolean;
-  edge: number;
-  edgePct: number;
-  impliedProbability: number;
-  /** e.g. `[VALUE +7%]` */
-  badge: string | null;
-};
-
 /**
  * Bookmaker implied probability: P_implied = 1 / odds.
  */
@@ -38,30 +29,6 @@ export function formatValueBadge(edge: number): string | null {
   if (edge < VALUE_EDGE_THRESHOLD) return null;
   const pct = Math.round(edge * 100);
   return `[VALUE +${pct}%]`;
-}
-
-export function analyzeValueLeg(
-  modelProbability: number,
-  odds: number
-): ValueFlag {
-  const edge = valueEdge(modelProbability, odds);
-  const implied = bookmakerImpliedProbability(odds);
-  const badge = formatValueBadge(edge);
-  return {
-    isValue: edge >= VALUE_EDGE_THRESHOLD,
-    edge,
-    edgePct: edge * 100,
-    impliedProbability: implied,
-    badge,
-  };
-}
-
-export function isValueBet(
-  modelProbability: number,
-  odds: number,
-  threshold = VALUE_EDGE_THRESHOLD
-): boolean {
-  return valueEdge(modelProbability, odds) >= threshold;
 }
 
 /** Ranking boost so positive-value legs are preferred in accumulator selection. */
@@ -89,14 +56,4 @@ export function prioritizeValueLegs<
     if (vb !== va) return vb - va;
     return eb - ea;
   });
-}
-
-export function appendValueBadgeToLabel(
-  marketLabel: string,
-  modelProbability: number,
-  odds: number
-): string {
-  const badge = formatValueBadge(valueEdge(modelProbability, odds));
-  if (!badge) return marketLabel;
-  return `${marketLabel} ${badge}`;
 }

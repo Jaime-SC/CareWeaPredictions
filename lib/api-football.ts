@@ -71,9 +71,6 @@ export {
   isClubFriendlyLeagueId,
 } from "../config/allowed-leagues";
 
-/** @deprecated Prefer EMPTY_MATCHES_MESSAGE */
-export const EMPTY_ELITE_MESSAGE = EMPTY_MATCHES_MESSAGE;
-
 export type FootballApiErrorCode = "API_ERROR" | "EMPTY" | "AUTH";
 
 export class FootballApiError extends Error {

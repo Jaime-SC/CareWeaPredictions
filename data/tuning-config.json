@@ -1,21 +1,6 @@
 {
-  "lastCalibratedAt": "2026-08-19T12:44:06.560Z",
-  "totalBetsAnalyzed": 81,
-  "leagueMultipliers": {
-    "CONMEBOL Sudamericana": 0.986,
-    "UEFA Champions League": 1.004,
-    "Coppa Italia": 1.004,
-    "UEFA Europa League": 1.004,
-    "Primera B": 0.983,
-    "UEFA Europa Conference League": 1,
-    "CONMEBOL Libertadores": 1.004,
-    "Friendlies Clubs": 0.984
-  },
-  "marketMultipliers": {
-    "over_1_5": 1.03125,
-    "1x": 1.03125,
-    "under_3_5": 1.03125,
-    "home_scores": 1.03125,
-    "under_4_5": 1.03125
-  }
+  "lastCalibratedAt": "",
+  "totalBetsAnalyzed": 0,
+  "leagueMultipliers": {},
+  "marketMultipliers": {}
 }
