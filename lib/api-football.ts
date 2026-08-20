@@ -12,9 +12,13 @@ import {
   fetchWithCache,
   ttlMinutesForFixtureDate,
   FREE_PLAN_MAX_PAGE,
+  getApiQuota,
   getCachedPayload,
   buildCacheKey,
+  purgeStaleOddsAndFixtureCache,
+  type ApiQuotaSnapshot,
 } from "./api-cache";
+import { env } from "./env";
 import { prisma } from "./db";
 import {
   applyOddsImpliedStats,
@@ -35,7 +39,6 @@ import {
   isClubFriendlyLeagueId,
 } from "../config/allowed-leagues";
 import { CHILE_TIMEZONE, chileDateApiWindow, chileDateOffset, chileDateRange, chileDateString } from "./utils";
-import { purgeStaleOddsAndFixtureCache } from "./cache";
 import { snapshotClosingOdds } from "./clv-tracker";
 import { enrichMatchContextFeatures } from "./context-enrichment";
 import {
@@ -57,7 +60,6 @@ export {
   getApiQuota,
   syncApiQuotaFromHeaders,
   parseApiFootballQuotaHeaders,
-  refreshApiQuotaFromStatus,
   CACHE_TTL_MINUTES,
   API_DAILY_QUOTA_LIMIT,
   FREE_PLAN_MAX_PAGE,
@@ -194,7 +196,7 @@ function ensureStaleCachePurged(): Promise<void> {
 }
 
 function resolveApiKey(): string {
-  const key = process.env.FOOTBALL_API_KEY?.trim();
+  const key = env.FOOTBALL_API_KEY?.trim() ?? "";
   if (!key) {
     throw new FootballApiError(API_KEY_MISSING_MESSAGE, "AUTH", 401);
   }
@@ -312,7 +314,6 @@ async function runLiveRequest<T>(fn: () => Promise<T>): Promise<T> {
       FREE_PLAN_LIVE_INTERVAL_MS - (Date.now() - lastLiveRequestAt)
     );
     if (wait > 0) {
-      console.log(`[api-football] rate-limit throttle ${wait}ms`);
       await delay(wait);
     }
     lastLiveRequestAt = Date.now();
@@ -372,7 +373,6 @@ async function apiGet<T>(
     if (!opts?.forceRefresh) {
       const cached = await getCachedPayload<ApiEnvelope<T>>(cacheKey);
       if (cached !== null) {
-        console.log(`[CACHE HIT] Returning data for key=${cacheKey}`);
         return cached;
       }
     }
@@ -385,7 +385,7 @@ async function apiGet<T>(
         {
           apiKey,
           cacheKey,
-          forceRefresh: opts?.forceRefresh,
+          forceRefresh: true,
           resolveTtl: opts?.resolveTtl,
         }
       )
@@ -756,11 +756,9 @@ export async function fetchMonopolyMatchPool(): Promise<{
   const windows = new Map<number, NearbyTeamFixture[]>();
   const seen = new Set<number>();
   const candidates: ApiFixture[] = [];
-  let teamCalls = 0;
 
   for (const team of getMonopolyTeams()) {
     const rows = await fetchTeamApiFixtures(team.teamId, fromScan, toScan);
-    teamCalls += 1;
     windows.set(team.teamId, rows.map(toNearbyFixture));
 
     for (const item of rows) {
@@ -798,10 +796,6 @@ export async function fetchMonopolyMatchPool(): Promise<{
     )
   ).sort(
     (a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime()
-  );
-
-  console.log(
-    `[api-football] monopoly week ${week.fromYmd}→${week.toYmd} candidates=${candidates.length} kept=${matches.length} teamCalls=${teamCalls}`
   );
 
   return { matches, daysFetched: week.dates.length, week };
@@ -1062,10 +1056,6 @@ async function fetchOddsForEliteFixtures(
     );
   }
 
-  console.log(
-    `[api-football] odds cache hits=${map.size} live=${batch.length} skipped=${skipped}`
-  );
-
   for (const job of batch) {
     try {
       const odds = await fetchOddsForFixture(job.id, apiKey, job.ttl);
@@ -1180,12 +1170,6 @@ async function fetchFromApiFootball(
   if (requireOdds) {
     results = results.filter((m) => hasLiveOdds(m.odds));
   }
-
-  console.log(
-    `[api-football] elite fixtures kept=${results.length}` +
-      (targetChileDate ? ` chileDate=${targetChileDate}` : "") +
-      ` apiDates=${dates.join(",")}`
-  );
 
   return {
     matches: results,
@@ -1408,6 +1392,20 @@ export function toErrorResponse(error: unknown): {
     },
     status: 502,
   };
+}
+
+/**
+ * Force one live /status call so quota mirrors official dashboard headers.
+ */
+export async function refreshApiQuotaFromStatus(): Promise<ApiQuotaSnapshot | null> {
+  const apiKey = resolveApiKey();
+  await apiGet("/status", apiKey, {
+    ttlMinutes: CACHE_TTL_MINUTES.STATUS,
+    cacheKey: "status_account",
+    forceRefresh: true,
+  });
+  const quota = await getApiQuota();
+  return quota.fromHeaders ? quota : null;
 }
 
 /** Exposed for smoke / connection checks */

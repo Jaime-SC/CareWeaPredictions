@@ -22,7 +22,7 @@ import {
   generateParlay,
   singleDayShortfallNotice,
 } from "@/lib/parlay-generator";
-import type { GeneratedParlay, Match } from "@/lib/types";
+import type { Match } from "@/lib/types";
 import { chileDateOffset, chileDateString } from "@/lib/utils";
 import {
   getWeeklyDateRange,
@@ -107,9 +107,6 @@ async function loadParlayMatchPool(
           404
         );
       }
-      console.log(
-        `[parlay] single-date ${primaryDate}: ${day.matches.length} fixtures (elite whitelist)`
-      );
       return {
         matches: day.matches.sort(
           (a, b) =>
@@ -152,9 +149,6 @@ async function loadParlayMatchPool(
         added += 1;
       }
       if (added > 0) datesUsed.push(date);
-      console.log(
-        `[parlay] multi-day ${date}: +${added} (total ${matches.length}/${minPool})`
-      );
     } catch (err) {
       if (err instanceof FootballApiError && err.code === "AUTH") throw err;
       lastError = err;

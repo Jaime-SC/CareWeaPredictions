@@ -650,7 +650,15 @@ export function deriveTuningConfig(weights: ModelWeights): TuningConfig {
 /** Load training rows from Prisma (WON/LOST + PENDING for completeness). */
 export async function loadHistoricalDataFromDb(): Promise<HistoricalPickRow[]> {
   const predictions = await prisma.prediction.findMany({
-    include: { fixture: true },
+    where: { outcome: { in: ["WON", "LOST", "PENDING", "VOID"] } },
+    select: {
+      market: true,
+      selection: true,
+      modelProbability: true,
+      odds: true,
+      outcome: true,
+      fixture: { select: { leagueName: true, leagueId: true } },
+    },
     orderBy: { createdAt: "desc" },
   });
 
@@ -777,10 +785,6 @@ export async function maybeRecalibrateAfterSettlement(
 
   try {
     const result = await recalibrateModel();
-    const ts = result.weights.calibratedAt ?? new Date().toISOString();
-    console.info(
-      `[AUTO-CALIBRATION] Recalibrated weights across ${result.leaguesAdjusted} leagues and ${result.marketsAdjusted} markets at ${ts}`
-    );
     return result;
   } catch (err) {
     console.error("[AUTO-CALIBRATION] Failed:", err);

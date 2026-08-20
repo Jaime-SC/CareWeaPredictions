@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaNeonHTTP } from "@prisma/adapter-neon";
 import { neon, types as pgTypes } from "@neondatabase/serverless";
+import { env } from "./env";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -16,15 +17,7 @@ if (globalForPrisma.prismaSchemaId !== PRISMA_SCHEMA_ID) {
   globalForPrisma.prismaSchemaId = PRISMA_SCHEMA_ID;
 }
 
-function assertPostgresUrl(url: string | undefined): asserts url is string {
-  if (!url || url.startsWith("file:")) {
-    throw new Error(
-      "DATABASE_URL debe ser la cadena PostgreSQL de Neon, no SQLite. Copia DATABASE_URL y DIRECT_URL desde https://console.neon.tech a .env y .env.local"
-    );
-  }
-}
-
-assertPostgresUrl(process.env.DATABASE_URL);
+const databaseUrl = env.DATABASE_URL;
 
 /** Postgres OIDs whose default JS Date parser breaks Prisma (P2023: found {}). */
 const PG_DATE = 1082;
@@ -48,7 +41,10 @@ const prismaHttpTypes = {
         return (value: string) => value.split("+")[0];
       }
     }
-    return pgTypes.getTypeParser(oid, format as "text" | "binary");
+    if (format === "binary") {
+      return pgTypes.getTypeParser(oid, "binary");
+    }
+    return pgTypes.getTypeParser(oid, "text");
   },
 };
 
@@ -67,7 +63,7 @@ function createNeonHttpClient(url: string): ReturnType<typeof neon> {
 }
 
 const neonSql =
-  globalForPrisma.neonSql ?? createNeonHttpClient(process.env.DATABASE_URL);
+  globalForPrisma.neonSql ?? createNeonHttpClient(databaseUrl);
 
 export const prisma =
   globalForPrisma.prisma ??

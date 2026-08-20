@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import {
   getApiQuota,
   refreshApiQuotaFromStatus,
-} from "@/lib/api-cache";
+} from "@/lib/api-football";
+import { errorMessage, jsonError } from "@/lib/api-response";
 import { chileDateString } from "@/lib/utils";
 
 /**
@@ -20,11 +21,8 @@ export async function GET(request: Request) {
     let quota = await getApiQuota(chileDateString());
 
     if (forceSync || !quota.fromHeaders) {
-      const apiKey = process.env.FOOTBALL_API_KEY?.trim();
-      if (apiKey) {
-        const synced = await refreshApiQuotaFromStatus(apiKey);
-        if (synced) quota = { ...synced, fromHeaders: true };
-      }
+      const synced = await refreshApiQuotaFromStatus().catch(() => null);
+      if (synced) quota = { ...synced, fromHeaders: true };
     }
 
     return NextResponse.json({
@@ -34,12 +32,8 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error("[api/quota]", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: "No se pudo leer la cuota diaria de API.",
-      },
-      { status: 500 }
+    return jsonError(
+      errorMessage(error, "No se pudo leer la cuota diaria de API.")
     );
   }
 }

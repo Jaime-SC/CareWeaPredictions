@@ -33,10 +33,13 @@ import {
   marketGroupLabel,
   deleteBetById,
   formatSignedCLP,
+  mergeLocalWithDbTickets,
+  unsyncedLocalBets,
   loadBets,
   purgeFakeHistory,
   replaceBets,
 } from "@/lib/history-tracker";
+import { syncHistoryBetsToDb } from "@/lib/bet-record-client";
 import { updatePendingBets } from "@/lib/result-checker";
 import { refundBankroll } from "@/lib/bankroll-store";
 import { cn, chileDateString, formatPercent } from "@/lib/utils";
@@ -178,17 +181,73 @@ export default function StatsPage() {
       }
     };
 
+    const applyLocalFallback = async () => {
+      setBets(local);
+      setByLeague([]);
+      setByDateMarket([]);
+      setTrainingExport([]);
+      setReadiness(null);
+      setApiSummary(undefined);
+      setHydrated(true);
+      await refreshCalibration();
+    };
+
     try {
       const res = await fetch("/api/stats/summary", { cache: "no-store" });
       const data = (await res.json()) as StatsApiPayload;
       if (res.ok && data.success) {
         const tickets = data.tickets ?? [];
-        // Prefer Neon/Postgres; keep localStorage if DB still empty (pre-migration)
-        if (tickets.length > 0) {
-          setBets(tickets);
+        const pendingSync = unsyncedLocalBets(local, tickets);
+        if (pendingSync.length > 0) {
+          const synced = await syncHistoryBetsToDb(pendingSync);
+          const saved =
+            synced.saved ??
+            synced.results?.filter((row) => row.ok).length ??
+            0;
+          if (saved > 0) {
+            const again = await fetch("/api/stats/summary", {
+              cache: "no-store",
+            });
+            const next = (await again.json()) as StatsApiPayload;
+            if (again.ok && next.success) {
+              const nextTickets = next.tickets ?? [];
+              const leftover = mergeLocalWithDbTickets(
+                loadBets(),
+                nextTickets
+              );
+              setBets(leftover);
+              replaceBets(
+                unsyncedLocalBets(loadBets(), nextTickets).length === 0
+                  ? nextTickets
+                  : leftover
+              );
+              setByLeague(next.byLeague ?? []);
+              setByDateMarket(next.byDateMarket ?? []);
+              setTrainingExport(next.trainingExport ?? []);
+              setReadiness(next.readiness ?? null);
+              setApiSummary(next.summary);
+              setHydrated(true);
+              setUpdateMsg(
+                `${saved} ticket${saved === 1 ? "" : "s"} del historial local guardado${saved === 1 ? "" : "s"} en Neon.`
+              );
+              await refreshCalibration();
+              return next;
+            }
+          }
+          if (!synced.success) {
+            setUpdateError(
+              synced.error ??
+                "Hay tickets locales que aún no están en Neon. Reintenta sincronizar."
+            );
+          }
+        }
+
+        const merged = mergeLocalWithDbTickets(loadBets(), tickets);
+        setBets(tickets.length > 0 ? merged : local);
+        if (tickets.length > 0 && pendingSync.length === 0) {
           replaceBets(tickets);
         } else {
-          setBets(local);
+          replaceBets(merged);
         }
         setByLeague(data.byLeague ?? []);
         setByDateMarket(data.byDateMarket ?? []);
@@ -203,14 +262,7 @@ export default function StatsPage() {
       // fall through to local
     }
 
-    setBets(local);
-    setByLeague([]);
-    setByDateMarket([]);
-    setTrainingExport([]);
-    setReadiness(null);
-    setApiSummary(undefined);
-    setHydrated(true);
-    await refreshCalibration();
+    await applyLocalFallback();
     return null;
   }, []);
 
@@ -248,19 +300,6 @@ export default function StatsPage() {
       const visibleUnresolved = unresolved.filter(
         (d) => !d.reason.includes("Sin payload API")
       );
-
-      console.info("[settle] Sincronización de marcadores", {
-        settledTicketsCount: n,
-        updatedLegsCount: legs,
-        ticketsWon: won,
-        ticketsLost: lost,
-        ticketsVoided: voided,
-        stillPending: settle.stillPending,
-        overduePending: settle.overduePending,
-        checkedFixtures: settle.checkedFixtures,
-        diagnostics: settle.diagnostics,
-        errors: settle.errors,
-      });
 
       if (n > 0 || legs > 0) {
         const voidPart =
@@ -382,8 +421,8 @@ export default function StatsPage() {
     const settle = await runSettle();
     if (!settle?.success) {
       const alreadyHitLiveApi =
-        (settle.checkedFixtures ?? 0) > 0 ||
-        (settle.diagnostics?.length ?? 0) > 0;
+        (settle?.checkedFixtures ?? 0) > 0 ||
+        (settle?.diagnostics?.length ?? 0) > 0;
       if (!alreadyHitLiveApi) {
         const fallback = await updatePendingBets();
         if (fallback.ok && fallback.updatedTickets > 0) {

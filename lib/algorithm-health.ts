@@ -130,7 +130,14 @@ export async function buildAlgorithmHealthReport(): Promise<AlgorithmHealthRepor
     where: {
       outcome: { in: ["WON", "LOST", "VOID"] },
     },
-    include: { fixture: true },
+    select: {
+      market: true,
+      selection: true,
+      modelProbability: true,
+      odds: true,
+      outcome: true,
+      fixture: { select: { leagueName: true } },
+    },
   });
 
   const marketRows = predictions.map((p) => ({

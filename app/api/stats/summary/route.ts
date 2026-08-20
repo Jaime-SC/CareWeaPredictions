@@ -5,6 +5,7 @@ import {
   deleteTicketById,
 } from "@/lib/bet-db";
 import { buildReadinessReport } from "@/lib/readiness";
+import { errorMessage, jsonError } from "@/lib/api-response";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -34,16 +35,7 @@ export async function GET() {
     );
   } catch (error) {
     console.error("[api/stats/summary]", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Error al calcular estadísticas.",
-      },
-      { status: 500 }
-    );
+    return jsonError(errorMessage(error, "Error al calcular estadísticas."));
   }
 }
 
@@ -73,19 +65,9 @@ export async function PATCH(request: NextRequest) {
       });
     }
 
-    return NextResponse.json(
-      { success: false, error: "Acción no reconocida." },
-      { status: 400 }
-    );
+    return jsonError("Acción no reconocida.", 400);
   } catch (error) {
     console.error("[api/stats/summary PATCH]", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          error instanceof Error ? error.message : "Error al actualizar.",
-      },
-      { status: 500 }
-    );
+    return jsonError(errorMessage(error, "Error al actualizar."));
   }
 }

@@ -15,7 +15,7 @@ import {
 } from "@/lib/parlay-defaults";
 import { enrichMatchesFromLocalData } from "@/lib/fixture-context";
 import { buildMatchPredictions } from "@/lib/parlay-generator";
-import type { MatchPrediction } from "@/lib/types";
+import type { MatchPrediction, SafePickItem } from "@/lib/types";
 import { chileDateString } from "@/lib/utils";
 
 function isValidDate(value: string | null): value is string {
@@ -32,7 +32,7 @@ type PredictSuccessBody = {
   daysFetched: number | null;
   poolMode: string | null;
   predictions: MatchPrediction[];
-  safePicks: unknown[];
+  safePicks: SafePickItem[];
   cached?: boolean;
 };
 
@@ -40,6 +40,7 @@ type PredictSuccessBody = {
  * Optional: &refresh=1 to bypass the computed-payload SQLite cache.
  */
 export async function GET(request: NextRequest) {
+  try {
   const { searchParams } = new URL(request.url);
   const matchId = searchParams.get("matchId");
   const safeOnly = searchParams.get("safeOnly") === "true";
@@ -69,7 +70,6 @@ export async function GET(request: NextRequest) {
   if (!forceRefresh) {
     const hit = await getCachedPayload<PredictSuccessBody>(cacheKey);
     if (hit?.success && Array.isArray(hit.predictions)) {
-      console.log(`[CACHE HIT] Returning data for key=${cacheKey}`);
       return NextResponse.json({
         ...hit,
         cached: true,
@@ -77,8 +77,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  try {
-    const { matches: rawMatches, source, daysFetched, poolMode: resolvedPool } =
+  const { matches: rawMatches, source, daysFetched, poolMode: resolvedPool } =
       await fetchUpcomingMatches({
         date,
         poolMode,

@@ -1,5 +1,10 @@
-import monopolyTeamsJson from "../data/monopoly-teams.json";
 import { INSUFFICIENT_MATCHES_MESSAGE } from "../config/builder-modes";
+import {
+  getMonopolyTeam,
+  getMonopolyTeamIds,
+  getMonopolyTeams,
+  type MonopolyTeam,
+} from "./monopoly-teams";
 import {
   calculateEdge,
   estimateExpectedGoals,
@@ -38,13 +43,8 @@ export const MONOPOLY_WINDOW_DAYS = 4;
 
 export { INSUFFICIENT_MATCHES_MESSAGE };
 
-export type MonopolyTeam = {
-  teamId: number;
-  teamName: string;
-  leagueId: number;
-  leagueName: string;
-  country: string;
-};
+export type { MonopolyTeam } from "./monopoly-teams";
+export { getMonopolyTeam, getMonopolyTeamIds, getMonopolyTeams };
 
 export type MonopolyFixture = NearbyTeamFixture;
 
@@ -72,18 +72,6 @@ export type MonopolySafetyResult = {
   warning?: MonopolyRotationWarning;
 };
 
-const TEAMS: MonopolyTeam[] = (monopolyTeamsJson as MonopolyTeam[]).map(
-  (row) => ({
-    teamId: Number(row.teamId),
-    teamName: String(row.teamName),
-    leagueId: Number(row.leagueId),
-    leagueName: String(row.leagueName ?? ""),
-    country: String(row.country),
-  })
-);
-
-const TEAM_BY_ID = new Map(TEAMS.map((t) => [t.teamId, t]));
-
 /**
  * Continental / international club (and national-team) competitions.
  * Any of these in the ±4 day window triggers ROTATION_RISK.
@@ -106,29 +94,17 @@ const CONTINENTAL_LEAGUE_IDS = new Set<number>([
 const CONTINENTAL_NAME_RE =
   /champions\s*league|europa\s*league|conference\s*league|afc\s*champion|caf\s*champion|libertadores|sudamericana|club\s*world\s*cup|nations\s*league|world\s*cup|copa\s*am[eé]rica|africa(?:n)?\s*(?:cup|nations)|asian\s*cup|concacaf|uefa\s*super\s*cup|recopa|confederation\s*cup|leagues\s*cup|arab\s*club|intercontinental/i;
 
-export function getMonopolyTeams(): MonopolyTeam[] {
-  return TEAMS;
-}
-
-export function getMonopolyTeam(teamId: number): MonopolyTeam | undefined {
-  return TEAM_BY_ID.get(teamId);
-}
-
-export function getMonopolyTeamIds(): Set<number> {
-  return new Set(TEAM_BY_ID.keys());
-}
-
 export function getMonopolyLeagueIds(): Set<number> {
-  return new Set(TEAMS.map((t) => t.leagueId));
+  return new Set(getMonopolyTeams().map((t) => t.leagueId));
 }
 
 export function findMonopolySide(fixture: MonopolyFixture): {
   team: MonopolyTeam;
   isHomeTeam: boolean;
 } | null {
-  const home = TEAM_BY_ID.get(fixture.teams.home.id);
+  const home = getMonopolyTeam(fixture.teams.home.id);
   if (home) return { team: home, isHomeTeam: true };
-  const away = TEAM_BY_ID.get(fixture.teams.away.id);
+  const away = getMonopolyTeam(fixture.teams.away.id);
   if (away) return { team: away, isHomeTeam: false };
   return null;
 }

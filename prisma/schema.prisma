@@ -24,6 +24,11 @@ model MatchFixture {
   updatedAt    DateTime @updatedAt
 
   predictions Prediction[]
+
+  @@index([leagueId])
+  @@index([matchDate])
+  @@index([status])
+  @@index([createdAt])
 }
 
 /// Individual model pick (leg) linked to a fixture and optional ticket
@@ -49,6 +54,8 @@ model Prediction {
   @@index([ticketId])
   @@index([outcome])
   @@index([market])
+  @@index([fixtureId])
+  @@index([createdAt])
 }
 
 /// Accumulator or single-pick ticket
@@ -69,6 +76,7 @@ model AccumulatorTicket {
   @@index([date])
   @@index([mode])
   @@index([status])
+  @@index([createdAt])
 }
 
 /// Persistent HTTP cache for API-Football responses (quota saver)

@@ -350,6 +350,7 @@ export interface SinglePickInput {
   market: MarketType;
   marketLabel: string;
   odds: number;
+  modelProbability?: number;
 }
 
 /** Stable key for an individual pick (fixture + market), independent of `live-` prefix. */
@@ -491,6 +492,61 @@ export function updateBetStatus(
 }
 
 export function replaceBets(bets: HistoryBet[]): void {
+  saveBets(bets);
+}
+
+/** Stable key to match a local ticket against a Neon ticket (ids differ). */
+export function historyTicketFingerprint(bet: {
+  date?: string;
+  mode?: string;
+  legs: Array<{ matchId?: string; fixtureId?: number; market?: string }>;
+}): string {
+  const legs = bet.legs
+    .map((leg) => {
+      const fromMatch = parseFixtureId(String(leg.matchId ?? ""));
+      const id =
+        fromMatch > 0
+          ? fromMatch
+          : Number.isFinite(leg.fixtureId)
+            ? Number(leg.fixtureId)
+            : 0;
+      return `${id}:${String(leg.market ?? "")}`;
+    })
+    .sort()
+    .join("|");
+  if (bet.legs.length <= 1) return `single|${legs}`;
+  return `acc|${bet.date ?? ""}|${bet.mode ?? ""}|${legs}`;
+}
+
+export function unsyncedLocalBets(
+  local: HistoryBet[],
+  dbTickets: HistoryBet[]
+): HistoryBet[] {
+  const dbIds = new Set(dbTickets.map((t) => t.id));
+  const dbFp = new Set(dbTickets.map(historyTicketFingerprint));
+  return local.filter(
+    (bet) =>
+      !dbIds.has(bet.id) && !dbFp.has(historyTicketFingerprint(bet))
+  );
+}
+
+export function mergeLocalWithDbTickets(
+  local: HistoryBet[],
+  dbTickets: HistoryBet[]
+): HistoryBet[] {
+  const unsynced = unsyncedLocalBets(local, dbTickets);
+  return [...unsynced, ...dbTickets].sort((a, b) => {
+    const byDate = b.date.localeCompare(a.date);
+    if (byDate !== 0) return byDate;
+    return b.createdAt.localeCompare(a.createdAt);
+  });
+}
+
+export function remapLocalBetId(localId: string, ticketId: string): void {
+  if (!localId || !ticketId || localId === ticketId) return;
+  const bets = loadBets().map((b) =>
+    b.id === localId ? { ...b, id: ticketId } : b
+  );
   saveBets(bets);
 }
 

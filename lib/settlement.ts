@@ -21,7 +21,7 @@ import {
 } from "./match-status";
 import type { MarketType } from "./types";
 import type { BetStatus, HistoryBetLeg, LegStatus } from "./history-tracker";
-import { UNIT_STAKE, chileDateString } from "./utils";
+import { UNIT_STAKE, chileDateString, toIsoDateTime } from "./utils";
 import { computePerformanceMetrics } from "./stats";
 
 export type SettlementDiagnostic = {
@@ -228,8 +228,9 @@ export async function settlePendingTickets(): Promise<SettlementResult> {
       // Past-kickoff pending legs only
       if (!isKickoffDueForSettlement(pred.fixture.matchDate, nowMs)) continue;
       apiIds.add(pred.fixture.apiFixtureId);
-      kickoffsById[pred.fixture.apiFixtureId] =
-        pred.fixture.matchDate.toISOString();
+      kickoffsById[pred.fixture.apiFixtureId] = toIsoDateTime(
+        pred.fixture.matchDate
+      );
       const st = pred.fixture.status;
       const hasTerminalCache =
         (isFixtureFinished(st) && Boolean(pred.fixture.finalScore)) ||
@@ -264,6 +265,25 @@ export async function settlePendingTickets(): Promise<SettlementResult> {
   let ticketsVoided = 0;
   let legsSettled = 0;
 
+  const fixturePatches = new Map<
+    string,
+    {
+      finalScore?: string;
+      status?: string;
+      homeTeam?: string;
+      awayTeam?: string;
+    }
+  >();
+  const predictionWonIds: string[] = [];
+  const predictionLostIds: string[] = [];
+  const predictionVoidIds: string[] = [];
+  const ticketPatches: Array<{
+    id: string;
+    status: string;
+    totalOdds: number;
+    payoutCLP: number;
+  }> = [];
+
   for (const ticket of pendingTickets) {
     const legStatuses: Array<{ status: LegStatus; odds: number }> = [];
 
@@ -276,7 +296,7 @@ export async function settlePendingTickets(): Promise<SettlementResult> {
       let voided = isFixtureVoided(statusShort);
       let live = isFixtureLive(statusShort);
       const label = matchLabel(pred.fixture.homeTeam, pred.fixture.awayTeam);
-      const kickoffIso = pred.fixture.matchDate.toISOString();
+      const kickoffIso = toIsoDateTime(pred.fixture.matchDate);
       const due = isKickoffDueForSettlement(pred.fixture.matchDate, nowMs);
 
       if (apiFx) {
@@ -310,14 +330,13 @@ export async function settlePendingTickets(): Promise<SettlementResult> {
       const score = scoreText(homeGoals, awayGoals);
 
       if (apiFx && (score || statusShort)) {
-        await prisma.matchFixture.update({
-          where: { id: pred.fixtureId },
-          data: {
-            ...(score ? { finalScore: score } : {}),
-            ...(statusShort ? { status: statusShort } : {}),
-            ...(apiFx.homeName ? { homeTeam: apiFx.homeName } : {}),
-            ...(apiFx.awayName ? { awayTeam: apiFx.awayName } : {}),
-          },
+        const prev = fixturePatches.get(pred.fixtureId) ?? {};
+        fixturePatches.set(pred.fixtureId, {
+          ...prev,
+          ...(score ? { finalScore: score } : {}),
+          ...(statusShort ? { status: statusShort } : {}),
+          ...(apiFx.homeName ? { homeTeam: apiFx.homeName } : {}),
+          ...(apiFx.awayName ? { awayTeam: apiFx.awayName } : {}),
         });
       }
 
@@ -400,13 +419,10 @@ export async function settlePendingTickets(): Promise<SettlementResult> {
         continue;
       }
 
-      await prisma.prediction.update({
-        where: { id: pred.id },
-        data: {
-          outcome: toDbOutcome(nextLeg),
-          ...(nextLeg === "void" ? { odds: 1 } : {}),
-        },
-      });
+      const dbOutcome = toDbOutcome(nextLeg);
+      if (dbOutcome === "WON") predictionWonIds.push(pred.id);
+      else if (dbOutcome === "LOST") predictionLostIds.push(pred.id);
+      else if (dbOutcome === "VOID") predictionVoidIds.push(pred.id);
 
       diagnostics.push({
         ...baseDiag,
@@ -445,13 +461,11 @@ export async function settlePendingTickets(): Promise<SettlementResult> {
           ? stake
           : 0;
 
-    await prisma.accumulatorTicket.update({
-      where: { id: ticket.id },
-      data: {
-        status: dbStatus,
-        totalOdds: odds,
-        payoutCLP: payout,
-      },
+    ticketPatches.push({
+      id: ticket.id,
+      status: dbStatus,
+      totalOdds: odds,
+      payoutCLP: payout,
     });
     ticketsUpdated += 1;
     if (nextStatus === "won") ticketsWon += 1;
@@ -459,10 +473,62 @@ export async function settlePendingTickets(): Promise<SettlementResult> {
     else if (nextStatus === "void") ticketsVoided += 1;
   }
 
+  const writes: Array<Promise<unknown>> = [];
+  for (const [id, data] of fixturePatches) {
+    writes.push(prisma.matchFixture.update({ where: { id }, data }));
+  }
+  if (predictionWonIds.length > 0) {
+    writes.push(
+      prisma.prediction.updateMany({
+        where: { id: { in: predictionWonIds } },
+        data: { outcome: "WON" },
+      })
+    );
+  }
+  if (predictionLostIds.length > 0) {
+    writes.push(
+      prisma.prediction.updateMany({
+        where: { id: { in: predictionLostIds } },
+        data: { outcome: "LOST" },
+      })
+    );
+  }
+  if (predictionVoidIds.length > 0) {
+    writes.push(
+      prisma.prediction.updateMany({
+        where: { id: { in: predictionVoidIds } },
+        data: { outcome: "VOID", odds: 1 },
+      })
+    );
+  }
+  for (const patch of ticketPatches) {
+    writes.push(
+      prisma.accumulatorTicket.update({
+        where: { id: patch.id },
+        data: {
+          status: patch.status,
+          totalOdds: patch.totalOdds,
+          payoutCLP: patch.payoutCLP,
+        },
+      })
+    );
+  }
+  if (writes.length > 0) {
+    await Promise.all(writes);
+  }
+
   const metrics = await computeGlobalSettlementMetrics();
   const remainingPending = await prisma.accumulatorTicket.findMany({
     where: { status: "PENDING" },
-    include: { predictions: { include: { fixture: true } } },
+    select: {
+      date: true,
+      predictions: {
+        select: {
+          outcome: true,
+          fixture: { select: { matchDate: true } },
+        },
+      },
+    },
   });
   const overdueRemaining = remainingPending.filter((t) =>
     isOverduePendingTicket(t, nowMs)

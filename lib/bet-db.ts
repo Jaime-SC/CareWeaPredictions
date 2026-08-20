@@ -18,7 +18,7 @@ import type {
   TrainingFeatureRow,
 } from "./bet-types";
 import type { GeneratedParlay, MarketType, StrategyMode } from "./types";
-import { chileDateString, UNIT_STAKE } from "./utils";
+import { chileDateString, toIsoDateTime, UNIT_STAKE } from "./utils";
 import { computePerformanceMetrics } from "./stats";
 
 export type {
@@ -118,7 +118,7 @@ function legsFingerprint(legs: Array<{ matchId?: string; market?: string }>): st
 async function upsertFixture(leg: RecordBetLegInput) {
   const apiFixtureId = parseFixtureId(leg.matchId);
   const { homeTeam, awayTeam } = splitMatchLabel(leg.matchLabel);
-  const matchDate = leg.kickoff ? new Date(leg.kickoff) : new Date();
+  const matchDate = toIsoDateTime(leg.kickoff || undefined);
 
   if (apiFixtureId > 0) {
     return prisma.matchFixture.upsert({
@@ -318,6 +318,71 @@ export async function recordBet(input: RecordBetInput) {
   return { ticketId: ticket.id, duplicate: false as const };
 }
 
+export interface RecordedHistoryResult {
+  localId: string;
+  ticketId?: string;
+  duplicate?: boolean;
+  ok: boolean;
+  error?: string;
+}
+
+export function historyBetToRecordInput(bet: HistoryBet): RecordBetInput {
+  return {
+    date: bet.date,
+    mode: bet.mode,
+    strategyMode: bet.strategyMode,
+    stakeCLP: bet.stakeCLP,
+    totalOdds: bet.totalOdds,
+    payoutCLP: bet.potentialReturn,
+    legs: bet.legs.map((leg) => ({
+      matchId: leg.matchId,
+      matchLabel: leg.matchLabel,
+      leagueName: leg.leagueName,
+      kickoff: leg.kickoff,
+      market: leg.market,
+      marketLabel: leg.marketLabel,
+      odds: leg.odds,
+      modelProbability: leg.modelProbability,
+    })),
+  };
+}
+
+/** Persist tickets that exist in the client historial but not yet in Neon. */
+export async function recordBetsFromHistory(
+  bets: HistoryBet[]
+): Promise<RecordedHistoryResult[]> {
+  const results: RecordedHistoryResult[] = [];
+  for (const bet of bets) {
+    if (!bet.legs?.length) {
+      results.push({
+        localId: bet.id,
+        ok: false,
+        error: "Ticket sin selecciones.",
+      });
+      continue;
+    }
+    try {
+      const recorded = await recordBet(historyBetToRecordInput(bet));
+      results.push({
+        localId: bet.id,
+        ticketId: recorded.ticketId,
+        duplicate: recorded.duplicate,
+        ok: true,
+      });
+    } catch (error) {
+      results.push({
+        localId: bet.id,
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Error al registrar la apuesta en la base de datos.",
+      });
+    }
+  }
+  return results;
+}
+
 /** Persist a combinada; overwrites the pending ticket for that date+mode. */
 export async function recordBetFromParlay(
   parlay: GeneratedParlay,
@@ -417,7 +482,7 @@ function mapTicketToHistory(row: {
       homeTeam: p.fixture.homeTeam,
       awayTeam: p.fixture.awayTeam,
       leagueName: p.fixture.leagueName,
-      kickoff: p.fixture.matchDate.toISOString(),
+      kickoff: toIsoDateTime(p.fixture.matchDate),
       market: p.market as MarketType,
       marketLabel: p.selection,
       odds: p.odds,
@@ -441,11 +506,11 @@ function mapTicketToHistory(row: {
     potentialReturn: row.payoutCLP,
     legs,
     status: fromDbTicketStatus(row.status),
-    createdAt: row.createdAt.toISOString(),
+    createdAt: toIsoDateTime(row.createdAt),
     settledAt:
       row.status.toUpperCase() === "PENDING"
         ? undefined
-        : row.updatedAt.toISOString(),
+        : toIsoDateTime(row.updatedAt),
   };
 }
 
@@ -498,20 +563,30 @@ export async function updateTicketStatusInDb(
 export async function syncOutcomesFromHistory(
   bets: HistoryBet[]
 ): Promise<number> {
+  if (bets.length === 0) return 0;
+
+  const ids = bets.map((bet) => bet.id);
+  const tickets = await prisma.accumulatorTicket.findMany({
+    where: { id: { in: ids } },
+    include: { predictions: { include: { fixture: true } } },
+  });
+  const ticketById = new Map(tickets.map((t) => [t.id, t]));
+
+  const ticketStatusUpdates: Array<{ id: string; status: string }> = [];
+  const predictionUpdates: Array<{ id: string; outcome: string }> = [];
+  const fixturePatches = new Map<
+    string,
+    { finalScore?: string; status?: string }
+  >();
   let updated = 0;
+
   for (const bet of bets) {
-    const ticket = await prisma.accumulatorTicket.findUnique({
-      where: { id: bet.id },
-      include: { predictions: { include: { fixture: true } } },
-    });
+    const ticket = ticketById.get(bet.id);
     if (!ticket) continue;
 
     const dbStatus = toDbOutcome(bet.status);
     if (ticket.status !== dbStatus) {
-      await prisma.accumulatorTicket.update({
-        where: { id: bet.id },
-        data: { status: dbStatus },
-      });
+      ticketStatusUpdates.push({ id: bet.id, status: dbStatus });
       updated += 1;
     }
 
@@ -531,22 +606,42 @@ export async function syncOutcomesFromHistory(
         pred.outcome !== outcome ||
         (score && pred.fixture.finalScore !== score)
       ) {
-        await prisma.prediction.update({
-          where: { id: pred.id },
-          data: { outcome },
-        });
+        predictionUpdates.push({ id: pred.id, outcome });
         if (score || statusShort) {
-          await prisma.matchFixture.update({
-            where: { id: pred.fixtureId },
-            data: {
-              ...(score ? { finalScore: score } : {}),
-              ...(statusShort ? { status: statusShort } : {}),
-            },
+          const prev = fixturePatches.get(pred.fixtureId) ?? {};
+          fixturePatches.set(pred.fixtureId, {
+            ...prev,
+            ...(score ? { finalScore: score } : {}),
+            ...(statusShort ? { status: statusShort } : {}),
           });
         }
         updated += 1;
       }
     }
+  }
+
+  const writes: Array<Promise<unknown>> = [];
+  for (const patch of ticketStatusUpdates) {
+    writes.push(
+      prisma.accumulatorTicket.update({
+        where: { id: patch.id },
+        data: { status: patch.status },
+      })
+    );
+  }
+  for (const patch of predictionUpdates) {
+    writes.push(
+      prisma.prediction.update({
+        where: { id: patch.id },
+        data: { outcome: patch.outcome },
+      })
+    );
+  }
+  for (const [id, data] of fixturePatches) {
+    writes.push(prisma.matchFixture.update({ where: { id }, data }));
+  }
+  if (writes.length > 0) {
+    await Promise.all(writes);
   }
   return updated;
 }
@@ -600,6 +695,12 @@ export async function buildStatsSummary(): Promise<StatsSummaryPayload> {
     orderBy: { createdAt: "desc" },
   });
 
+  const legsByTicket = new Map<string, number>();
+  for (const p of predictions) {
+    if (!p.ticketId) continue;
+    legsByTicket.set(p.ticketId, (legsByTicket.get(p.ticketId) ?? 0) + 1);
+  }
+
   // --- By competition ---
   const leagueMap = new Map<
     string,
@@ -616,7 +717,7 @@ export async function buildStatsSummary(): Promise<StatsSummaryPayload> {
       profit: 0,
     };
     const ticketStake = p.ticket?.stakeCLP ?? 0;
-    const legCount = Math.max(1, predictions.filter((x) => x.ticketId === p.ticketId).length);
+    const legCount = Math.max(1, p.ticketId ? (legsByTicket.get(p.ticketId) ?? 1) : 1);
     const share = ticketStake / legCount;
 
     cur.stakeShare += share;
@@ -695,7 +796,7 @@ export async function buildStatsSummary(): Promise<StatsSummaryPayload> {
     modelProbability: p.modelProbability,
     odds: p.odds,
     outcome: p.outcome as PredictionOutcome,
-    matchDate: p.fixture.matchDate.toISOString(),
+    matchDate: toIsoDateTime(p.fixture.matchDate),
     homeTeam: p.fixture.homeTeam,
     awayTeam: p.fixture.awayTeam,
   }));

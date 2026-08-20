@@ -1,12 +1,6 @@
-import monopolyTeamsJson from "../data/monopoly-teams.json";
+import { getMonopolyTeams, type MonopolyTeam } from "./monopoly-teams";
 
-export type MonopolyRosterTeam = {
-  teamId: number;
-  teamName: string;
-  leagueId: number;
-  leagueName: string;
-  country: string;
-};
+export type MonopolyRosterTeam = MonopolyTeam;
 
 export type MonopolyRosterLeague = {
   leagueId: number;
@@ -16,10 +10,9 @@ export type MonopolyRosterLeague = {
 };
 
 export function getMonopolyRosterByLeague(): MonopolyRosterLeague[] {
-  const teams = monopolyTeamsJson as MonopolyRosterTeam[];
   const byLeague = new Map<number, MonopolyRosterLeague>();
 
-  for (const team of teams) {
+  for (const team of getMonopolyTeams()) {
     const existing = byLeague.get(team.leagueId);
     if (existing) {
       existing.teams.push(team);

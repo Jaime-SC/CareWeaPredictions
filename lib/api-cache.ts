@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { env } from "./env";
 import { chileDateString } from "./utils";
 
 /** Far-future sentinel used for finished/permanent cache entries. */
@@ -19,7 +20,7 @@ export const CACHE_TTL_MINUTES = {
 
 /** Free-plan style daily budget shown in the UI. */
 export const API_DAILY_QUOTA_LIMIT = Number(
-  process.env.API_FOOTBALL_DAILY_LIMIT ?? 100
+  env.API_FOOTBALL_DAILY_LIMIT ?? 100
 );
 
 /** API-Football free plans reject Page > 3. */
@@ -239,22 +240,6 @@ export async function getApiQuota(
   }
 }
 
-/**
- * Force one live /status call so quota mirrors official dashboard headers.
- * Uses forceRefresh to bypass SQLite cache.
- */
-export async function refreshApiQuotaFromStatus(
-  apiKey: string
-): Promise<ApiQuotaSnapshot | null> {
-  await fetchWithCache("/status", {}, CACHE_TTL_MINUTES.STATUS, {
-    apiKey,
-    cacheKey: "status_account",
-    forceRefresh: true,
-  });
-  const quota = await getApiQuota();
-  return quota.fromHeaders ? quota : null;
-}
-
 const BASE_URL = "https://v3.football.api-sports.io";
 
 /**
@@ -295,7 +280,6 @@ export async function fetchWithCache<T>(
   if (!options.forceRefresh) {
     const hit = await getCachedPayload<T>(cacheKey);
     if (hit !== null) {
-      console.log(`[CACHE HIT] Returning data for key=${cacheKey}`);
       return hit;
     }
   }
@@ -328,19 +312,9 @@ export async function fetchWithCache<T>(
   }
 
   // Official dashboard metrics — only on HTTP 200 with real quota headers
-  let quota: ApiQuotaSnapshot | null = null;
-  if (res.status === 200) {
-    const parsed = parseApiFootballQuotaHeaders(res.headers);
-    if (parsed) {
-      quota = await syncApiQuotaFromHeaders(res.headers);
-    }
+  if (res.status === 200 && parseApiFootballQuotaHeaders(res.headers)) {
+    await syncApiQuotaFromHeaders(res.headers);
   }
-  console.log(
-    `[CACHE MISS] Fetched key=${cacheKey} status=${res.status}` +
-      (quota
-        ? ` · quota today=${quota.used}/${quota.limit} (remaining=${quota.remaining})`
-        : "")
-  );
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -385,4 +359,47 @@ export async function fetchWithCache<T>(
   );
 
   return data;
+}
+
+/** Bump to force another one-shot wipe of bulk date caches. */
+export const STALE_CACHE_PURGE_MARKER = "cache_purge_odds_fixture_v1";
+
+export async function purgeStaleOddsAndFixtureCache(): Promise<{
+  deleted: number;
+  skipped: boolean;
+}> {
+  try {
+    const marker = await prisma.cachedApiResponse.findUnique({
+      where: { id: STALE_CACHE_PURGE_MARKER },
+    });
+    if (marker) {
+      return { deleted: 0, skipped: true };
+    }
+
+    const result = await prisma.cachedApiResponse.deleteMany({
+      where: {
+        OR: [
+          { id: { startsWith: "fixtures_date_" } },
+          { id: { startsWith: "odds_date_" } },
+        ],
+      },
+    });
+
+    await prisma.cachedApiResponse.create({
+      data: {
+        id: STALE_CACHE_PURGE_MARKER,
+        endpoint: "cache/purge",
+        payload: JSON.stringify({
+          purgedAt: new Date().toISOString(),
+          deleted: result.count,
+        }),
+        expiresAt: PERMANENT_EXPIRES_AT,
+      },
+    });
+
+    return { deleted: result.count, skipped: false };
+  } catch (err) {
+    console.warn("[api-cache] stale cache purge failed:", err);
+    return { deleted: 0, skipped: false };
+  }
 }

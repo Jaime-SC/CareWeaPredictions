@@ -1,12 +1,7 @@
 import { useCallback, useSyncExternalStore } from "react";
+import type { BankrollSettings } from "@/types";
 
-export interface BankrollSettings {
-  totalBankroll: number;
-  currency: string;
-  minBookmakerStake: number;
-  maxRiskSingle: number;
-  maxRiskParlay: number;
-}
+export type { BankrollSettings };
 
 export const DEFAULT_BANKROLL_SETTINGS: BankrollSettings = {
   totalBankroll: 30_000,

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { maybeRecalibrateAfterSettlement } from "@/lib/auto-tuner";
+import { errorMessage, jsonError } from "@/lib/api-response";
 import { settlePendingTickets } from "@/lib/settlement";
 
 export const dynamic = "force-dynamic";
@@ -52,23 +53,19 @@ export async function POST() {
     );
   } catch (error) {
     console.error("[api/settle]", error);
-    return NextResponse.json(
-      {
-        success: false,
-        settledTicketsCount: 0,
-        updatedLegsCount: 0,
-        ticketsWon: 0,
-        ticketsLost: 0,
-        ticketsVoided: 0,
-        diagnostics: [],
-        errors: [
-          error instanceof Error
-            ? error.message
-            : "Error al sincronizar marcadores.",
-        ],
-      },
-      { status: 500, headers: NO_STORE_HEADERS }
-    );
+    return jsonError(errorMessage(error, "Error al sincronizar marcadores."), 500, {
+      settledTicketsCount: 0,
+      updatedLegsCount: 0,
+      ticketsWon: 0,
+      ticketsLost: 0,
+      ticketsVoided: 0,
+      diagnostics: [],
+      errors: [
+        error instanceof Error
+          ? error.message
+          : "Error al sincronizar marcadores.",
+      ],
+    }, { headers: NO_STORE_HEADERS });
   }
 }
 

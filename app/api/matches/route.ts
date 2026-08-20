@@ -6,6 +6,8 @@ import {
 import { enrichMatchesFromLocalData } from "@/lib/fixture-context";
 import { chileDateString } from "@/lib/utils";
 
+export const revalidate = 30;
+
 function isValidDate(value: string | null): value is string {
   return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }

@@ -21,9 +21,10 @@ import {
   addBetFromParlay,
   findExistingParlay,
   loadBets,
-  saveBets,
+  remapLocalBetId,
   type HistoryBet,
 } from "@/lib/history-tracker";
+import { postBetRecord } from "@/lib/bet-record-client";
 import { contextBadgeLabels } from "@/lib/context-engine";
 import { recalculateParlay } from "@/lib/parlay-recalc";
 import type { GeneratedParlay, ParlayLeg } from "@/lib/types";
@@ -193,75 +194,68 @@ export function ParlaySlip({
 
   const persistToNeon = useCallback(async () => {
     if (activeParlay.legs.length === 0) return;
-    const stake = parseStakeCLP(stakeInput);
-    if (stake == null) {
-      setRegisterMsg("Indica el monto a apostar en CLP.");
-      return;
-    }
 
     const date = historyDate ?? chileDateString();
-    const already =
-      findExistingParlay(activeParlay, loadBets()) ||
-      (dbTickets ? findExistingParlay(activeParlay, dbTickets) : undefined);
-    if (already) {
+    const alreadyDb = dbTickets
+      ? findExistingParlay(activeParlay, dbTickets)
+      : undefined;
+    if (alreadyDb) {
       setRegistered(true);
-      setRegisterMsg("Ticket ya registrado en el historial.");
+      setRegisterMsg("Ticket ya registrado en la base de datos.");
       return;
     }
 
-    const debit = debitBankroll(stake);
-    if (!debit.ok) {
-      setRegisterMsg(
-        debit.reason === "insufficient"
-          ? `Banca insuficiente. Disponible: ${formatCLP(debit.remaining)}.`
-          : "Indica el monto a apostar en CLP."
-      );
-      return;
-    }
+    const alreadyLocal = findExistingParlay(activeParlay, loadBets());
+    let local = alreadyLocal ?? null;
 
-    const existingIds = new Set(loadBets().map((b) => b.id));
-    const local = addBetFromParlay(activeParlay, date, stake);
-    if (!local || existingIds.has(local.id)) {
-      refundBankroll(stake);
-      if (local) {
-        setRegistered(true);
-        setRegisterMsg("Ticket ya registrado en el historial.");
-      } else {
-        setRegisterMsg("No se pudo registrar la apuesta.");
+    if (!local) {
+      const stake = parseStakeCLP(stakeInput);
+      if (stake == null) {
+        setRegisterMsg("Indica el monto a apostar en CLP.");
+        return;
       }
-      return;
+      const debit = debitBankroll(stake);
+      if (!debit.ok) {
+        setRegisterMsg(
+          debit.reason === "insufficient"
+            ? `Banca insuficiente. Disponible: ${formatCLP(debit.remaining)}.`
+            : "Indica el monto a apostar en CLP."
+        );
+        return;
+      }
+
+      local = addBetFromParlay(activeParlay, date, stake);
+      if (!local) {
+        refundBankroll(stake);
+        setRegisterMsg("No se pudo registrar la apuesta.");
+        return;
+      }
     }
 
     try {
-      const res = await fetch("/api/bets/record", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          date,
-          strategyMode: activeParlay.strategyMode ?? "daily-fun",
-          stakeCLP: stake,
-          totalOdds: activeParlay.totalOdds,
-          payoutCLP: stake * activeParlay.totalOdds,
-          legs: activeParlay.legs.map((l) => ({
-            matchId: l.matchId,
-            matchLabel: l.matchLabel,
-            leagueName: l.leagueName,
-            kickoff: l.kickoff,
-            market: l.market,
-            marketLabel: l.marketLabel,
-            odds: l.odds,
-            modelProbability: l.modelProbability,
-          })),
-        }),
+      const data = await postBetRecord({
+        date,
+        strategyMode: activeParlay.strategyMode ?? "daily-fun",
+        stakeCLP: local.stakeCLP,
+        totalOdds: activeParlay.totalOdds,
+        payoutCLP: local.stakeCLP * activeParlay.totalOdds,
+        legs: activeParlay.legs.map((l) => ({
+          matchId: l.matchId,
+          matchLabel: l.matchLabel,
+          leagueName: l.leagueName,
+          kickoff: l.kickoff,
+          market: l.market,
+          marketLabel: l.marketLabel,
+          odds: l.odds,
+          modelProbability: l.modelProbability,
+        })),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) {
+      if (!data.success) {
+        setRegistered(false);
         setRegisterMsg(
-          typeof data.error === "string"
-            ? data.error
-            : local
-              ? "Guardada localmente; falló la base de datos."
-              : "No se pudo registrar la apuesta."
+          data.error
+            ? `${data.error} El ticket quedó en el historial local; reintenta para guardarlo en Neon.`
+            : "Guardada localmente; falló la base de datos. Reintenta para sincronizar."
         );
         return;
       }
@@ -271,18 +265,13 @@ export function ParlaySlip({
           ? "Ticket ya registrado en la base de datos."
           : "Apuesta guardada en Neon."
       );
-
-      if (local && typeof data.ticketId === "string") {
-        const bets = loadBets().map((b) =>
-          b.id === local.id ? { ...b, id: data.ticketId as string } : b
-        );
-        saveBets(bets);
+      if (typeof data.ticketId === "string") {
+        remapLocalBetId(local.id, data.ticketId);
       }
     } catch {
+      setRegistered(false);
       setRegisterMsg(
-        local
-          ? "Guardada localmente; sin conexión a Neon."
-          : "No se pudo registrar la apuesta."
+        "Guardada localmente; sin conexión a Neon. Reintenta para sincronizar."
       );
     }
   }, [activeParlay, dbTickets, historyDate, stakeInput]);
@@ -558,7 +547,11 @@ export function ParlaySlip({
             <Button
               className="w-full"
               variant={registered ? "secondary" : "default"}
-              disabled={registered || stakeCLP == null || exceedsBankroll}
+              disabled={
+                registered ||
+                (!findExistingParlay(activeParlay, loadBets()) &&
+                  (stakeCLP == null || exceedsBankroll))
+              }
               onClick={() => void persistToNeon()}
             >
               {registered ? (

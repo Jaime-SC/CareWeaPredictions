@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildAlgorithmHealthReport } from "@/lib/algorithm-health";
 import { buildReadinessReport } from "@/lib/readiness";
+import { errorMessage, jsonError } from "@/lib/api-response";
 
 export const dynamic = "force-dynamic";
 
@@ -23,15 +24,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, ...report, readiness });
   } catch (error) {
     console.error("[api/analytics/health]", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Error al calcular salud del algoritmo.",
-      },
-      { status: 500 }
+    return jsonError(
+      errorMessage(error, "Error al calcular salud del algoritmo.")
     );
   }
 }

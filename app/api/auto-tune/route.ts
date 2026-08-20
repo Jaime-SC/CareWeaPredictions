@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { recalibrateModel, resetCalibration } from "@/lib/auto-tuner";
+import { errorMessage, jsonError } from "@/lib/api-response";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -34,15 +35,11 @@ export async function POST() {
     );
   } catch (error) {
     console.error("[api/auto-tune POST]", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Error al recalibrar los multiplicadores.",
-      },
-      { status: 500, headers: NO_STORE_HEADERS }
+    return jsonError(
+      errorMessage(error, "Error al recalibrar los multiplicadores."),
+      500,
+      undefined,
+      { headers: NO_STORE_HEADERS }
     );
   }
 }
@@ -68,15 +65,11 @@ export async function DELETE() {
     );
   } catch (error) {
     console.error("[api/auto-tune DELETE]", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Error al restaurar los multiplicadores de fábrica.",
-      },
-      { status: 500, headers: NO_STORE_HEADERS }
+    return jsonError(
+      errorMessage(error, "Error al restaurar los multiplicadores de fábrica."),
+      500,
+      undefined,
+      { headers: NO_STORE_HEADERS }
     );
   }
 }

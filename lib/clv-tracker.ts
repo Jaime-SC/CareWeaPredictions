@@ -92,9 +92,6 @@ export async function snapshotClosingOdds(
       updated += 1;
     }
 
-    if (updated > 0) {
-      console.log(`[clv] closing-odds snapshots=${updated}`);
-    }
     return updated;
   } catch (error) {
     console.warn("[clv] snapshot failed", error);

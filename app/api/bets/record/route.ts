@@ -1,70 +1,90 @@
 import { NextRequest, NextResponse } from "next/server";
-import { recordBet, type RecordBetInput } from "@/lib/bet-db";
+import {
+  recordBet,
+  recordBetsFromHistory,
+  type RecordBetInput,
+} from "@/lib/bet-db";
+import { errorMessage, jsonError } from "@/lib/api-response";
+import type { HistoryBet } from "@/lib/history-tracker";
 import type { StrategyMode } from "@/lib/types";
+
+function isHistoryTicketArray(value: unknown): value is HistoryBet[] {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function parseSingleBody(
+  body: Partial<RecordBetInput>
+): RecordBetInput | { error: string } {
+  if (!Array.isArray(body.legs) || body.legs.length === 0) {
+    return { error: "Body inválido: se requiere legs[] con al menos una selección." };
+  }
+  if (typeof body.totalOdds !== "number") {
+    return { error: "Body inválido: totalOdds es requerido." };
+  }
+  const unitStake = Number(body.stakeCLP);
+  if (!Number.isFinite(unitStake) || unitStake <= 0) {
+    return { error: "Indica el monto a apostar en pesos chilenos (CLP)." };
+  }
+  return {
+    date: typeof body.date === "string" ? body.date : undefined,
+    mode: body.mode,
+    strategyMode: body.strategyMode as StrategyMode | undefined,
+    stakeCLP: unitStake,
+    totalOdds: body.totalOdds,
+    payoutCLP: unitStake * body.totalOdds,
+    legs: body.legs.map((leg) => ({
+      matchId: String(leg.matchId ?? ""),
+      matchLabel: String(leg.matchLabel ?? ""),
+      leagueName: String(leg.leagueName ?? ""),
+      leagueId: typeof leg.leagueId === "string" ? leg.leagueId : undefined,
+      kickoff: String(leg.kickoff ?? ""),
+      market: leg.market,
+      marketLabel: String(leg.marketLabel ?? ""),
+      odds: Number(leg.odds),
+      modelProbability:
+        typeof leg.modelProbability === "number"
+          ? leg.modelProbability
+          : undefined,
+    })),
+  };
+}
 
 /**
  * POST /api/bets/record
  * Persist an accumulator or single-pick ticket into Postgres via Prisma.
+ * Also accepts `{ tickets: HistoryBet[] }` to sync localStorage leftovers.
  */
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json().catch(() => null)) as
-      | (Partial<RecordBetInput> & { parlay?: unknown })
+      | (Partial<RecordBetInput> & { tickets?: unknown; parlay?: unknown })
       | null;
 
-    if (!body || !Array.isArray(body.legs) || body.legs.length === 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Body inválido: se requiere legs[] con al menos una selección.",
-        },
-        { status: 400 }
-      );
+    if (!body) {
+      return jsonError("Body inválido.", 400);
     }
 
-    if (typeof body.totalOdds !== "number") {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Body inválido: totalOdds es requerido.",
-        },
-        { status: 400 }
-      );
-    }
-
-    const unitStake = Number(body.stakeCLP);
-    if (!Number.isFinite(unitStake) || unitStake <= 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Indica el monto a apostar en pesos chilenos (CLP).",
-        },
-        { status: 400 }
-      );
-    }
-    const result = await recordBet({
-      date: typeof body.date === "string" ? body.date : undefined,
-      mode: body.mode,
-      strategyMode: body.strategyMode as StrategyMode | undefined,
-      stakeCLP: unitStake,
-      totalOdds: body.totalOdds,
-      payoutCLP: unitStake * body.totalOdds,
-      legs: body.legs.map((leg) => ({
-        matchId: String(leg.matchId ?? ""),
-        matchLabel: String(leg.matchLabel ?? ""),
-        leagueName: String(leg.leagueName ?? ""),
-        leagueId:
-          typeof leg.leagueId === "string" ? leg.leagueId : undefined,
-        kickoff: String(leg.kickoff ?? ""),
-        market: leg.market,
-        marketLabel: String(leg.marketLabel ?? ""),
-        odds: Number(leg.odds),
-        modelProbability:
-          typeof leg.modelProbability === "number"
-            ? leg.modelProbability
+    if (isHistoryTicketArray(body.tickets)) {
+      const results = await recordBetsFromHistory(body.tickets);
+      const failed = results.filter((row) => !row.ok);
+      return NextResponse.json({
+        success: failed.length === 0,
+        saved: results.filter((row) => row.ok).length,
+        failed: failed.length,
+        results,
+        error:
+          failed.length > 0
+            ? failed[0]?.error ?? "Algunos tickets no se pudieron guardar."
             : undefined,
-      })),
-    });
+      });
+    }
+
+    const parsed = parseSingleBody(body);
+    if ("error" in parsed) {
+      return jsonError(parsed.error, 400);
+    }
+
+    const result = await recordBet(parsed);
 
     return NextResponse.json({
       success: true,
@@ -76,15 +96,8 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("[api/bets/record]", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Error al registrar la apuesta en la base de datos.",
-      },
-      { status: 500 }
+    return jsonError(
+      errorMessage(error, "Error al registrar la apuesta en la base de datos.")
     );
   }
 }

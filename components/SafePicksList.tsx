@@ -19,10 +19,12 @@ import {
 } from "@/lib/bankroll-store";
 import {
   addBetFromSinglePick,
+  findExistingSinglePick,
   individualPickKey,
   loadBets,
-  saveBets,
+  remapLocalBetId,
 } from "@/lib/history-tracker";
+import { postBetRecord } from "@/lib/bet-record-client";
 import { contextBadgeLabels } from "@/lib/context-engine";
 import type { SafePickItem } from "@/lib/types";
 import {
@@ -73,6 +75,8 @@ export function SafePicksList({
     Record<string, number>
   >({});
   const [stakeInput, setStakeInput] = useState("");
+  const [registerMsg, setRegisterMsg] = useState<string | null>(null);
+  const [registeringKey, setRegisteringKey] = useState<string | null>(null);
   const stakeCLP = parseStakeCLP(stakeInput);
   const settings = useBankrollSettings();
   const exceedsBankroll =
@@ -130,68 +134,73 @@ export function SafePicksList({
   }, [suggestedStake, stakeInput]);
 
   async function handleRegister(pick: SafePickItem) {
-    if (stakeCLP == null) return;
-    if (stakeCLP > settings.totalBankroll) return;
+    const key = pickKey(pick);
+    const alreadyLocal = findExistingSinglePick(pick, loadBets());
+    let local = alreadyLocal ?? null;
 
-    const debit = debitBankroll(stakeCLP);
-    if (!debit.ok) return;
-
-    const existingIds = new Set(loadBets().map((b) => b.id));
-    const local = addBetFromSinglePick(pick, stakeCLP, date);
-    if (!local || existingIds.has(local.id)) {
-      refundBankroll(stakeCLP);
-      if (local) {
-        const key = pickKey(pick);
-        setRegisteredKeys((prev) => new Set(prev).add(key));
-        setRegisteredStakes((prev) => ({
-          ...prev,
-          [key]: local.stakeCLP,
-        }));
+    if (!local) {
+      if (stakeCLP == null) return;
+      if (stakeCLP > settings.totalBankroll) return;
+      const debit = debitBankroll(stakeCLP);
+      if (!debit.ok) return;
+      local = addBetFromSinglePick(pick, stakeCLP, date);
+      if (!local) {
+        refundBankroll(stakeCLP);
+        return;
       }
-      return;
     }
 
+    setRegisteringKey(key);
+    setRegisterMsg(null);
     try {
-      const res = await fetch("/api/bets/record", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          date,
-          strategyMode: "daily-safe",
-          mode: "Segura",
-          stakeCLP,
-          totalOdds: pick.odds,
-          payoutCLP: stakeCLP * pick.odds,
-          legs: [
-            {
-              matchId: pick.matchId,
-              matchLabel: pick.matchLabel,
-              leagueName: pick.leagueName,
-              kickoff: pick.kickoff,
-              market: pick.market,
-              marketLabel: pick.marketLabel,
-              odds: pick.odds,
-              modelProbability: pick.modelProbability,
-            },
-          ],
-        }),
+      const data = await postBetRecord({
+        date,
+        strategyMode: "daily-safe",
+        mode: "Segura",
+        stakeCLP: local.stakeCLP,
+        totalOdds: pick.odds,
+        payoutCLP: local.stakeCLP * pick.odds,
+        legs: [
+          {
+            matchId: pick.matchId,
+            matchLabel: pick.matchLabel,
+            leagueName: pick.leagueName,
+            kickoff: pick.kickoff,
+            market: pick.market,
+            marketLabel: pick.marketLabel,
+            odds: pick.odds,
+            modelProbability: pick.modelProbability,
+          },
+        ],
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) return;
-
-      const key = pickKey(pick);
-      setRegisteredKeys((prev) => new Set(prev).add(key));
-      setRegisteredStakes((prev) => ({ ...prev, [key]: stakeCLP }));
-      if (typeof data.ticketId === "string") {
-        const bets = loadBets().map((b) =>
-          b.id === local.id ? { ...b, id: data.ticketId as string } : b
+      if (!data.success) {
+        setRegisterMsg(
+          data.error
+            ? `${data.error} Quedó en el historial local; reintenta para guardarlo en Neon.`
+            : "Guardada localmente; falló la base de datos. Reintenta para sincronizar."
         );
-        saveBets(bets);
+        return;
       }
-    } catch {
-      const key = pickKey(pick);
+
       setRegisteredKeys((prev) => new Set(prev).add(key));
-      setRegisteredStakes((prev) => ({ ...prev, [key]: stakeCLP }));
+      setRegisteredStakes((prev) => ({
+        ...prev,
+        [key]: local.stakeCLP,
+      }));
+      if (typeof data.ticketId === "string") {
+        remapLocalBetId(local.id, data.ticketId);
+      }
+      setRegisterMsg(
+        data.duplicate
+          ? "Pick ya registrado en la base de datos."
+          : "Pick guardado en Neon."
+      );
+    } catch {
+      setRegisterMsg(
+        "Guardada localmente; sin conexión a Neon. Reintenta para sincronizar."
+      );
+    } finally {
+      setRegisteringKey(null);
     }
   }
 
@@ -213,6 +222,11 @@ export function SafePicksList({
             {fromCache && (
               <p role="status" className="mt-2 text-sm text-sky-200">
                 Lista recuperada desde Neon para esta fecha.
+              </p>
+            )}
+            {registerMsg && (
+              <p role="status" className="mt-2 text-sm text-amber-100">
+                {registerMsg}
               </p>
             )}
           </div>
@@ -372,13 +386,24 @@ export function SafePicksList({
                               size="sm"
                               variant={registered ? "secondary" : "default"}
                               disabled={
-                                registered || stakeCLP == null || exceedsBankroll
+                                registered ||
+                                registeringKey === key ||
+                                (!findExistingSinglePick(pick) &&
+                                  (stakeCLP == null || exceedsBankroll))
                               }
                               onClick={() => handleRegister(pick)}
                             >
                               {registered ? (
                                 <>
                                   <Check className="h-3.5 w-3.5" aria-hidden /> Registrado
+                                </>
+                              ) : registeringKey === key ? (
+                                <>
+                                  <Loader2
+                                    className="h-3.5 w-3.5 animate-spin"
+                                    aria-hidden
+                                  />
+                                  Guardando…
                                 </>
                               ) : (
                                 <>

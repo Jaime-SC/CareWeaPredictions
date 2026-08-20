@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runHistoricalBacktest } from "@/lib/backtest";
+import { errorMessage, jsonError } from "@/lib/api-response";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -28,16 +29,7 @@ async function handle(request: NextRequest) {
     });
   } catch (error) {
     console.error("[api/backtest]", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Error al ejecutar el backtest.",
-      },
-      { status: 500 }
-    );
+    return jsonError(errorMessage(error, "Error al ejecutar el backtest."));
   }
 }
 

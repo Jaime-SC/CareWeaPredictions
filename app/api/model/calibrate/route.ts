@@ -4,6 +4,7 @@ import {
   recalibrateModel,
 } from "@/lib/auto-tuner";
 import { loadModelWeights } from "@/lib/model-weights";
+import { errorMessage, jsonError } from "@/lib/api-response";
 
 /**
  * GET /api/model/calibrate — current calibrated weights snapshot.
@@ -23,15 +24,8 @@ export async function GET() {
     });
   } catch (error) {
     console.error("[api/model/calibrate GET]", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "No se pudieron leer los pesos del modelo.",
-      },
-      { status: 500 }
+    return jsonError(
+      errorMessage(error, "No se pudieron leer los pesos del modelo.")
     );
   }
 }
@@ -66,15 +60,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("[api/model/calibrate POST]", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Error al recalibrar el modelo.",
-      },
-      { status: 500 }
-    );
+    return jsonError(errorMessage(error, "Error al recalibrar el modelo."));
   }
 }

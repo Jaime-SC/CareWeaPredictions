@@ -40,13 +40,14 @@ export function formatStakeInput(raw: string): string {
 export const UNIT_STAKE = 1;
 
 /** Fecha civil YYYY-MM-DD en hora Chile. */
-export function chileDateString(date: Date = new Date()): string {
+export function chileDateString(date: Date | string = new Date()): string {
+  const value = date instanceof Date ? date : new Date(date);
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: CHILE_TIMEZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(date);
+  }).format(Number.isFinite(value.getTime()) ? value : new Date());
 }
 
 /** Suma/resta días civiles a una fecha YYYY-MM-DD (calendario Chile). */
@@ -270,4 +271,25 @@ export function groupByKeyThenKickoff<T>(
     return a.key.localeCompare(b.key, "es");
   });
   return groups;
+}
+
+/**
+ * Prisma DateTime as ISO string. Neon HTTP can hand back strings (or `{}`)
+ * instead of Date; callers must not assume `.toISOString()` exists.
+ */
+export function toIsoDateTime(
+  value: Date | string | number | null | undefined
+): string {
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return value.toISOString();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const parsed = new Date(value);
+    if (Number.isFinite(parsed.getTime())) return parsed.toISOString();
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = new Date(value);
+    if (Number.isFinite(parsed.getTime())) return parsed.toISOString();
+  }
+  return new Date().toISOString();
 }

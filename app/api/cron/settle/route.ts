@@ -4,6 +4,8 @@ import {
   MIN_SETTLEMENT_CALIBRATION_BATCH,
   maybeRecalibrateAfterSettlement,
 } from "@/lib/auto-tuner";
+import { errorMessage, jsonError } from "@/lib/api-response";
+import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -18,7 +20,7 @@ export const maxDuration = 60;
  *   or ?secret=<CRON_SECRET>
  */
 function authorize(request: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
+  const secret = env.CRON_SECRET;
   if (!secret) return true; // open in local/dev when unset
   const auth = request.headers.get("authorization");
   if (auth === `Bearer ${secret}`) return true;
@@ -56,14 +58,7 @@ async function handle(request: NextRequest) {
     > = null;
 
     if (newlySettledCount >= MIN_SETTLEMENT_CALIBRATION_BATCH) {
-      console.log(
-        `[SETTLE] ${newlySettledCount} bets settled. Threshold reached (>= ${MIN_SETTLEMENT_CALIBRATION_BATCH}). Running auto-calibration...`
-      );
       calibration = await maybeRecalibrateAfterSettlement(newlySettledCount);
-    } else {
-      console.log(
-        `[SETTLE] ${newlySettledCount} bets settled. Skipping auto-calibration (requires >= ${MIN_SETTLEMENT_CALIBRATION_BATCH} settled bets).`
-      );
     }
 
     return NextResponse.json({
@@ -76,15 +71,8 @@ async function handle(request: NextRequest) {
     });
   } catch (error) {
     console.error("[api/cron/settle]", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Error al liquidar tickets.",
-      },
-      { status: 500 }
+    return jsonError(
+      errorMessage(error, "Error al liquidar tickets.")
     );
   }
 }
