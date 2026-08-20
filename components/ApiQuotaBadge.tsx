@@ -60,21 +60,21 @@ function writeLocal(state: QuotaState) {
 function toneForRemaining(remaining: number) {
   if (remaining <= 10) {
     return {
-      className: "border-rose-500/40 bg-rose-500/10 text-rose-200",
-      dotClass: "bg-rose-400",
+      className: "bg-[#ff453a]/12 text-[#ff453a] ring-[#ff453a]/25",
+      dotClass: "bg-[#ff453a]",
       label: "Crítica",
     };
   }
   if (remaining <= 20) {
     return {
-      className: "border-amber-500/40 bg-amber-500/10 text-amber-200",
-      dotClass: "bg-amber-400",
+      className: "bg-[#ffd60a]/12 text-[#ffd60a] ring-[#ffd60a]/25",
+      dotClass: "bg-[#ffd60a]",
       label: "Baja",
     };
   }
   return {
-    className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
-    dotClass: "bg-emerald-400",
+    className: "bg-[#30d158]/12 text-[#30d158] ring-[#30d158]/25",
+    dotClass: "bg-[#30d158]",
     label: "OK",
   };
 }
@@ -130,16 +130,13 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
   }, [refresh]);
 
   useEffect(() => {
-    if (!quota || quota.remaining > 0) {
-      setDailyResetMs(0);
-      return;
-    }
+    if (!mounted) return;
     setDailyResetMs(msUntilUtcMidnight());
     const id = window.setInterval(() => {
       setDailyResetMs(msUntilUtcMidnight());
     }, 1000);
     return () => window.clearInterval(id);
-  }, [quota]);
+  }, [mounted]);
 
   if (!mounted) return null;
 
@@ -150,13 +147,13 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
         aria-live="polite"
         aria-label={`Límite por minuto del plan Free. Podrás generar de nuevo en ${cooldown.label}.`}
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs font-medium tabular-nums text-amber-200",
+          "inline-flex items-center gap-1.5 rounded-full bg-[#ffd60a]/12 px-2.5 py-1 text-xs font-medium tabular-nums text-[#ffd60a] ring-1 ring-[#ffd60a]/25",
           className
         )}
       >
         <span
           aria-hidden
-          className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-400"
+          className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#ffd60a]"
         />
         <span className="hidden sm:inline">
           Plan Free · listo en {cooldown.label}
@@ -168,21 +165,22 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
 
   if (!quota) return null;
 
+  const resetLabel = formatDurationShort(dailyResetMs);
+
   if (quota.remaining <= 0) {
-    const resetLabel = formatDurationShort(dailyResetMs);
     return (
       <span
         role="status"
         aria-live="polite"
         aria-label={`Cuota diaria agotada. Se reinicia en ${resetLabel} (medianoche UTC).`}
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs font-medium tabular-nums text-rose-200",
+          "inline-flex items-center gap-1.5 rounded-full bg-[#ff453a]/12 px-2.5 py-1 text-xs font-medium tabular-nums text-[#ff453a] ring-1 ring-[#ff453a]/25",
           className
         )}
       >
         <span
           aria-hidden
-          className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-rose-400"
+          className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#ff453a]"
         />
         <span className="hidden sm:inline">
           Cupo diario 0 · reset en {resetLabel}
@@ -199,24 +197,19 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
   return (
     <span
       role="status"
-      aria-label={`Cuota oficial API-Football del ${quota.date}: ${quota.used} usadas, ${quota.remaining} restantes. Estado ${label}.`}
+      aria-label={`Cuota oficial API-Football del ${quota.date}: ${quota.used} de ${quota.limit} usadas (${quota.remaining} restantes). Se reinicia en ${resetLabel} (medianoche UTC). Estado ${label}.`}
+      title={`API ${quota.used}/${quota.limit} · ${quota.remaining} restantes`}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium tabular-nums",
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium tabular-nums ring-1",
         tone,
         className
       )}
     >
       <span
         aria-hidden
-        className={cn("h-2 w-2 shrink-0 rounded-full", dotClass)}
+        className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dotClass)}
       />
-      <span className="hidden sm:inline">
-        API Quota: {quota.used} / {quota.limit} llamadas hoy · {quota.remaining}{" "}
-        restantes
-      </span>
-      <span className="sm:hidden">
-        API {quota.used}/{quota.limit} · {quota.remaining} restantes
-      </span>
+      <span>Reset en {resetLabel}</span>
     </span>
   );
 }

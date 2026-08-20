@@ -214,8 +214,8 @@ export function SafePicksList({
       <CardHeader>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-50">
-              <Target className="h-5 w-5 text-emerald-300" aria-hidden />
+            <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-white">
+              <Target className="h-5 w-5 text-[#30d158]" aria-hidden />
               Picks seguros individuales
             </h2>
             <CardDescription>
@@ -223,12 +223,12 @@ export function SafePicksList({
               {picks.length === 1 ? "" : "es"}
             </CardDescription>
             {fromCache && (
-              <p role="status" className="mt-2 text-sm text-sky-200">
+              <p role="status" className="mt-2 text-sm text-[#64d2ff]">
                 Lista recuperada desde Neon para esta fecha.
               </p>
             )}
             {registerMsg && (
-              <p role="status" className="mt-2 text-sm text-amber-100">
+              <p role="status" className="mt-2 text-sm text-[#ffd60a]">
                 {registerMsg}
               </p>
             )}
@@ -262,18 +262,18 @@ export function SafePicksList({
       </CardHeader>
       <CardContent className="space-y-4">
         {picks.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-slate-600 p-6 text-center text-sm text-slate-200">
+          <p className="rounded-2xl border border-dashed border-white/15 p-6 text-center text-sm text-neutral-400">
             No hay picks con probabilidad modelo ≥ 85% para esta fecha.
           </p>
         ) : (
           <>
             {hasUnregistered && (
-            <div className="space-y-2 rounded-xl border border-slate-600 bg-slate-950/70 p-4">
-              <Label htmlFor="safe-stake-clp" className="text-sm text-slate-100">
+            <div className="space-y-2 rounded-2xl bg-white/[0.04] p-4 ring-1 ring-white/10">
+              <Label htmlFor="safe-stake-clp" className="!normal-case !tracking-normal !text-sm !font-medium !text-white">
                 Monto a apostar por pick ($ CLP)
               </Label>
               <div className="relative">
-                <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-slate-400">
+                <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-neutral-500">
                   $
                 </span>
                 <Input
@@ -289,7 +289,7 @@ export function SafePicksList({
                   aria-describedby="safe-stake-help"
                 />
               </div>
-              <p id="safe-stake-help" className="text-sm text-slate-300">
+              <p id="safe-stake-help" className="text-sm text-neutral-400">
                 {stakeCLP != null
                   ? exceedsBankroll
                     ? `El monto supera la banca disponible (${formatCLP(settings.totalBankroll)}).`
@@ -299,7 +299,7 @@ export function SafePicksList({
             </div>
             )}
           <div className="max-h-[36rem] space-y-2 overflow-y-auto pr-1">
-            <ul className="space-y-2">
+            <ul className="space-y-3">
               {ordered.map((pick) => {
                     const key = pickKey(pick);
                     const registered = registeredKeys.has(key);
@@ -309,48 +309,64 @@ export function SafePicksList({
                     return (
                       <li
                         key={key}
-                        className="rounded-xl border border-slate-600 bg-slate-950/50 p-3"
+                        className="lift rounded-3xl bg-white/[0.04] p-4 ring-1 ring-white/10 sm:p-5"
                       >
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                          <div className="min-w-0 space-y-1">
-                            <p className="text-xs text-slate-300">
-                              {pick.leagueName || "Otros"}
-                            </p>
-                            <p className="text-sm font-medium text-slate-50">
-                              {pick.matchLabel}
-                              <span className="ml-2 text-xs font-normal text-slate-300">
+                          <div className="min-w-0 space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="rounded-full bg-white/8 px-2.5 py-0.5 text-[11px] font-medium text-neutral-300 ring-1 ring-white/10">
+                                {pick.leagueName || "Otros"}
+                              </span>
+                              <span className="text-xs tabular-nums text-neutral-500">
                                 {formatKickoffTime(pick.kickoff)} CL
                               </span>
+                              {valueBadge && (
+                                <Badge variant="warning" className="gap-1">
+                                  <Flame className="h-3 w-3" />
+                                  {valueBadge}
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-lg font-bold tracking-tight text-white">
+                              {pick.matchLabel}
                             </p>
-                            <p className="text-sm text-slate-100">
-                              Apuesta: {formatExplicitBetLine(explicit)}
-                              <span className="mx-1.5 text-slate-400">·</span>
-                              <span className="font-mono text-emerald-200">
-                                @{formatOdds(pick.odds)}
-                              </span>
-                            </p>
+                            <div className="rounded-2xl border border-[#0a84ff]/20 bg-[#0a84ff]/10 px-3 py-2.5">
+                              <p className="text-sm font-semibold text-[#64d2ff]">
+                                {formatExplicitBetLine(explicit)}
+                                <span className="mx-1.5 text-[#64d2ff]/50">·</span>
+                                <span className="font-mono">
+                                  @{formatOdds(pick.odds)}
+                                </span>
+                              </p>
+                              <SingleStakeBadge
+                                modelProbability={pick.modelProbability}
+                                odds={pick.odds}
+                                pickCount={picks.length}
+                                className="mt-1.5 border-0 bg-transparent p-0 ring-0"
+                              />
+                            </div>
                             {registered && typeof savedStake === "number" && savedStake > 0 && (
-                              <p className="text-sm text-emerald-100">
+                              <p className="text-sm text-[#30d158]">
                                 Apostado {formatCLP(savedStake)}
-                                <span className="mx-1.5 text-slate-400">·</span>
+                                <span className="mx-1.5 text-neutral-600">·</span>
                                 retorno potencial {formatCLP(savedStake * pick.odds)}
                               </p>
                             )}
                             <p
-                              className="text-xs leading-snug text-slate-300"
+                              className="text-xs leading-snug text-neutral-500"
                               title={explicit.condition}
                             >
                               Condición: {explicit.condition}
                             </p>
-                            <p className="text-xs leading-snug text-sky-200">
+                            <p className="text-xs leading-snug text-[#64d2ff]">
                               {explicit.bookmakerTab}
                             </p>
-                            <p className="flex items-start gap-1.5 text-xs leading-snug text-amber-100">
+                            <p className="flex items-start gap-1.5 text-xs leading-snug text-[#ffd60a]">
                               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
                               <span>{explicit.warningNote}</span>
                             </p>
                             {explicit.cupEquivalent ? (
-                              <p className="flex items-start gap-1.5 text-xs leading-snug text-emerald-100">
+                              <p className="flex items-start gap-1.5 text-xs leading-snug text-[#30d158]">
                                 <Lightbulb className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
                                 <span>{explicit.cupEquivalent}</span>
                               </p>
@@ -374,18 +390,7 @@ export function SafePicksList({
                                     {label}
                                   </Badge>
                                 ))}
-                              {valueBadge && (
-                                <Badge variant="warning" className="gap-1">
-                                  <Flame className="h-3 w-3 text-amber-400" />
-                                  {valueBadge}
-                                </Badge>
-                              )}
                             </div>
-                            <SingleStakeBadge
-                              modelProbability={pick.modelProbability}
-                              odds={pick.odds}
-                              pickCount={picks.length}
-                            />
                           </div>
                           <div className="flex flex-col items-stretch gap-1 sm:items-end">
                             <Button
@@ -421,7 +426,7 @@ export function SafePicksList({
                             {registered && (
                               <Link
                                 href="/stats"
-                                className="inline-flex min-h-11 items-center justify-center text-center text-sm text-emerald-200 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                                className="inline-flex min-h-11 items-center justify-center text-center text-sm text-[#0a84ff] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]"
                               >
                                 Ver en Estadísticas
                               </Link>

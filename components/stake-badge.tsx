@@ -34,17 +34,17 @@ export function StakeBadge({
     <p
       title={recommendation.reasoning}
       className={cn(
-        "rounded-lg border px-2.5 py-1.5 text-xs font-medium leading-snug",
+        "rounded-2xl px-3 py-2 text-xs font-medium leading-snug ring-1",
         hasStake
           ? isParlay
-            ? "border-amber-400/35 bg-amber-500/10 text-amber-100"
-            : "border-emerald-400/35 bg-emerald-500/10 text-emerald-100"
-          : "border-slate-600 bg-slate-950/60 text-slate-300",
+            ? "bg-[#ffd60a]/10 text-[#ffd60a] ring-[#ffd60a]/20"
+            : "bg-[#0a84ff]/10 text-[#64d2ff] ring-[#0a84ff]/20"
+          : "bg-white/[0.04] text-neutral-400 ring-white/10",
         className
       )}
     >
       {label}
-      <span className="mt-0.5 block text-[11px] font-normal text-slate-300">
+      <span className="mt-0.5 block text-[11px] font-normal opacity-70">
         {recommendation.reasoning}
       </span>
     </p>

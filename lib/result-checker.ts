@@ -6,7 +6,6 @@ import {
   type LegStatus,
   loadBets,
   saveBets,
-  purgeFakeHistory,
 } from "./history-tracker";
 import {
   isFixtureFinished,
@@ -311,11 +310,10 @@ export function collectPendingKickoffsById(
 }
 
 /**
- * Client-side: purge fake data, query `/api/results`, evaluate legs, persist.
+ * Client-side: query `/api/results`, evaluate legs, persist.
  * Each leg stores its own status (won | lost | pending | void) + finalScore.
  */
 export async function updatePendingBets(): Promise<UpdatePendingResult> {
-  purgeFakeHistory();
   const bets = loadBets();
   const fixtureIds = collectPendingFixtureIds(bets);
   const kickoffsById = collectPendingKickoffsById(bets);

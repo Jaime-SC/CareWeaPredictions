@@ -7,10 +7,7 @@ export function Label({
 }: React.LabelHTMLAttributes<HTMLLabelElement>) {
   return (
     <label
-      className={cn(
-        "text-xs font-medium text-slate-300",
-        className
-      )}
+      className={cn("label-caps", className)}
       {...props}
     />
   );

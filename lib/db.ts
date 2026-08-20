@@ -1,7 +1,24 @@
+import {
+  getServers,
+  setDefaultResultOrder,
+  setServers,
+} from "node:dns";
 import { PrismaClient } from "@prisma/client";
 import { PrismaNeonHTTP } from "@prisma/adapter-neon";
 import { neon, types as pgTypes } from "@neondatabase/serverless";
 import { env } from "./env";
+
+// Neon HTTP → api.<region>.aws.neon.tech. Router DNS (192.168.x.1) often
+// returns ENOTFOUND / EAI_AGAIN / connect timeouts; prefer public resolvers.
+setDefaultResultOrder("ipv4first");
+{
+  const publicDns = ["1.1.1.1", "8.8.8.8"];
+  const current = getServers();
+  setServers([
+    ...publicDns,
+    ...current.filter((s) => !publicDns.includes(s)),
+  ]);
+}
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -10,7 +27,7 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 /** Bump when Prisma schema fields change so a stale singleton is dropped. */
-const PRISMA_SCHEMA_ID = "prediction-closing-odds-v1";
+const PRISMA_SCHEMA_ID = "bankroll-settings-v1";
 
 if (globalForPrisma.prismaSchemaId !== PRISMA_SCHEMA_ID) {
   globalForPrisma.prisma = undefined;

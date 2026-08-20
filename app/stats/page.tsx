@@ -36,7 +36,6 @@ import {
   mergeLocalWithDbTickets,
   unsyncedLocalBets,
   loadBets,
-  purgeFakeHistory,
   replaceBets,
 } from "@/lib/history-tracker";
 import { syncHistoryBetsToDb } from "@/lib/bet-record-client";
@@ -165,7 +164,6 @@ export default function StatsPage() {
   );
 
   const refreshFromDb = useCallback(async (): Promise<StatsApiPayload | null> => {
-    purgeFakeHistory();
     const local = loadBets();
 
     const refreshCalibration = async () => {
@@ -593,7 +591,7 @@ export default function StatsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-7xl space-y-6 px-3 py-6 sm:space-y-8 sm:px-6 sm:py-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2">

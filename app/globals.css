@@ -1,24 +1,41 @@
 @import "tailwindcss";
 
 :root {
-  /* Dark Mode HIG: dimmer base, brighter elevated surfaces */
-  --background: #080c16;
-  --background-elevated: #172033;
-  --foreground: #f8fafc;
-  --foreground-secondary: #cbd5e1;
-  --foreground-tertiary: #94a3b8;
-  --muted: #cbd5e1;
-  --accent: #34d399;
-  --accent-foreground: #042f1e;
-  --border: #3d4f66;
-  --separator: rgba(148, 163, 184, 0.22);
-  --ring: rgba(52, 211, 153, 0.7);
+  /* Apple HIG Dark Mode */
+  --background: #000000;
+  --background-elevated: #09090b;
+  --background-secondary: #1c1c1e;
+  --foreground: #f5f5f7;
+  --foreground-secondary: #a1a1a6;
+  --foreground-tertiary: #6e6e73;
+  --muted: #a1a1a6;
 
-  /* Liquid Glass — regular, opaque enough for dark UI legibility */
-  --glass-bg: rgba(8, 12, 22, 0.84);
-  --glass-border: rgba(226, 232, 240, 0.1);
-  --glass-blur: 18px;
-  --glass-saturate: 1.12;
+  /* System accents */
+  --accent: #30d158;
+  --accent-foreground: #00210b;
+  --system-blue: #0a84ff;
+  --system-red: #ff453a;
+  --system-amber: #ffd60a;
+  --system-orange: #ff9f0a;
+
+  --border: rgba(255, 255, 255, 0.1);
+  --separator: rgba(255, 255, 255, 0.08);
+  --ring: rgba(10, 132, 255, 0.65);
+
+  /* Frosted glass */
+  --glass-bg: rgba(0, 0, 0, 0.6);
+  --glass-surface: rgba(255, 255, 255, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-blur: 24px;
+  --glass-saturate: 1.4;
+
+  --font-apple:
+    -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+    system-ui, "Segoe UI", sans-serif;
+
+  --tab-bar-h: 3.5rem;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
 }
 
 @theme inline {
@@ -28,20 +45,35 @@
   --color-muted: var(--foreground-secondary);
   --color-accent: var(--accent);
   --color-border: var(--border);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-system-blue: var(--system-blue);
+  --color-system-red: var(--system-red);
+  --color-system-amber: var(--system-amber);
+  --font-sans: var(--font-apple);
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+html {
+  /* Do not set overflow-x here — it forces overflow-y and can kill page scroll */
+  width: 100%;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: var(--font-apple);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+  -webkit-tap-highlight-color: transparent;
 }
 
 * {
   border-color: var(--border);
 }
 
+/* Sticky / nav frost */
 .liquid-glass {
   isolation: isolate;
   background: var(--glass-bg);
@@ -50,14 +82,22 @@ body {
   border-bottom: 1px solid var(--glass-border);
 }
 
+/* Elevated translucent surface */
+.glass-surface {
+  background: var(--glass-surface);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+}
+
 .skip-link {
   position: absolute;
   left: 1rem;
   top: -100%;
   z-index: 100;
-  border-radius: 0.75rem;
-  background: var(--accent);
-  color: var(--accent-foreground);
+  border-radius: 999px;
+  background: var(--system-blue);
+  color: #fff;
   padding: 0.5rem 1rem;
   font-size: 0.875rem;
   font-weight: 600;
@@ -69,9 +109,209 @@ body {
   outline-offset: 2px;
 }
 
+/* Micro-interactions — CSS stand-in for Framer Motion */
+.pressable {
+  transition:
+    transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 200ms ease,
+    border-color 200ms ease,
+    background-color 200ms ease;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.pressable:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.lift {
+  transition:
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 200ms ease,
+    border-color 200ms ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lift:hover {
+    transform: translateY(-2px);
+  }
+}
+
+/* Off-screen card paint deferral (60fps scroll) */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.scroll-snap-x {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+
+.scroll-snap-x > * {
+  scroll-snap-align: start;
+}
+
+/* iOS bottom sheet */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.55);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.sheet-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 61;
+  max-height: min(92dvh, 100%);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 1.25rem 1.25rem 0 0;
+  background: rgba(28, 28, 30, 0.96);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  backdrop-filter: blur(24px) saturate(1.4);
+  box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.5);
+  padding-bottom: calc(1.25rem + var(--safe-bottom));
+  animation: sheet-up 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@media (min-width: 768px) {
+  .sheet-panel {
+    left: 50%;
+    right: auto;
+    bottom: auto;
+    top: 50%;
+    width: min(24rem, calc(100vw - 2rem));
+    max-height: 85vh;
+    border-radius: 1.5rem;
+    transform: translate(-50%, -50%);
+    animation: sheet-fade 180ms ease;
+    padding-bottom: 1.25rem;
+  }
+
+  @keyframes sheet-fade {
+    from {
+      opacity: 0;
+      transform: translate(-50%, -48%);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, -50%);
+    }
+  }
+}
+
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.app-main-pad {
+  padding-bottom: 1rem;
+}
+
+@media (max-width: 767px) {
+  .app-main-pad {
+    padding-bottom: calc(var(--tab-bar-h) + var(--safe-bottom) + 1rem);
+  }
+
+  .app-footer-mobile-hide {
+    display: none;
+  }
+}
+
+.segmented {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: 999px;
+  background: rgba(28, 28, 30, 0.85);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+}
+
+.segmented-item {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--foreground-secondary);
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.segmented-item:hover {
+  color: var(--foreground);
+}
+
+.segmented-item[data-active="true"] {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.segmented-item:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.label-caps {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--foreground-tertiary);
+}
+
+/* Native <select> options — translucent parents make OS menus unreadable */
+.native-select {
+  background-color: #171717;
+  color: #f5f5f7;
+}
+
+.native-select option,
+.native-select optgroup {
+  background-color: #171717;
+  color: #f5f5f7;
+}
+
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   .liquid-glass {
-    background: #10182a;
+    background: #09090b;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .glass-surface {
+    background: #1c1c1e;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
@@ -90,6 +330,12 @@ body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+
+  .pressable:active:not(:disabled),
+  .lift:hover,
+  .segmented-item:active:not(:disabled) {
+    transform: none;
+  }
 }
 
 ::-webkit-scrollbar {
@@ -100,9 +346,9 @@ body {
   background: var(--background);
 }
 ::-webkit-scrollbar-thumb {
-  background: #475569;
+  background: #3a3a3c;
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
+  background: #48484a;
 }

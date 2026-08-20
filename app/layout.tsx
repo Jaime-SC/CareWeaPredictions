@@ -1,22 +1,27 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { MobileTabBar } from "@/components/MobileTabBar";
 import { Navbar } from "@/components/Navbar";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "CareWeaPredictions — Football Accumulator Lab",
   description:
     "Poisson & Dixon-Coles football analytics. Safe picks (1.15–1.35) and automated high-odds parlays.",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "ParleyLab",
+  },
+  formatDetection: {
+    telephone: false,
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#000000",
 };
 
 export default function RootLayout({
@@ -25,22 +30,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="es"
-      className={`${geistSans.variable} ${geistMono.variable} h-full dark`}
-    >
-      <body className="flex min-h-full flex-col bg-[var(--background)] text-[var(--foreground)] antialiased">
+    <html lang="es" className="dark">
+      <body className="flex min-h-dvh w-full max-w-full flex-col overflow-x-clip bg-black text-[#f5f5f7] antialiased">
         <a href="#contenido" className="skip-link">
           Saltar al contenido
         </a>
         <Navbar />
-        <main id="contenido" className="flex-1">
+        <main id="contenido" className="app-main-pad w-full min-w-0 flex-1">
           {children}
         </main>
-        <footer className="border-t border-slate-600/80 py-4 text-center text-sm text-slate-300">
+        <footer className="app-footer-mobile-hide border-t border-white/10 py-5 text-center text-xs tracking-wide text-neutral-500">
           CareWeaPredictions · Solo fines educativos. El juego puede ser
           adictivo. +18.
         </footer>
+        <MobileTabBar />
       </body>
     </html>
   );

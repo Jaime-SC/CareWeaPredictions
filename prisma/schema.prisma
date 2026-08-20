@@ -108,3 +108,15 @@ model ApiQuotaDaily {
   fromHeaders Boolean @default(false)
   updatedAt  DateTime @updatedAt
 }
+
+/// Single-tenant bankroll (id = "default")
+model BankrollSettings {
+  id                String   @id
+  totalBankroll     Float
+  currency          String   @default("CLP")
+  minBookmakerStake Float
+  maxRiskSingle     Float
+  maxRiskParlay     Float
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}

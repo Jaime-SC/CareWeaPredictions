@@ -408,35 +408,6 @@ export function fairDecimalOdds(probability: number, margin = 1.03): number {
   return Number(Math.max(1.05, (margin / p)).toFixed(3));
 }
 
-/**
- * Offline / backtest helper: Poisson-implied fair board.
- * Production prediction must never call this — missing books discard the match.
- */
-export function buildFairMatchOdds(match: Match): MatchOdds {
-  const xg = estimateExpectedGoals(match);
-  const matrix = buildScoreMatrix(xg.home, xg.away);
-  const probs = marketProbsFromMatrix(matrix);
-
-  return {
-    home: fairDecimalOdds(probs.home),
-    draw: fairDecimalOdds(probs.draw),
-    away: fairDecimalOdds(probs.away),
-    doubleChance1X: fairDecimalOdds(probs["1x"]),
-    doubleChanceX2: fairDecimalOdds(probs.x2),
-    over05: fairDecimalOdds(probs.over_0_5),
-    over15: fairDecimalOdds(probs.over_1_5),
-    over25: fairDecimalOdds(probs.over_2_5),
-    under35: fairDecimalOdds(probs.under_3_5),
-    under45: fairDecimalOdds(probs.under_4_5),
-    homeScores: fairDecimalOdds(probs.home_scores),
-    awayScores: fairDecimalOdds(probs.away_scores),
-    homeOver15: fairDecimalOdds(probs.home_over_1_5),
-    awayOver15: fairDecimalOdds(probs.away_over_1_5),
-    dnbHome: fairDecimalOdds(probs.dnb_home),
-    dnbAway: fairDecimalOdds(probs.dnb_away),
-  };
-}
-
 export function predictMatchMarkets(
   match: Match,
   options?: {

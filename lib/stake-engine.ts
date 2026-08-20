@@ -1,7 +1,7 @@
 import {
   DEFAULT_BANKROLL_SETTINGS,
   type BankrollSettings,
-} from "./bankroll-store";
+} from "./bankroll-settings";
 
 export interface StakeRecommendation {
   amountCLP: number;

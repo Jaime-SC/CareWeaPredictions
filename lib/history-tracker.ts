@@ -3,7 +3,6 @@ import { computePerformanceMetrics } from "./stats";
 import { chileDateString } from "./utils";
 
 const STORAGE_KEY = "parleylab_bet_history";
-const BACKTEST_FLAG_KEY = "parleylab_history_is_backtest";
 
 export type BetMode = "Segura" | "Diversion";
 export type BetTimeframe = "Individual" | "Combinada" | "Diaria" | "Semanal";
@@ -46,8 +45,6 @@ export interface HistoryBet {
   potentialReturn: number;
   legs: HistoryBetLeg[];
   status: BetStatus;
-  /** @deprecated Fake backtest — purged on load */
-  isBacktest?: boolean;
   createdAt: string;
   settledAt?: string;
   lastCheckedAt?: string;
@@ -240,7 +237,6 @@ function normalizeLeg(raw: Partial<HistoryBetLeg> & {
 }
 
 function normalizeBet(raw: HistoryBet): HistoryBet | null {
-  if (raw.isBacktest) return null;
   if (!Array.isArray(raw.legs) || raw.legs.length === 0) return null;
 
   const legs = raw.legs
@@ -251,7 +247,6 @@ function normalizeBet(raw: HistoryBet): HistoryBet | null {
 
   return {
     ...raw,
-    isBacktest: undefined,
     legs,
     status: raw.status ?? "pending",
   };
@@ -270,10 +265,9 @@ export function loadBets(): HistoryBet[] {
       .filter((b): b is HistoryBet => b !== null)
       .sort((a, b) => b.date.localeCompare(a.date));
 
-    // Persist cleanup if fake/invalid rows were dropped
+    // Persist cleanup if invalid rows were dropped
     if (normalized.length !== parsed.length) {
       saveBets(normalized);
-      localStorage.removeItem(BACKTEST_FLAG_KEY);
     }
 
     return normalized;
@@ -285,21 +279,10 @@ export function loadBets(): HistoryBet[] {
 export function saveBets(bets: HistoryBet[]): void {
   if (!canUseStorage()) return;
   try {
-    const clean = bets.filter((b) => !b.isBacktest);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(clean));
-    localStorage.removeItem(BACKTEST_FLAG_KEY);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(bets));
   } catch (err) {
     console.warn("[history-tracker] Failed to save:", err);
   }
-}
-
-/** Remove any leftover mock/backtest rows. */
-export function purgeFakeHistory(): void {
-  if (!canUseStorage()) return;
-  localStorage.removeItem(BACKTEST_FLAG_KEY);
-  const bets = loadBets();
-  const real = bets.filter((b) => !b.isBacktest);
-  if (real.length !== bets.length) saveBets(real);
 }
 
 export function addBetFromParlay(
@@ -308,7 +291,6 @@ export function addBetFromParlay(
   stakeCLP = 1
 ): HistoryBet | null {
   if (!parlay.legs.length) return null;
-  purgeFakeHistory();
 
   const strategyMode = parlay.strategyMode ?? "daily-fun";
   const existing = loadBets();
@@ -426,7 +408,6 @@ export function addBetFromSinglePick(
   stakeCLP = 1,
   date = chileDateString()
 ): HistoryBet | null {
-  purgeFakeHistory();
   const existing = loadBets();
   const fixtureId = parseFixtureId(pick.matchId);
 
@@ -563,7 +544,6 @@ export function deleteBetById(betId: string): boolean {
 export function clearHistory(): void {
   if (!canUseStorage()) return;
   localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem(BACKTEST_FLAG_KEY);
 }
 
 export function isLotteryBet(bet: Pick<HistoryBet, "mode" | "strategyMode">): boolean {

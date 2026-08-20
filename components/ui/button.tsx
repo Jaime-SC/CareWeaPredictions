@@ -9,17 +9,17 @@ export interface ButtonProps
 
 const variants = {
   default:
-    "bg-emerald-400 text-emerald-950 hover:bg-emerald-300 shadow-lg shadow-emerald-500/20",
-  secondary: "bg-slate-700 text-slate-50 hover:bg-slate-600",
+    "bg-[#0a84ff] text-white hover:bg-[#409cff] shadow-lg shadow-black/30",
+  secondary: "bg-white/10 text-white hover:bg-white/15",
   outline:
-    "border border-slate-500 bg-transparent text-slate-100 hover:bg-slate-800",
-  ghost: "bg-transparent text-slate-200 hover:bg-slate-800 hover:text-slate-50",
-  danger: "bg-rose-600 text-white hover:bg-rose-500",
+    "border border-white/15 bg-transparent text-neutral-100 hover:bg-white/5",
+  ghost: "bg-transparent text-neutral-300 hover:bg-white/[0.08] hover:text-white",
+  danger: "bg-[#ff453a] text-white hover:bg-[#ff6961]",
 };
 
 const sizes = {
-  default: "min-h-11 px-4 py-2 text-sm",
-  sm: "min-h-9 px-3 text-sm",
+  default: "min-h-11 min-w-11 px-4 py-2 text-sm",
+  sm: "min-h-11 px-3 text-sm",
   lg: "min-h-12 px-6 text-base",
   icon: "h-11 w-11",
 };
@@ -34,7 +34,7 @@ export function buttonVariants({
   className?: string;
 } = {}) {
   return cn(
-    "inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:pointer-events-none disabled:opacity-50",
+    "pressable inline-flex items-center justify-center gap-2 rounded-full font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff] focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:pointer-events-none disabled:opacity-50",
     variants[variant ?? "default"],
     sizes[size ?? "default"],
     className

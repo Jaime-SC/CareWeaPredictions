@@ -8,7 +8,6 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -205,10 +204,10 @@ export default function DashboardPage() {
   );
 
   return (
-    <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-7xl space-y-6 px-3 py-6 sm:space-y-8 sm:px-6 sm:py-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="mb-2 flex flex-wrap items-center gap-2">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
             <Badge variant="info">Hoy / próximos días · hora Chile</Badge>
             {refreshing ? (
               <Badge variant="warning">Actualizando…</Badge>
@@ -218,10 +217,10 @@ export default function DashboardPage() {
               <Badge variant="success">Datos en vivo</Badge>
             )}
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-50">
+          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-4xl">
             Dashboard de Safe Picks
           </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-300">
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-neutral-400">
             Probabilidades Poisson + Dixon-Coles sobre fixtures reales de
             API-Football. Filtro: modelo ≥ 80% y cuotas entre 1.15–1.35.
           </p>
@@ -258,8 +257,8 @@ export default function DashboardPage() {
       </div>
 
       {error && (
-        <Card role="alert" className="border-rose-400/50 bg-rose-950/40">
-          <CardContent className="p-4 text-sm text-rose-100">
+        <Card role="alert" className="bg-[#ff453a]/10 ring-[#ff453a]/30">
+          <CardContent className="p-4 text-sm text-[#ff453a]">
             {error}
           </CardContent>
         </Card>
@@ -268,7 +267,7 @@ export default function DashboardPage() {
       {!showFullSpinner && !error && emptyMessage && (
         <Card>
           <CardContent className="flex flex-col items-center gap-2 px-6 py-10 text-center">
-            <p className="text-base font-medium text-slate-100">
+            <p className="text-base font-medium text-white">
               {emptyMessage}
             </p>
           </CardContent>
@@ -287,15 +286,15 @@ export default function DashboardPage() {
 
       <section className="space-y-4" aria-labelledby="top-safe-picks">
         <div className="flex items-center gap-2">
-          <ShieldCheck className="h-5 w-5 text-emerald-300" aria-hidden />
-          <h2 id="top-safe-picks" className="text-xl font-semibold text-slate-50">
+          <ShieldCheck className="h-5 w-5 text-[#30d158]" aria-hidden />
+          <h2 id="top-safe-picks" className="text-xl font-semibold text-white">
             Top Safe Picks
           </h2>
         </div>
 
         {showFullSpinner ? (
           <div
-            className="flex items-center justify-center py-16 text-slate-300"
+            className="flex items-center justify-center py-16 text-neutral-400"
             role="status"
             aria-live="polite"
             aria-busy="true"
@@ -305,7 +304,7 @@ export default function DashboardPage() {
           </div>
         ) : error ? null : safePicks.length === 0 ? (
           <Card>
-            <CardContent className="p-8 text-center text-sm text-slate-300">
+            <CardContent className="p-8 text-center text-sm text-neutral-400">
               {emptyMessage ?? "No hay safe picks con los filtros actuales."}
             </CardContent>
           </Card>
@@ -316,52 +315,55 @@ export default function DashboardPage() {
             aria-live="polite"
           >
             {orderedSafePicks.map(({ prediction, market }) => (
-                    <Card
-                      key={`${prediction.matchId}-${market.market}`}
-                      className="border-emerald-400/25"
-                    >
-                      <CardHeader className="pb-2">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <CardDescription>
-                              {prediction.match.leagueName}
-                            </CardDescription>
-                            <CardTitle className="mt-1">
-                              {prediction.match.home.name} vs{" "}
-                              {prediction.match.away.name}
-                            </CardTitle>
-                            <p className="mt-1 text-xs text-slate-300">
-                              {formatKickoff(prediction.match.kickoff)}
-                            </p>
-                          </div>
-                          <Badge variant="success">
-                            Modelo {formatPercent(market.modelProbability)}
-                          </Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        <div className="flex items-end justify-between gap-3">
-                          <div>
-                            <p className="text-sm text-slate-100">
-                              {market.label}
-                            </p>
-                            <p className="text-xs text-slate-300">
-                              Edge {formatPercent(market.edge)} · xG{" "}
-                              {prediction.expectedGoals.home.toFixed(2)}–
-                              {prediction.expectedGoals.away.toFixed(2)}
-                            </p>
-                          </div>
-                          <p className="font-mono text-2xl font-bold text-emerald-200">
-                            @{formatOdds(market.odds)}
-                          </p>
-                        </div>
-                        <SingleStakeBadge
-                          modelProbability={market.modelProbability}
-                          odds={market.odds}
-                          pickCount={safePicks.length}
-                        />
-                      </CardContent>
-                    </Card>
+              <Card
+                key={`${prediction.matchId}-${market.market}`}
+                className="lift cv-auto"
+              >
+                <CardHeader className="pb-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-white/8 px-2.5 py-0.5 text-[11px] font-medium text-neutral-300 ring-1 ring-white/10">
+                      {prediction.match.leagueName}
+                    </span>
+                    <span className="text-xs tabular-nums text-neutral-500">
+                      {formatKickoff(prediction.match.kickoff)}
+                    </span>
+                    <Badge variant="success" className="ml-auto">
+                      Modelo {formatPercent(market.modelProbability)}
+                    </Badge>
+                  </div>
+                  <CardTitle className="mt-3 text-xl font-bold">
+                    {prediction.match.home.name}{" "}
+                    <span className="font-medium text-neutral-500">vs</span>{" "}
+                    {prediction.match.away.name}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="rounded-2xl border border-[#0a84ff]/20 bg-[#0a84ff]/10 px-4 py-3">
+                    <div className="flex items-end justify-between gap-3">
+                      <div>
+                        <p className="label-caps text-[#64d2ff]">Mercado</p>
+                        <p className="mt-0.5 text-sm font-semibold text-[#64d2ff]">
+                          {market.label}
+                        </p>
+                        <p className="text-xs text-neutral-400">
+                          Edge {formatPercent(market.edge)} · xG{" "}
+                          {prediction.expectedGoals.home.toFixed(2)}–
+                          {prediction.expectedGoals.away.toFixed(2)}
+                        </p>
+                      </div>
+                      <p className="font-mono text-2xl font-bold text-white">
+                        @{formatOdds(market.odds)}
+                      </p>
+                    </div>
+                    <SingleStakeBadge
+                      modelProbability={market.modelProbability}
+                      odds={market.odds}
+                      pickCount={safePicks.length}
+                      className="mt-2 border-0 bg-transparent p-0 ring-0"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
             ))}
           </div>
         )}
@@ -369,7 +371,7 @@ export default function DashboardPage() {
 
       {!showFullSpinner && !error && predictions.length > 0 && (
         <section className="space-y-6" aria-labelledby="partidos-analizados">
-          <h2 id="partidos-analizados" className="text-xl font-semibold text-slate-50">
+          <h2 id="partidos-analizados" className="text-xl font-semibold text-white">
             Partidos analizados
           </h2>
           <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">

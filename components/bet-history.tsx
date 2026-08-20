@@ -64,17 +64,25 @@ export type PageSize = 10 | 25 | 50;
 
 const PAGE_SIZE_OPTIONS: PageSize[] = [10, 25, 50];
 
-const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+const STATUS_OPTIONS: {
+  value: StatusFilter;
+  label: string;
+  shortLabel?: string;
+}[] = [
   { value: "ALL", label: "Todos" },
-  { value: "WON", label: "Ganadas (WON)" },
-  { value: "LOST", label: "Perdidas (LOST)" },
-  { value: "PENDING", label: "Pendientes (PENDING)" },
+  { value: "WON", label: "Ganadas" },
+  { value: "LOST", label: "Perdidas" },
+  { value: "PENDING", label: "Pendientes" },
 ];
 
-const MODE_OPTIONS: { value: ModeFilter; label: string }[] = [
+const MODE_OPTIONS: {
+  value: ModeFilter;
+  label: string;
+  shortLabel?: string;
+}[] = [
   { value: "ALL", label: "Todos" },
   { value: "MONOPOLY_ASYMMETRY", label: "Asimetría" },
-  { value: "SINGLE_SAFE", label: "Picks Seguros" },
+  { value: "SINGLE_SAFE", label: "Picks Seguros", shortLabel: "Seguras" },
   { value: "LOTTERY", label: "Lotería" },
 ];
 
@@ -88,7 +96,46 @@ const SORT_OPTIONS: { value: SortPreset; label: string }[] = [
 ];
 
 const selectClassName =
-  "min-h-11 w-full rounded-xl border border-slate-500 bg-slate-950 px-3 text-sm text-slate-50 [color-scheme:dark] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950";
+  "native-select min-h-11 w-full appearance-none rounded-2xl border border-white/15 bg-neutral-900 px-3 text-sm text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)] [color-scheme:dark] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff] focus-visible:ring-offset-2 focus-visible:ring-offset-black";
+
+function SegmentedControl<T extends string>({
+  options,
+  value,
+  onChange,
+  ariaLabel,
+}: {
+  options: { value: T; label: string; shortLabel?: string }[];
+  value: T;
+  onChange: (next: T) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <div
+      className="grid w-full grid-cols-2 gap-1.5 rounded-2xl bg-neutral-800/80 p-1.5 ring-1 ring-inset ring-white/5 sm:inline-flex sm:w-fit sm:max-w-full sm:grid-cols-none sm:gap-1 sm:overflow-x-auto sm:rounded-full sm:p-1"
+      role="tablist"
+      aria-label={ariaLabel}
+    >
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="tab"
+          aria-selected={value === option.value}
+          data-active={value === option.value}
+          className={cn(
+            "pressable inline-flex min-h-11 items-center justify-center rounded-xl px-2.5 text-center text-xs font-medium leading-tight text-neutral-400 transition-colors select-none sm:shrink-0 sm:rounded-full sm:px-3.5 sm:text-[0.8125rem] sm:whitespace-nowrap",
+            value === option.value &&
+              "bg-white/12 text-white shadow-sm shadow-black/30"
+          )}
+          onClick={() => onChange(option.value)}
+        >
+          <span className="sm:hidden">{option.shortLabel ?? option.label}</span>
+          <span className="hidden sm:inline">{option.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function ticketProfit(bet: HistoryBet): number {
   if (bet.status === "won") return bet.potentialReturn - bet.stakeCLP;
@@ -174,8 +221,6 @@ export function BetHistory({
   onDelete: (betId: string) => void;
 }) {
   const searchId = useId();
-  const statusId = useId();
-  const modeId = useId();
   const sortId = useId();
   const pageSizeId = useId();
 
@@ -269,13 +314,13 @@ export function BetHistory({
   }
 
   return (
-    <Card className="border-sky-500/30 bg-sky-950/15">
+    <Card>
       <CardHeader>
         <div className="flex flex-wrap items-center gap-2">
           <CardTitle>Historial de apuestas</CardTitle>
           {pendingCount > 0 ? (
-            <Badge variant="info" className="gap-1">
-              <Clock className="h-3 w-3 text-sky-400" aria-hidden />
+            <Badge variant="warning" className="gap-1">
+              <Clock className="h-3 w-3" aria-hidden />
               {pendingCount} en curso
             </Badge>
           ) : null}
@@ -288,10 +333,10 @@ export function BetHistory({
         </CardDescription>
       </CardHeader>
 
-      <CardContent className="space-y-4">
-        <div className="grid gap-2 sm:grid-cols-3">
+      <CardContent className="space-y-5">
+        <div className="grid gap-3 sm:grid-cols-3">
           <KpiBadge
-            icon={<Wallet className="h-3.5 w-3.5 text-sky-300" aria-hidden />}
+            icon={<Wallet className="h-3.5 w-3.5 text-[#64d2ff]" aria-hidden />}
             label="Total jugado"
             value={formatCLP(kpis.totalJugado)}
             hint="Suma de stakes del filtro"
@@ -301,7 +346,7 @@ export function BetHistory({
               <TrendingUp
                 className={cn(
                   "h-3.5 w-3.5",
-                  kpis.roi >= 0 ? "text-emerald-300" : "text-rose-300"
+                  kpis.roi >= 0 ? "text-[#30d158]" : "text-[#ff453a]"
                 )}
                 aria-hidden
               />
@@ -314,15 +359,15 @@ export function BetHistory({
             }
             valueClass={
               kpis.settled === 0
-                ? "text-slate-300"
+                ? "text-neutral-400"
                 : kpis.roi >= 0
-                  ? "text-emerald-200"
-                  : "text-rose-200"
+                  ? "text-[#30d158]"
+                  : "text-[#ff453a]"
             }
             hint="Net profit / stake liquidado"
           />
           <KpiBadge
-            icon={<Percent className="h-3.5 w-3.5 text-emerald-300" aria-hidden />}
+            icon={<Percent className="h-3.5 w-3.5 text-[#30d158]" aria-hidden />}
             label="Win Rate %"
             value={kpis.settled > 0 ? formatPercent(kpis.winRate) : "—"}
             hint="Ganadas / (ganadas + perdidas)"
@@ -331,14 +376,42 @@ export function BetHistory({
 
         <div
           role="search"
-          className="flex flex-col gap-3 rounded-xl border border-slate-600/70 bg-slate-950/40 p-3 sm:p-4"
+          className="flex flex-col gap-5 rounded-3xl bg-white/[0.03] p-3 ring-1 ring-white/8 sm:gap-4 sm:p-5"
         >
+          <div className="flex flex-col gap-5 sm:flex-row sm:flex-wrap sm:items-start sm:gap-6 lg:gap-8">
+            <div className="min-w-0 space-y-2 sm:w-auto">
+              <p className="label-caps">Estado</p>
+              <SegmentedControl
+                ariaLabel="Filtrar por estado"
+                options={STATUS_OPTIONS}
+                value={statusFilter}
+                onChange={(next) => {
+                  setStatusFilter(next);
+                  resetToFirstPage();
+                }}
+              />
+            </div>
+
+            <div className="min-w-0 space-y-2 sm:w-auto">
+              <p className="label-caps">Modo</p>
+              <SegmentedControl
+                ariaLabel="Filtrar por modo"
+                options={MODE_OPTIONS}
+                value={modeFilter}
+                onChange={(next) => {
+                  setModeFilter(next);
+                  resetToFirstPage();
+                }}
+              />
+            </div>
+          </div>
+
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
             <div className="min-w-0 flex-1 space-y-1.5">
               <Label htmlFor={searchId}>Buscar</Label>
               <div className="relative">
                 <Search
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-500"
                   aria-hidden
                 />
                 <Input
@@ -356,66 +429,28 @@ export function BetHistory({
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3 lg:w-[min(100%,42rem)]">
-              <div className="space-y-1.5">
-                <Label htmlFor={statusId}>Estado</Label>
-                <select
-                  id={statusId}
-                  className={selectClassName}
-                  value={statusFilter}
-                  onChange={(event) => {
-                    setStatusFilter(event.target.value as StatusFilter);
-                    resetToFirstPage();
-                  }}
-                >
-                  {STATUS_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor={modeId}>Modo</Label>
-                <select
-                  id={modeId}
-                  className={selectClassName}
-                  value={modeFilter}
-                  onChange={(event) => {
-                    setModeFilter(event.target.value as ModeFilter);
-                    resetToFirstPage();
-                  }}
-                >
-                  {MODE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor={sortId}>Orden</Label>
-                <select
-                  id={sortId}
-                  className={selectClassName}
-                  value={SORT_OPTIONS.some((option) => option.value === sortPreset)
-                    ? sortPreset
-                    : "date_desc"}
-                  onChange={(event) => handleSortChange(event.target.value)}
-                >
-                  {SORT_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div className="space-y-1.5 lg:w-64">
+              <Label htmlFor={sortId}>Orden</Label>
+              <select
+                id={sortId}
+                className={selectClassName}
+                value={SORT_OPTIONS.some((option) => option.value === sortPreset)
+                  ? sortPreset
+                  : "date_desc"}
+                onChange={(event) => handleSortChange(event.target.value)}
+              >
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
           {filtersActive ? (
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-slate-300">
+              <p className="text-xs text-neutral-400">
                 {kpis.count} resultado{kpis.count === 1 ? "" : "s"} con los
                 filtros actuales
               </p>
@@ -433,7 +468,7 @@ export function BetHistory({
 
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <p
-            className="text-sm text-slate-300"
+            className="text-sm text-neutral-400"
             aria-live="polite"
           >
             {sortedBets.length === 0
@@ -460,7 +495,7 @@ export function BetHistory({
               item === "ellipsis" ? (
                 <span
                   key={`ellipsis-${index}`}
-                  className="min-w-9 px-1 text-center text-sm text-slate-400"
+                  className="min-w-9 px-1 text-center text-sm text-neutral-500"
                 >
                   …
                 </span>
@@ -522,7 +557,7 @@ export function BetHistory({
           aria-atomic="false"
         >
           {pagedBets.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-slate-600 px-4 py-10 text-center text-sm text-slate-300">
+            <p className="rounded-3xl border border-dashed border-white/15 px-4 py-12 text-center text-sm text-neutral-400">
               No hay apuestas que coincidan con la búsqueda o los filtros.
             </p>
           ) : (
@@ -555,20 +590,20 @@ function KpiBadge({
   valueClass?: string;
 }) {
   return (
-    <div className="rounded-xl border border-slate-600/70 bg-slate-950/50 px-3 py-2.5">
-      <p className="inline-flex items-center gap-1.5 text-xs text-slate-300">
+    <div className="rounded-2xl bg-white/[0.04] px-4 py-3 ring-1 ring-white/8">
+      <p className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-400">
         {icon}
         {label}
       </p>
       <p
         className={cn(
-          "mt-0.5 text-lg font-semibold tabular-nums text-slate-50",
+          "mt-1 text-2xl font-bold tabular-nums tracking-tight text-white",
           valueClass
         )}
       >
         {value}
       </p>
-      <p className="text-xs leading-snug text-slate-400">{hint}</p>
+      <p className="text-xs leading-snug text-neutral-500">{hint}</p>
     </div>
   );
 }
@@ -582,7 +617,7 @@ function ticketStatusBadge(status: BetStatus): {
       variant: "success",
       label: (
         <span className="inline-flex items-center gap-1">
-          <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+          <CheckCircle2 className="h-3 w-3 text-[#30d158]" />
           Ganada
         </span>
       ),
@@ -593,7 +628,7 @@ function ticketStatusBadge(status: BetStatus): {
       variant: "danger",
       label: (
         <span className="inline-flex items-center gap-1">
-          <XCircle className="h-3 w-3 text-rose-400" />
+          <XCircle className="h-3 w-3 text-[#ff453a]" />
           Perdida
         </span>
       ),
@@ -604,7 +639,7 @@ function ticketStatusBadge(status: BetStatus): {
       variant: "warning",
       label: (
         <span className="inline-flex items-center gap-1">
-          <CircleSlash className="h-3 w-3 text-amber-300" />
+          <CircleSlash className="h-3 w-3 text-[#ffd60a]" />
           Cancelada
         </span>
       ),
@@ -614,7 +649,7 @@ function ticketStatusBadge(status: BetStatus): {
     variant: "info",
     label: (
       <span className="inline-flex items-center gap-1">
-        <Clock className="h-3 w-3 text-sky-400" />
+        <Clock className="h-3 w-3 text-[#64d2ff]" />
         En juego
       </span>
     ),
@@ -635,20 +670,20 @@ function LegHitsInline({
         className
       )}
     >
-      <span className="inline-flex items-center gap-0.5 text-emerald-200">
+      <span className="inline-flex items-center gap-0.5 text-[#30d158]">
         <Check className="h-3 w-3" strokeWidth={2.5} />
         {hits.won}
       </span>
-      <span className="inline-flex items-center gap-0.5 text-rose-200">
+      <span className="inline-flex items-center gap-0.5 text-[#ff453a]">
         <X className="h-3 w-3" strokeWidth={2.5} />
         {hits.lost}
       </span>
-      <span className="inline-flex items-center gap-0.5 text-sky-200">
+      <span className="inline-flex items-center gap-0.5 text-[#64d2ff]">
         <Clock className="h-3 w-3" />
         {hits.pending}
       </span>
       {(hits.voided ?? 0) > 0 ? (
-        <span className="inline-flex items-center gap-0.5 text-amber-300">
+        <span className="inline-flex items-center gap-0.5 text-[#ffd60a]">
           <CircleSlash className="h-3 w-3" />
           {hits.voided}
         </span>
@@ -670,7 +705,7 @@ function LegResultIcon({ status }: { status: LegStatus }) {
   if (status === "won") {
     return (
       <span
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-200"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#30d158]/20 text-[#30d158]"
         aria-label="Acertada"
         title="Acertada"
       >
@@ -681,7 +716,7 @@ function LegResultIcon({ status }: { status: LegStatus }) {
   if (status === "lost") {
     return (
       <span
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-rose-500/20 text-rose-200"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#ff453a]/20 text-[#ff453a]"
         aria-label="Fallida"
         title="Fallida"
       >
@@ -692,7 +727,7 @@ function LegResultIcon({ status }: { status: LegStatus }) {
   if (status === "void") {
     return (
       <span
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-100"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#ffd60a]/20 text-[#ffd60a]"
         aria-label="Anulada"
         title="Anulada"
       >
@@ -702,7 +737,7 @@ function LegResultIcon({ status }: { status: LegStatus }) {
   }
   return (
     <span
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-500/20 text-sky-200"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#0a84ff]/20 text-[#64d2ff]"
       aria-label="Pendiente"
       title="Pendiente"
     >
@@ -727,32 +762,32 @@ function LegDetailRow({ leg }: { leg: HistoryBetLeg }) {
   return (
     <li
       className={cn(
-        "flex gap-3 rounded-lg border px-3 py-2.5",
-        leg.status === "won" && "border-emerald-500/20 bg-emerald-500/5",
-        leg.status === "lost" && "border-rose-500/20 bg-rose-500/5",
-        leg.status === "void" && "border-amber-500/20 bg-amber-500/5",
-        leg.status === "pending" && "border-slate-600 bg-slate-950/50"
+        "flex gap-3 rounded-2xl px-3 py-2.5 ring-1",
+        leg.status === "won" && "bg-[#30d158]/8 ring-[#30d158]/20",
+        leg.status === "lost" && "bg-[#ff453a]/8 ring-[#ff453a]/20",
+        leg.status === "void" && "bg-[#ffd60a]/8 ring-[#ffd60a]/20",
+        leg.status === "pending" && "bg-white/[0.03] ring-white/8"
       )}
     >
       <LegResultIcon status={leg.status} />
       <div className="min-w-0 flex-1 space-y-0.5">
-        <p className="text-sm font-medium leading-snug text-slate-100">
+        <p className="text-sm font-medium leading-snug text-white">
           {matchName}
         </p>
-        <p className="text-sm text-slate-200">
+        <p className="text-sm text-neutral-300">
           {formatExplicitBetLine(explicit)}
-          <span className="mx-1.5 text-slate-400">·</span>
-          <span className="font-mono text-emerald-200">
+          <span className="mx-1.5 text-neutral-600">·</span>
+          <span className="font-mono text-[#30d158]">
             @{formatOdds(leg.odds)}
           </span>
         </p>
-        <p className="text-xs leading-snug text-sky-200">
+        <p className="text-xs leading-snug text-[#64d2ff]">
           {explicit.bookmakerTab}
         </p>
-        <p className="text-xs text-slate-300">
+        <p className="text-xs text-neutral-500">
           {statusLine}
           {leg.leagueName ? (
-            <span className="text-slate-300"> · {leg.leagueName}</span>
+            <span> · {leg.leagueName}</span>
           ) : null}
         </p>
       </div>
@@ -785,13 +820,13 @@ function BetRow({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-xl border border-slate-600 bg-slate-950/50 transition-all duration-200 ease-out motion-reduce:transition-none",
+        "lift overflow-hidden rounded-3xl bg-white/[0.04] ring-1 ring-white/10 transition-all duration-200 ease-out motion-reduce:transition-none",
         removing
-          ? "max-h-0 -translate-y-1 scale-[0.98] border-transparent opacity-0"
+          ? "max-h-0 -translate-y-1 scale-[0.98] opacity-0 ring-transparent"
           : "max-h-[2000px] translate-y-0 scale-100 opacity-100"
       )}
     >
-      <div className="p-4">
+      <div className="p-5">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
@@ -801,7 +836,7 @@ function BetRow({
               title="Eliminar del historial"
               onClick={onDelete}
               disabled={removing}
-              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-slate-300 transition-colors hover:bg-rose-500/20 hover:text-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 disabled:opacity-40"
+              className="pressable inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-neutral-500 transition-colors hover:bg-[#ff453a]/15 hover:text-[#ff453a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff453a] disabled:opacity-40"
             >
               <Trash2 className="h-4 w-4" aria-hidden />
             </button>
@@ -809,22 +844,22 @@ function BetRow({
               variant={hitsVariant}
               className="gap-1 font-semibold tracking-tight"
             >
-              <Check className="h-3 w-3 text-emerald-400" strokeWidth={2.5} />
+              <Check className="h-3 w-3" strokeWidth={2.5} />
               {hits.won} / {hits.total} Acertadas
             </Badge>
             <Badge variant={bet.mode === "Segura" ? "success" : "warning"}>
               {bet.mode} · {bet.timeframe}
             </Badge>
-            <span className="text-xs text-slate-300">{bet.date}</span>
+            <span className="text-xs text-neutral-500">{bet.date}</span>
           </div>
-          <p className="text-sm text-slate-200">
+          <p className="text-sm text-neutral-300">
             {bet.legs.length} legs · Multiplicador {formatOdds(bet.totalOdds)}x
             · {formatCLP(bet.stakeCLP)}
           </p>
           {(bet.status === "won" || bet.status === "lost") && (
             <p
-              className={`text-xs font-medium ${
-                unitPnl >= 0 ? "text-emerald-400" : "text-rose-400"
+              className={`text-sm font-semibold tabular-nums ${
+                unitPnl >= 0 ? "text-[#30d158]" : "text-[#ff453a]"
               }`}
             >
               Resultado {formatSignedCLP(unitPnl)}
@@ -833,7 +868,7 @@ function BetRow({
         </div>
       </div>
 
-      <div className="border-t border-slate-800/80 px-2 pb-2">
+      <div className="border-t border-white/8 px-3 pb-3">
         {isSingle ? (
           <ul className="space-y-2 px-1 py-2">
             {orderedLegs.map((leg, idx) => (
@@ -848,18 +883,18 @@ function BetRow({
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
-              className="flex min-h-11 w-full items-center justify-between gap-2 rounded-lg px-2 py-2.5 text-left text-sm text-slate-200 transition hover:bg-slate-800 hover:text-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+              className="pressable flex min-h-11 w-full items-center justify-between gap-2 rounded-2xl px-2 py-2.5 text-left text-sm text-neutral-300 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]"
               aria-expanded={expanded}
               disabled={removing}
             >
               <span className="inline-flex flex-wrap items-center gap-2">
                 Desglose de legs
-                <LegHitsInline hits={hits} className="text-slate-300" />
+                <LegHitsInline hits={hits} className="text-neutral-400" />
               </span>
               <ChevronDown
                 aria-hidden
                 className={cn(
-                  "h-4 w-4 shrink-0 text-slate-300 transition-transform motion-reduce:transition-none",
+                  "h-4 w-4 shrink-0 text-neutral-500 transition-transform motion-reduce:transition-none",
                   expanded && "rotate-180"
                 )}
               />

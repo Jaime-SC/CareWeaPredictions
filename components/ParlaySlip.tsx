@@ -347,7 +347,7 @@ export function ParlaySlip({
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold tracking-tight text-slate-50">
+            <h2 className="text-lg font-semibold tracking-tight text-white">
               Tu combinada
             </h2>
             <CardDescription>
@@ -366,18 +366,18 @@ export function ParlaySlip({
               </div>
             )}
             {activeParlay.legs.length > 0 && (
-              <p className="mt-2 inline-flex items-center rounded-md border border-emerald-400/40 bg-emerald-500/15 px-2.5 py-1 text-sm font-medium text-emerald-100">
+              <p className="mt-2 inline-flex items-center rounded-full bg-[#30d158]/15 px-2.5 py-1 text-sm font-medium text-[#30d158] ring-1 ring-[#30d158]/25">
                 {activeParlay.legs.length} partidos seleccionados para la
                 apuesta real
               </p>
             )}
             {activeParlay.successProbabilityLabel && (
-              <p className="mt-2 text-sm font-medium text-emerald-100">
+              <p className="mt-2 text-sm font-medium text-[#30d158]">
                 {activeParlay.successProbabilityLabel}
               </p>
             )}
             {activeParlay.fillNotice && (
-              <p className="mt-2 text-sm text-amber-100">
+              <p className="mt-2 text-sm text-[#ffd60a]">
                 {activeParlay.fillNotice}
               </p>
             )}
@@ -389,8 +389,8 @@ export function ParlaySlip({
       </CardHeader>
       <CardContent className="space-y-4">
         {activeLegs.length === 0 ? (
-          <div className="space-y-3 rounded-lg border border-dashed border-slate-600 p-6 text-center">
-            <p className="text-sm text-slate-200">
+          <div className="space-y-3 rounded-2xl border border-dashed border-white/15 p-6 text-center">
+            <p className="text-sm text-neutral-400">
               No quedan selecciones. Restablece el ticket o regenera la
               combinada.
             </p>
@@ -421,7 +421,7 @@ export function ParlaySlip({
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-600 bg-slate-950/70 p-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 rounded-2xl bg-white/[0.04] p-4 ring-1 ring-white/10 sm:grid-cols-3">
           <Stat
             label="Cuota total / Multiplicador"
             value={`${formatOdds(activeParlay.totalOdds)}x`}
@@ -446,7 +446,7 @@ export function ParlaySlip({
         )}
 
         {activeParlay.legs.length > 0 && (
-          <p className="text-sm leading-relaxed text-slate-300">
+          <p className="text-sm leading-relaxed text-neutral-400">
             {activeParlay.riskLabel}
             {" · "}
             Edge medio {formatPercent(activeParlay.averageEdge)}
@@ -505,12 +505,12 @@ export function ParlaySlip({
 
         {activeParlay.legs.length > 0 && (
           <div className="space-y-3">
-            <div className="space-y-2 rounded-xl border border-slate-600 bg-slate-950/70 p-4">
-              <Label htmlFor="parlay-stake-clp" className="text-sm text-slate-100">
+            <div className="space-y-2 rounded-2xl bg-white/[0.04] p-4 ring-1 ring-white/10">
+              <Label htmlFor="parlay-stake-clp" className="!normal-case !tracking-normal !text-sm !font-medium !text-white">
                 Monto a apostar ($ CLP)
               </Label>
               <div className="relative">
-                <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-slate-400">
+                <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-neutral-500">
                   $
                 </span>
                 <Input
@@ -528,7 +528,7 @@ export function ParlaySlip({
                   aria-describedby="parlay-stake-help"
                 />
               </div>
-              <p id="parlay-stake-help" className="text-sm text-slate-300">
+              <p id="parlay-stake-help" className="text-sm text-neutral-400">
                 {stakeCLP != null && potentialReturn != null
                   ? exceedsBankroll
                     ? `El monto supera la banca disponible (${formatCLP(bankroll.totalBankroll)}).`
@@ -559,12 +559,12 @@ export function ParlaySlip({
               )}
             </Button>
             {registerMsg && (
-              <p role="status" className="text-center text-sm text-slate-300">
+              <p role="status" className="text-center text-sm text-neutral-400">
                 {registerMsg}{" "}
                 {registered && (
                   <Link
                     href="/stats"
-                    className="text-emerald-200 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                    className="text-[#0a84ff] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]"
                   >
                     Ver Estadísticas
                   </Link>
@@ -601,46 +601,46 @@ function LegRow({
   return (
     <li
       className={cn(
-        "flex items-start gap-2 overflow-hidden rounded-lg border border-slate-600 bg-slate-950/50 px-3 py-2.5 transition-all duration-200 ease-out motion-reduce:transition-none",
+        "lift flex items-start gap-2 overflow-hidden rounded-2xl bg-white/[0.04] px-3 py-3 ring-1 ring-white/10 transition-all duration-200 ease-out motion-reduce:transition-none",
         exiting
-          ? "max-h-0 -translate-x-2 scale-[0.98] border-transparent py-0 opacity-0 motion-reduce:transition-none"
+          ? "max-h-0 -translate-x-2 scale-[0.98] py-0 opacity-0 ring-transparent motion-reduce:transition-none"
           : "max-h-[280px] translate-x-0 scale-100 opacity-100"
       )}
     >
-      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded bg-slate-700 text-xs font-bold text-slate-100">
+      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/10 text-xs font-bold text-white">
         {index}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-xs text-slate-300">{leg.leagueName || "Otros"}</p>
-        <p className="text-sm font-medium leading-snug text-slate-50">
+        <p className="text-xs text-neutral-500">{leg.leagueName || "Otros"}</p>
+        <p className="text-sm font-semibold leading-snug text-white">
           {leg.matchLabel}
         </p>
-        <p className="text-sm text-slate-100">
+        <p className="text-sm text-neutral-200">
           Apuesta: {formatExplicitBetLine(explicit)}
           {valueBadge ? (
-            <span className="ml-1 inline-flex items-center gap-0.5 text-amber-100">
+            <span className="ml-1 inline-flex items-center gap-0.5 text-[#ffd60a]">
               <Flame className="h-3 w-3" aria-hidden />
               {valueBadge}
             </span>
           ) : null}
         </p>
-        <p className="text-xs leading-snug text-slate-300" title={explicit.condition}>
+        <p className="text-xs leading-snug text-neutral-500" title={explicit.condition}>
           Condición: {explicit.condition}
         </p>
-        <p className="text-xs leading-snug text-sky-200">
+        <p className="text-xs leading-snug text-[#64d2ff]">
           {explicit.bookmakerTab}
         </p>
-        <p className="flex items-start gap-1.5 text-xs leading-snug text-amber-100">
+        <p className="flex items-start gap-1.5 text-xs leading-snug text-[#ffd60a]">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
           <span>{explicit.warningNote}</span>
         </p>
         {explicit.cupEquivalent ? (
-          <p className="flex items-start gap-1.5 text-xs leading-snug text-emerald-100">
+          <p className="flex items-start gap-1.5 text-xs leading-snug text-[#30d158]">
             <Lightbulb className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
             <span>{explicit.cupEquivalent}</span>
           </p>
         ) : null}
-        <p className="text-xs text-slate-300">
+        <p className="text-xs text-neutral-500">
           {formatKickoffDayLabel(leg.kickoff)} CL · modelo{" "}
           {formatPercent(leg.modelProbability)}
         </p>
@@ -667,21 +667,21 @@ function LegRow({
           </div>
         )}
         {(leg.referee || leg.venue) && (
-          <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-slate-300">
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-neutral-500">
             {leg.venue ? (
               <span className="inline-flex items-center gap-0.5">
-                <MapPin className="h-2.5 w-2.5 text-sky-500" />
+                <MapPin className="h-2.5 w-2.5 text-[#0a84ff]" />
                 {leg.venue}
               </span>
             ) : null}
             {leg.venue && leg.referee ? (
-              <span className="text-slate-700">·</span>
+              <span className="text-neutral-700">·</span>
             ) : null}
             {leg.referee ? <span>Árb. {leg.referee}</span> : null}
           </p>
         )}
       </div>
-      <span className="font-mono text-sm font-semibold text-emerald-200">
+      <span className="font-mono text-sm font-semibold text-[#30d158]">
         @{formatOdds(leg.odds)}
       </span>
       <button
@@ -690,7 +690,7 @@ function LegRow({
         title="Quitar de la apuesta"
         onClick={onRemove}
         disabled={exiting}
-        className="mt-0.5 inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-slate-300 transition-colors hover:bg-rose-500/20 hover:text-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 disabled:opacity-40"
+        className="pressable mt-0.5 inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full text-neutral-500 transition-colors hover:bg-[#ff453a]/15 hover:text-[#ff453a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff453a] disabled:opacity-40"
       >
         <Trash2 className="h-4 w-4" aria-hidden />
       </button>
@@ -709,12 +709,10 @@ function Stat({
 }) {
   return (
     <div>
-      <p className="text-xs text-slate-300">
-        {label}
-      </p>
+      <p className="label-caps">{label}</p>
       <p
-        className={`mt-0.5 font-semibold tabular-nums ${
-          highlight ? "text-lg text-emerald-200" : "text-slate-50"
+        className={`mt-1 font-bold tabular-nums tracking-tight ${
+          highlight ? "text-2xl text-[#30d158]" : "text-xl text-white"
         }`}
       >
         {value}

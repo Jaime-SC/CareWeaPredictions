@@ -355,13 +355,13 @@ export default function BuilderPage() {
       : `Generar combinada (~${preset.targetMultiplier}x)`;
 
   return (
-    <div className="relative min-h-[calc(100vh-3.5rem)] overflow-hidden">
+      <div className="relative min-h-[calc(100vh-3.5rem)] overflow-hidden">
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(16,185,129,0.14),_transparent_50%),radial-gradient(ellipse_at_bottom_right,_rgba(14,165,233,0.08),_transparent_40%)]"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(10,132,255,0.14),_transparent_50%),radial-gradient(ellipse_at_bottom_right,_rgba(48,209,88,0.08),_transparent_40%)]"
       />
 
-      <div className="relative mx-auto flex max-w-5xl flex-col gap-6 px-4 py-10 sm:px-6">
+      <div className="relative mx-auto flex max-w-5xl flex-col gap-5 px-3 py-6 sm:gap-6 sm:px-6 sm:py-10">
         <header className="text-center">
           <Badge variant="success" className="mb-4 gap-1.5">
             {isMonopoly ? (
@@ -373,14 +373,14 @@ export default function BuilderPage() {
               <>Generador · {selectedDate} · hora Chile</>
             )}
           </Badge>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-50 sm:text-4xl">
+          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-4xl">
             Generar selecciones
           </h1>
           <p
             className={
               isMonopoly
-                ? "mx-auto mt-3 max-w-3xl text-pretty text-base leading-relaxed text-slate-200"
-                : "mx-auto mt-3 text-base leading-relaxed text-slate-200 max-sm:text-pretty sm:whitespace-nowrap"
+                ? "mx-auto mt-3 max-w-3xl text-pretty text-base leading-relaxed text-neutral-400"
+                : "mx-auto mt-3 text-base leading-relaxed text-neutral-400 max-sm:text-pretty sm:whitespace-nowrap"
             }
           >
             {isMonopoly
@@ -399,7 +399,7 @@ export default function BuilderPage() {
 
         <p
           role="status"
-          className="rounded-xl border border-emerald-400/35 bg-emerald-500/15 px-4 py-3 text-center text-sm text-emerald-100"
+          className="rounded-2xl bg-[#30d158]/12 px-4 py-3 text-center text-sm text-[#30d158] ring-1 ring-[#30d158]/25"
         >
           {STRATEGY_LABELS[strategyMode]} ·{" "}
           {isSafe
@@ -411,7 +411,7 @@ export default function BuilderPage() {
 
         <Card>
           <CardHeader className="text-center">
-            <h2 className="text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl">
+            <h2 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">
               Elige tu estrategia
             </h2>
             <CardDescription className="text-base">
@@ -451,7 +451,7 @@ export default function BuilderPage() {
                 </Button>
                 <p
                   id={helperId}
-                  className="max-w-md text-center text-sm leading-relaxed text-slate-300"
+                  className="max-w-md text-center text-sm leading-relaxed text-neutral-400"
                 >
                   {isCoolingDown
                     ? "Plan Free: máximo 10 peticiones/minuto. El contador indica cuándo puedes volver a generar."
@@ -465,7 +465,7 @@ export default function BuilderPage() {
             )}
 
             {generated && fromCache && (isSafe ? safePicks.length > 0 : parlay.legs.length > 0) && (
-              <p role="status" className="text-center text-sm text-sky-200">
+              <p role="status" className="text-center text-sm text-[#64d2ff]">
                 {isSafe ? "Picks recuperados" : "Combinada recuperada"} desde Neon para{" "}
                 {isMonopoly
                   ? `${week.fromYmd} → ${week.toYmd}`
@@ -477,8 +477,8 @@ export default function BuilderPage() {
         </Card>
 
         {error && (
-          <Card role="alert" className="border-rose-400/50 bg-rose-950/40">
-            <CardContent className="p-4 text-center text-sm text-rose-100">
+          <Card role="alert" className="bg-[#ff453a]/10 ring-[#ff453a]/30">
+            <CardContent className="p-4 text-center text-sm text-[#ff453a]">
               {error}
             </CardContent>
           </Card>
@@ -486,7 +486,7 @@ export default function BuilderPage() {
 
         {emptyMessage && !error && (
           <Card>
-            <CardContent className="p-6 text-center text-sm text-slate-200">
+            <CardContent className="p-6 text-center text-sm text-neutral-400">
               {emptyMessage}
             </CardContent>
           </Card>

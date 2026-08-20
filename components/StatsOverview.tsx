@@ -25,36 +25,36 @@ export function StatsOverview({ summary }: StatsOverviewProps) {
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Card className="sm:col-span-2">
-        <CardContent className="p-4">
-          <p className="text-xs text-slate-300">Resultados liquidados</p>
-          <p className="mt-0.5 text-xl font-semibold text-slate-50">
-            <span className="text-emerald-200">{summary.won} ganadas</span>
-            <span className="text-slate-400"> · </span>
-            <span className="text-rose-200">{summary.lost} perdidas</span>
+        <CardContent className="p-5">
+          <p className="label-caps">Resultados liquidados</p>
+          <p className="mt-1 text-2xl font-bold tracking-tight text-white">
+            <span className="text-[#30d158]">{summary.won} ganadas</span>
+            <span className="text-neutral-600"> · </span>
+            <span className="text-[#ff453a]">{summary.lost} perdidas</span>
           </p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
             <StrategySplit
-              icon={<Shield className="h-3.5 w-3.5 text-emerald-400" />}
+              icon={<Shield className="h-3.5 w-3.5 text-[#30d158]" />}
               label="Apuestas seguras"
               won={summary.safeWon}
               lost={summary.safeLost}
             />
             <StrategySplit
-              icon={<Sparkles className="h-3.5 w-3.5 text-amber-400" />}
+              icon={<Sparkles className="h-3.5 w-3.5 text-[#ffd60a]" />}
               label="Combinadas lotería"
               won={summary.lotteryWon}
               lost={summary.lotteryLost}
             />
           </div>
           {summary.pending > 0 ? (
-            <p className="mt-2 text-xs text-slate-300">
+            <p className="mt-3 text-xs text-neutral-500">
               {summary.pending} en juego (no cuentan)
             </p>
           ) : null}
         </CardContent>
       </Card>
       <Metric
-        icon={<Percent className="h-4 w-4 text-sky-400" />}
+        icon={<Percent className="h-4 w-4 text-[#64d2ff]" />}
         label="Tasa de acierto (Win Rate)"
         value={formatPercent(summary.winRate)}
         hint={
@@ -64,11 +64,11 @@ export function StatsOverview({ summary }: StatsOverviewProps) {
         }
       />
       <Metric
-        icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
+        icon={<TrendingUp className="h-4 w-4 text-[#30d158]" />}
         label="ROI % / Rendimiento"
         value={`${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}
         hint="Ganancia neta / stake liquidado · pendientes excluidos"
-        valueClass={roiPositive ? "text-emerald-200" : "text-rose-200"}
+        valueClass={roiPositive ? "text-[#30d158]" : "text-[#ff453a]"}
       />
     </div>
   );
@@ -87,19 +87,19 @@ export function LivePicksOverview({
   return (
     <div className="grid gap-3 sm:grid-cols-3">
       <Metric
-        icon={<Target className="h-4 w-4 text-emerald-400" />}
+        icon={<Target className="h-4 w-4 text-[#30d158]" />}
         label="Safe picks"
         value={String(safePickCount)}
         hint={`${matchCount} partidos live`}
       />
       <Metric
-        icon={<Activity className="h-4 w-4 text-sky-400" />}
+        icon={<Activity className="h-4 w-4 text-[#64d2ff]" />}
         label="Edge medio"
         value={formatPercent(avgEdge)}
         hint="Modelo − implícita"
       />
       <Metric
-        icon={<Ticket className="h-4 w-4 text-amber-400" />}
+        icon={<Ticket className="h-4 w-4 text-[#ffd60a]" />}
         label="Fuente"
         value="API-Football"
         hint="Solo datos en vivo"
@@ -120,15 +120,15 @@ function StrategySplit({
   lost: number;
 }) {
   return (
-    <div className="rounded-lg border border-slate-600 bg-slate-950/80 px-3 py-2">
-      <p className="flex items-center gap-1.5 text-xs text-slate-300">
+    <div className="rounded-2xl bg-white/[0.04] px-3 py-2.5 ring-1 ring-white/8">
+      <p className="flex items-center gap-1.5 text-xs text-neutral-400">
         {icon}
         {label}
       </p>
       <p className="mt-1 text-sm font-medium tabular-nums">
-        <span className="text-emerald-200">{won} ganadas</span>
-        <span className="text-slate-400"> · </span>
-        <span className="text-rose-200">{lost} perdidas</span>
+        <span className="text-[#30d158]">{won} ganadas</span>
+        <span className="text-neutral-600"> · </span>
+        <span className="text-[#ff453a]">{lost} perdidas</span>
       </p>
     </div>
   );
@@ -148,19 +148,22 @@ function Metric({
   valueClass?: string;
 }) {
   return (
-    <Card>
-      <CardContent className="flex items-start gap-3 p-4">
-        <div className="rounded-lg bg-slate-800 p-2" aria-hidden>
+    <Card className="lift">
+      <CardContent className="flex items-start gap-3 p-5">
+        <div
+          className="rounded-xl bg-white/8 p-2.5 ring-1 ring-white/10"
+          aria-hidden
+        >
           {icon}
         </div>
         <div className="min-w-0">
-          <p className="text-xs text-slate-300">{label}</p>
+          <p className="label-caps">{label}</p>
           <p
-            className={`truncate text-xl font-semibold ${valueClass ?? "text-slate-50"}`}
+            className={`mt-0.5 truncate text-2xl font-bold tracking-tight ${valueClass ?? "text-white"}`}
           >
             {value}
           </p>
-          <p className="text-xs text-slate-300">{hint}</p>
+          <p className="text-xs text-neutral-500">{hint}</p>
         </div>
       </CardContent>
     </Card>

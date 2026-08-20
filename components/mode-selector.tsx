@@ -78,7 +78,7 @@ export function ModeSelector({
           active={value === "daily-safe"}
           title={safe.title}
           subtitle={safe.subtitle}
-          icon={<Target className="h-4 w-4 text-emerald-300" aria-hidden />}
+          icon={<Target className="h-4 w-4 text-[#30d158]" aria-hidden />}
           onClick={() => onChange("daily-safe")}
           recommended
         />
@@ -89,7 +89,7 @@ export function ModeSelector({
           active={value === "daily-fun"}
           title={fun.title}
           subtitle={fun.subtitle}
-          icon={<Shield className="h-4 w-4 text-amber-200" aria-hidden />}
+          icon={<Shield className="h-4 w-4 text-[#ffd60a]" aria-hidden />}
           onClick={() => onChange("daily-fun")}
           fun
         />
@@ -101,7 +101,7 @@ export function ModeSelector({
           title="Modo Asimetría"
           subtitle="Gigantes exóticos · legs dinámicas · lunes a domingo"
           stakeTag={monopoly.recommendedStake}
-          icon={<Crown className="h-4 w-4 text-emerald-200" aria-hidden />}
+          icon={<Crown className="h-4 w-4 text-[#30d158]" aria-hidden />}
           onClick={() => onChange("monopoly-asymmetry")}
           monopoly
         />
@@ -151,40 +151,40 @@ function StrategyOption({
       tabIndex={active ? 0 : -1}
       onClick={onClick}
       className={cn(
-        "min-h-11 rounded-xl border px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
+        "pressable min-h-11 rounded-2xl px-3 py-3 text-left ring-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff] focus-visible:ring-offset-2 focus-visible:ring-offset-black",
         active
           ? monopoly
-            ? "border-emerald-400 bg-emerald-500/20"
+            ? "bg-[#30d158]/15 ring-[#30d158]/40"
             : fun
-              ? "border-amber-400 bg-amber-500/20"
-              : "border-emerald-400 bg-emerald-500/20"
-          : "border-slate-600 bg-slate-950/60 hover:border-slate-500"
+              ? "bg-[#ffd60a]/12 ring-[#ffd60a]/35"
+              : "bg-[#0a84ff]/15 ring-[#0a84ff]/40"
+          : "bg-white/[0.03] ring-white/10 hover:bg-white/[0.06]"
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="flex items-start gap-2 text-sm font-semibold leading-snug text-slate-50">
+        <p className="flex items-start gap-2 text-sm font-semibold leading-snug text-white">
           {icon ? <span className="mt-0.5 shrink-0">{icon}</span> : null}
           <span>{title}</span>
         </p>
         {recommended && (
-          <span className="shrink-0 rounded bg-emerald-500/20 px-1.5 py-0.5 text-xs font-medium text-emerald-100">
+          <span className="shrink-0 rounded-full bg-[#30d158]/20 px-2 py-0.5 text-[11px] font-medium text-[#30d158]">
             Sugerido
           </span>
         )}
         {fun && !recommended && (
-          <span className="shrink-0 rounded bg-amber-500/20 px-1.5 py-0.5 text-xs font-medium text-amber-100">
+          <span className="shrink-0 rounded-full bg-[#ffd60a]/15 px-2 py-0.5 text-[11px] font-medium text-[#ffd60a]">
             Lotería
           </span>
         )}
         {monopoly && (
-          <span className="shrink-0 rounded bg-emerald-400/20 px-1.5 py-0.5 text-xs font-medium text-emerald-100">
+          <span className="shrink-0 rounded-full bg-[#30d158]/15 px-2 py-0.5 text-[11px] font-medium text-[#30d158]">
             Gigantes exóticos
           </span>
         )}
       </div>
-      <p className="mt-1 text-sm leading-relaxed text-slate-300">{subtitle}</p>
+      <p className="mt-1 text-sm leading-relaxed text-neutral-400">{subtitle}</p>
       {stakeTag ? (
-        <p className="mt-2 text-xs font-medium text-emerald-200">
+        <p className="mt-2 text-xs font-medium text-[#30d158]">
           Stake {stakeTag}
         </p>
       ) : null}
@@ -197,14 +197,14 @@ function MonopolyRosterPreview() {
   const teamCount = leagues.reduce((sum, league) => sum + league.teams.length, 0);
 
   return (
-    <div className="rounded-xl border border-emerald-400/30 bg-slate-950/60 px-3 py-3">
+    <div className="rounded-2xl bg-[#30d158]/10 px-3 py-3 ring-1 ring-[#30d158]/25">
       <div className="flex items-start gap-2">
-        <Globe className="mt-0.5 h-4 w-4 shrink-0 text-emerald-200" aria-hidden />
+        <Globe className="mt-0.5 h-4 w-4 shrink-0 text-[#30d158]" aria-hidden />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-slate-50">
+          <p className="text-sm font-semibold text-white">
             Ligas y equipos que se escanearán
           </p>
-          <p className="mt-0.5 text-xs leading-relaxed text-slate-300">
+          <p className="mt-0.5 text-xs leading-relaxed text-neutral-400">
             {leagues.length} ligas domésticas · {teamCount} gigantes · semana
             lun–dom. Solo entran partidos de estas ligas.
           </p>
@@ -214,15 +214,15 @@ function MonopolyRosterPreview() {
         {leagues.map((league) => (
           <li
             key={league.leagueId}
-            className="rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2"
+            className="rounded-xl bg-white/[0.04] px-3 py-2 ring-1 ring-white/8"
           >
-            <p className="text-sm font-medium text-slate-50">
+            <p className="text-sm font-medium text-white">
               {league.leagueName}
             </p>
-            <p className="text-xs text-slate-400">{league.country}</p>
+            <p className="text-xs text-neutral-500">{league.country}</p>
             <ul className="mt-1.5 space-y-0.5">
               {league.teams.map((team) => (
-                <li key={team.teamId} className="text-sm text-emerald-100">
+                <li key={team.teamId} className="text-sm text-[#30d158]">
                   {team.teamName}
                 </li>
               ))}
@@ -245,7 +245,7 @@ function RotationFilterSwitch({
   const switchId = "monopoly-rotation-filter";
 
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-slate-600 bg-slate-950/60 px-3 py-3">
+    <div className="flex items-start gap-3 rounded-2xl bg-white/[0.04] px-3 py-3 ring-1 ring-white/10">
       <button
         id={switchId}
         type="button"
@@ -255,8 +255,8 @@ function RotationFilterSwitch({
         disabled={!onChange}
         onClick={() => onChange?.(!ignoreRotationFilter)}
         className={cn(
-          "mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-0 p-0.5 appearance-none shadow-inner transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-not-allowed",
-          filterOn ? "bg-emerald-500" : "bg-slate-600"
+          "pressable mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-0 p-0.5 appearance-none shadow-inner focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff] focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed",
+          filterOn ? "bg-[#30d158]" : "bg-neutral-600"
         )}
       >
         <span
@@ -270,11 +270,11 @@ function RotationFilterSwitch({
       <div className="min-w-0 flex-1">
         <label
           htmlFor={switchId}
-          className="cursor-pointer text-sm font-semibold text-slate-50"
+          className="cursor-pointer text-sm font-semibold text-white"
         >
           Filtro Anti-Rotación (Torneos Continentales)
         </label>
-        <p id={`${switchId}-hint`} className="mt-1 text-xs leading-relaxed text-slate-300">
+        <p id={`${switchId}-hint`} className="mt-1 text-xs leading-relaxed text-neutral-400">
           {filterOn
             ? "Omite partidos si el equipo tiene Champions/Europa League a ±4 días."
             : "Ignora el calendario internacional y muestra todos los partidos de la liga doméstica."}

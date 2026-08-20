@@ -102,7 +102,7 @@ export function BuilderDatePicker({
       </CardHeader>
       <CardContent className="space-y-3">
         <div
-          className="grid grid-cols-2 gap-2 sm:grid-cols-3"
+          className="no-scrollbar flex snap-x snap-mandatory gap-2 overflow-x-auto pb-1 sm:grid sm:grid-cols-3 sm:overflow-visible sm:pb-0"
           role="radiogroup"
           aria-label="Atajos de fecha"
           onKeyDown={onShortcutKeyDown}
@@ -118,14 +118,14 @@ export function BuilderDatePicker({
                 tabIndex={checked ? 0 : -1}
                 onClick={() => onChange(tab.date)}
                 className={cn(
-                  "min-h-11 rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
+                  "pressable min-h-11 min-w-[9.5rem] shrink-0 snap-start select-none rounded-2xl px-3 py-2.5 text-sm font-medium ring-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff] sm:min-w-0",
                   checked
-                    ? "border-emerald-400 bg-emerald-500/20 text-emerald-100"
-                    : "border-slate-600 bg-slate-950/60 text-slate-100 hover:border-slate-500"
+                    ? "bg-[#30d158]/15 text-[#30d158] ring-[#30d158]/35"
+                    : "bg-white/[0.04] text-neutral-100 ring-white/10"
                 )}
               >
                 {tab.label}
-                <span className="mt-0.5 block text-xs font-normal text-slate-300">
+                <span className="mt-0.5 block text-xs font-normal text-neutral-400">
                   {tab.date}
                 </span>
               </button>
@@ -134,13 +134,13 @@ export function BuilderDatePicker({
           <label
             htmlFor="builder-custom-date"
             className={cn(
-              "flex min-h-11 cursor-pointer flex-col justify-center rounded-xl border px-3 py-2 transition-colors sm:col-span-1",
+              "flex min-h-11 min-w-[9.5rem] shrink-0 snap-start cursor-pointer select-none flex-col justify-center rounded-2xl px-3 py-2 ring-1 sm:min-w-0",
               isCustomDate
-                ? "border-sky-400 bg-sky-500/20"
-                : "border-slate-600 bg-slate-950/60 hover:border-slate-500"
+                ? "bg-[#0a84ff]/15 ring-[#0a84ff]/35"
+                : "bg-white/[0.04] ring-white/10"
             )}
           >
-            <span className="text-xs text-slate-300">Otra fecha</span>
+            <span className="text-xs text-neutral-400">Otra fecha</span>
             <Input
               id="builder-custom-date"
               type="date"

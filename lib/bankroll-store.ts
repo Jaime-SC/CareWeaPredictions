@@ -1,74 +1,30 @@
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import type { BankrollSettings } from "@/types";
+import {
+  DEFAULT_BANKROLL_SETTINGS,
+  parseBankrollSettings,
+  settingsEqual,
+  clampBankroll,
+} from "@/lib/bankroll-settings";
 import { roundCLP } from "@/lib/utils";
 
 export type { BankrollSettings };
-
-export const DEFAULT_BANKROLL_SETTINGS: BankrollSettings = {
-  totalBankroll: 30_000,
-  currency: "CLP",
-  minBookmakerStake: 75,
-  maxRiskSingle: 0.02,
-  maxRiskParlay: 0.01,
-};
+export {
+  DEFAULT_BANKROLL_SETTINGS,
+  parseBankrollSettings,
+} from "@/lib/bankroll-settings";
 
 const STORAGE_KEY = "parleylab_bankroll_settings_v1";
 const CHANGE_EVENT = "parleylab:bankroll-change";
+const API_PATH = "/api/bankroll";
 
 let cachedRaw: string | null | undefined;
 let cachedSettings: BankrollSettings = DEFAULT_BANKROLL_SETTINGS;
+let hydrateStarted = false;
+let syncGen = 0;
 
 function canUseStorage(): boolean {
   return typeof window !== "undefined" && typeof localStorage !== "undefined";
-}
-
-function clampBankroll(value: number): number {
-  if (!Number.isFinite(value)) return DEFAULT_BANKROLL_SETTINGS.totalBankroll;
-  return Math.max(0, roundCLP(value));
-}
-
-function clampRate(value: number, fallback: number): number {
-  if (!Number.isFinite(value) || value <= 0 || value > 1) return fallback;
-  return value;
-}
-
-function clampStake(value: number, fallback: number): number {
-  if (!Number.isFinite(value) || value < 0) return fallback;
-  return roundCLP(value);
-}
-
-export function parseBankrollSettings(raw: unknown): BankrollSettings {
-  const src =
-    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  return {
-    totalBankroll: clampBankroll(
-      typeof src.totalBankroll === "number"
-        ? src.totalBankroll
-        : DEFAULT_BANKROLL_SETTINGS.totalBankroll
-    ),
-    currency:
-      typeof src.currency === "string" && src.currency.trim()
-        ? src.currency.trim().toUpperCase()
-        : DEFAULT_BANKROLL_SETTINGS.currency,
-    minBookmakerStake: clampStake(
-      typeof src.minBookmakerStake === "number"
-        ? src.minBookmakerStake
-        : DEFAULT_BANKROLL_SETTINGS.minBookmakerStake,
-      DEFAULT_BANKROLL_SETTINGS.minBookmakerStake
-    ),
-    maxRiskSingle: clampRate(
-      typeof src.maxRiskSingle === "number"
-        ? src.maxRiskSingle
-        : DEFAULT_BANKROLL_SETTINGS.maxRiskSingle,
-      DEFAULT_BANKROLL_SETTINGS.maxRiskSingle
-    ),
-    maxRiskParlay: clampRate(
-      typeof src.maxRiskParlay === "number"
-        ? src.maxRiskParlay
-        : DEFAULT_BANKROLL_SETTINGS.maxRiskParlay,
-      DEFAULT_BANKROLL_SETTINGS.maxRiskParlay
-    ),
-  };
 }
 
 function readRaw(): string | null {
@@ -106,7 +62,7 @@ function emitChange(): void {
   window.dispatchEvent(new Event(CHANGE_EVENT));
 }
 
-function persist(next: BankrollSettings): BankrollSettings {
+function persistLocal(next: BankrollSettings): BankrollSettings {
   const normalized = parseBankrollSettings(next);
   cachedSettings = normalized;
   cachedRaw = JSON.stringify(normalized);
@@ -121,6 +77,129 @@ function persist(next: BankrollSettings): BankrollSettings {
   return normalized;
 }
 
+async function fetchJson(
+  init?: RequestInit
+): Promise<{
+  ok: boolean;
+  status: number;
+  body: {
+    success?: boolean;
+    virgin?: boolean;
+    settings?: BankrollSettings;
+    reason?: string;
+    error?: string;
+  };
+}> {
+  const res = await fetch(API_PATH, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    success?: boolean;
+    virgin?: boolean;
+    settings?: BankrollSettings;
+    reason?: string;
+    error?: string;
+  };
+  return { ok: res.ok, status: res.status, body };
+}
+
+function applyRemoteSettings(settings: BankrollSettings): BankrollSettings {
+  return persistLocal(parseBankrollSettings(settings));
+}
+
+async function rehydrateFromServer(): Promise<void> {
+  try {
+    const { ok, body } = await fetchJson();
+    if (ok && body.settings) applyRemoteSettings(body.settings);
+  } catch (err) {
+    console.warn("[bankroll-store] Rehydrate failed:", err);
+  }
+}
+
+/**
+ * Write-through to Neon. On failure, re-hydrate from server so local
+ * does not drift permanently from source of truth.
+ */
+async function syncPatch(
+  payload: Record<string, unknown>
+): Promise<BankrollSettings | null> {
+  const gen = ++syncGen;
+  try {
+    const { ok, status, body } = await fetchJson({
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+    if (gen !== syncGen) return null;
+    if (ok && body.settings) {
+      return applyRemoteSettings(body.settings);
+    }
+    if (body.settings) {
+      applyRemoteSettings(body.settings);
+    } else {
+      await rehydrateFromServer();
+    }
+    console.warn(
+      "[bankroll-store] Sync failed:",
+      body.error ?? `HTTP ${status}`
+    );
+    return null;
+  } catch (err) {
+    console.warn("[bankroll-store] Sync error:", err);
+    if (gen === syncGen) await rehydrateFromServer();
+    return null;
+  }
+}
+
+async function syncPut(settings: BankrollSettings): Promise<void> {
+  const gen = ++syncGen;
+  try {
+    const { ok, body } = await fetchJson({
+      method: "PUT",
+      body: JSON.stringify(settings),
+    });
+    if (gen !== syncGen) return;
+    if (ok && body.settings) {
+      applyRemoteSettings(body.settings);
+      return;
+    }
+    console.warn("[bankroll-store] PUT failed:", body.error);
+    await rehydrateFromServer();
+  } catch (err) {
+    console.warn("[bankroll-store] PUT error:", err);
+    if (gen === syncGen) await rehydrateFromServer();
+  }
+}
+
+/** One-shot hydrate: Neon wins unless virgin row + local differs → seed. */
+export async function hydrateBankrollFromServer(): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    const local = getClientSnapshot();
+    const hadLocalKey = canUseStorage() && localStorage.getItem(STORAGE_KEY) != null;
+    const { ok, body } = await fetchJson();
+    if (!ok || !body.settings) return;
+
+    const remote = parseBankrollSettings(body.settings);
+    if (body.virgin && hadLocalKey && !settingsEqual(local, remote)) {
+      await syncPut(local);
+      return;
+    }
+    applyRemoteSettings(remote);
+  } catch (err) {
+    console.warn("[bankroll-store] Hydrate failed:", err);
+  }
+}
+
+function ensureHydrate(): void {
+  if (hydrateStarted || typeof window === "undefined") return;
+  hydrateStarted = true;
+  void hydrateBankrollFromServer();
+}
+
 export function loadBankrollSettings(): BankrollSettings {
   return getClientSnapshot();
 }
@@ -129,16 +208,29 @@ export function saveBankrollSettings(
   patch: Partial<BankrollSettings>
 ): BankrollSettings {
   const current = getClientSnapshot();
-  return persist({ ...current, ...patch });
+  const next = persistLocal({ ...current, ...patch });
+  void syncPatch({ op: "patch", ...patch });
+  return next;
 }
 
 export function setTotalBankroll(amountCLP: number): BankrollSettings {
-  return saveBankrollSettings({ totalBankroll: clampBankroll(amountCLP) });
+  const next = persistLocal({
+    ...getClientSnapshot(),
+    totalBankroll: clampBankroll(amountCLP),
+  });
+  void syncPatch({ op: "set", totalBankroll: next.totalBankroll });
+  return next;
 }
 
 export function adjustBankroll(deltaCLP: number): BankrollSettings {
+  const delta = roundCLP(deltaCLP);
   const current = getClientSnapshot();
-  return setTotalBankroll(current.totalBankroll + deltaCLP);
+  const next = persistLocal({
+    ...current,
+    totalBankroll: clampBankroll(current.totalBankroll + delta),
+  });
+  void syncPatch({ op: "adjust", delta });
+  return next;
 }
 
 export type DebitBankrollResult =
@@ -155,7 +247,11 @@ export function debitBankroll(amountCLP: number): DebitBankrollResult {
   if (amount > remaining) {
     return { ok: false, remaining, reason: "insufficient" };
   }
-  const next = setTotalBankroll(remaining - amount);
+  const next = persistLocal({
+    ...getClientSnapshot(),
+    totalBankroll: remaining - amount,
+  });
+  void syncPatch({ op: "debit", amount });
   return { ok: true, remaining: next.totalBankroll };
 }
 
@@ -165,11 +261,18 @@ export function refundBankroll(amountCLP: number): BankrollSettings {
   if (!Number.isFinite(amount) || amount <= 0) {
     return getClientSnapshot();
   }
-  return adjustBankroll(amount);
+  const current = getClientSnapshot();
+  const next = persistLocal({
+    ...current,
+    totalBankroll: clampBankroll(current.totalBankroll + amount),
+  });
+  void syncPatch({ op: "refund", amount });
+  return next;
 }
 
 function subscribe(onStoreChange: () => void): () => void {
   if (typeof window === "undefined") return () => {};
+  ensureHydrate();
   const onStorage = (event: StorageEvent) => {
     if (event.key === STORAGE_KEY || event.key === null) onStoreChange();
   };
@@ -182,7 +285,15 @@ function subscribe(onStoreChange: () => void): () => void {
 }
 
 export function useBankrollSettings(): BankrollSettings {
-  return useSyncExternalStore(subscribe, getClientSnapshot, getServerSnapshot);
+  const settings = useSyncExternalStore(
+    subscribe,
+    getClientSnapshot,
+    getServerSnapshot
+  );
+  useEffect(() => {
+    ensureHydrate();
+  }, []);
+  return settings;
 }
 
 export function useBankroll(): {
