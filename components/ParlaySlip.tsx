@@ -36,7 +36,7 @@ import {
   formatOdds,
   formatPercent,
   formatStakeInput,
-  groupByKeyThenKickoff,
+  sortByKickoffDesc,
   parseStakeCLP,
 } from "@/lib/utils";
 import {
@@ -89,6 +89,8 @@ interface ParlaySlipProps {
   /** Civil date YYYY-MM-DD for history registration */
   historyDate?: string;
   onRegenerate?: () => void;
+  /** Free-plan per-minute lockout (mm:ss). Disables regenerate while set. */
+  cooldownLabel?: string | null;
 }
 
 export function ParlaySlip({
@@ -98,6 +100,7 @@ export function ParlaySlip({
   fromCache = false,
   historyDate,
   onRegenerate,
+  cooldownLabel = null,
 }: ParlaySlipProps) {
   const [registered, setRegistered] = useState(false);
   const [registerMsg, setRegisterMsg] = useState<string | null>(null);
@@ -120,7 +123,7 @@ export function ParlaySlip({
       setRegistered(true);
       setRegisterMsg("Esta combinada ya está en tu historial.");
       if (parlay.stake >= DEFAULT_BANKROLL_SETTINGS.minBookmakerStake) {
-        const formatted = formatStakeInput(String(Math.round(parlay.stake)));
+        const formatted = formatStakeInput(String(parlay.stake));
         lastAutoStake.current = formatted;
         setStakeInput(formatted);
       } else {
@@ -180,7 +183,8 @@ export function ParlaySlip({
     stakeCLP != null && stakeCLP > bankroll.totalBankroll;
   const suggested = useParlayStakeRecommendation(
     activeParlay.totalOdds,
-    activeParlay.jointProbability
+    activeParlay.jointProbability,
+    activeParlay.legs.length
   );
 
   useEffect(() => {
@@ -279,12 +283,12 @@ export function ParlaySlip({
   const isEdited = keptLegs.length !== parlay.legs.length;
   const originalCount = parlay.legs.length;
 
-  const groupedLegs = useMemo(
+  const orderedLegs = useMemo(
     () =>
-      groupByKeyThenKickoff(
+      sortByKickoffDesc(
         activeLegs,
-        (leg) => leg.leagueName || "Otros",
-        (leg) => leg.kickoff
+        (leg) => leg.kickoff,
+        (leg) => leg.leagueName
       ),
     [activeLegs]
   );
@@ -348,9 +352,7 @@ export function ParlaySlip({
             </h2>
             <CardDescription>
               {activeParlay.legs.length} selecciones
-              {isEdited ? ` de ${originalCount}` : ""} ·{" "}
-              {groupedLegs.length} competición
-              {groupedLegs.length === 1 ? "" : "es"}
+              {isEdited ? ` de ${originalCount}` : ""}
             </CardDescription>
             {activeParlay.strategyLabel && (
               <div className="mt-2 flex flex-wrap gap-2">
@@ -400,35 +402,22 @@ export function ParlaySlip({
             )}
           </div>
         ) : (
-          <div className="max-h-[28rem] space-y-4 overflow-y-auto pr-1">
-            {groupedLegs.map((group) => (
-              <section key={group.key} className="space-y-2">
-                <div className="sticky top-0 z-10 flex items-center justify-between gap-2 rounded-md border border-slate-600 bg-[var(--background-elevated)] px-2.5 py-1.5">
-                  <p className="text-sm font-semibold text-slate-100">
-                    {group.key}
-                  </p>
-                  <span className="text-xs text-slate-300">
-                    {group.items.length} pick
-                    {group.items.length === 1 ? "" : "s"}
-                  </span>
-                </div>
-                <ul className="space-y-2">
-                  {group.items.map((leg) => {
-                    legNumber += 1;
-                    const key = legKey(leg);
-                    return (
-                      <LegRow
-                        key={key}
-                        leg={leg}
-                        index={legNumber}
-                        exiting={exitingKeys.has(key)}
-                        onRemove={() => handleRemoveLeg(leg)}
-                      />
-                    );
-                  })}
-                </ul>
-              </section>
-            ))}
+          <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
+            <ul className="space-y-2">
+              {orderedLegs.map((leg) => {
+                legNumber += 1;
+                const key = legKey(leg);
+                return (
+                  <LegRow
+                    key={key}
+                    leg={leg}
+                    index={legNumber}
+                    exiting={exitingKeys.has(key)}
+                    onRemove={() => handleRemoveLeg(leg)}
+                  />
+                );
+              })}
+            </ul>
           </div>
         )}
 
@@ -452,6 +441,7 @@ export function ParlaySlip({
           <ParlayStakeBadge
             totalOdds={activeParlay.totalOdds}
             combinedProbability={activeParlay.jointProbability}
+            legCount={activeParlay.legs.length}
           />
         )}
 
@@ -493,7 +483,7 @@ export function ParlaySlip({
             <Button
               className="flex-1"
               variant="outline"
-              disabled={regenerating}
+              disabled={regenerating || Boolean(cooldownLabel)}
               aria-busy={regenerating}
               onClick={onRegenerate}
             >
@@ -504,9 +494,11 @@ export function ParlaySlip({
               )}
               {regenerating
                 ? "Generando…"
-                : fromCache
-                  ? "Volver a generar para hoy"
-                  : "Regenerar otra combinada"}
+                : cooldownLabel
+                  ? `Listo en ${cooldownLabel}`
+                  : fromCache
+                    ? "Volver a generar para hoy"
+                    : "Regenerar otra combinada"}
             </Button>
           )}
         </div>
@@ -523,7 +515,7 @@ export function ParlaySlip({
                 </span>
                 <Input
                   id="parlay-stake-clp"
-                  inputMode="numeric"
+                  inputMode="decimal"
                   autoComplete="off"
                   placeholder="Ej: 10.000"
                   disabled={registered}
@@ -619,6 +611,7 @@ function LegRow({
         {index}
       </span>
       <div className="min-w-0 flex-1">
+        <p className="text-xs text-slate-300">{leg.leagueName || "Otros"}</p>
         <p className="text-sm font-medium leading-snug text-slate-50">
           {leg.matchLabel}
         </p>

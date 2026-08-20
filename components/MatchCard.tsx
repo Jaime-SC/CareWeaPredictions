@@ -13,9 +13,15 @@ import { useState } from "react";
 interface MatchCardProps {
   prediction: MatchPrediction;
   onAddPick?: (prediction: MatchPrediction) => void;
+  /** Total safe picks in the current list — shrinks recommended stake when high. */
+  pickCount?: number;
 }
 
-export function MatchCard({ prediction, onAddPick }: MatchCardProps) {
+export function MatchCard({
+  prediction,
+  onAddPick,
+  pickCount = 1,
+}: MatchCardProps) {
   const { match, expectedGoals, bestSafePick, markets } = prediction;
   const [detailOpen, setDetailOpen] = useState(false);
   const topMarkets = [...markets]
@@ -107,6 +113,7 @@ export function MatchCard({ prediction, onAddPick }: MatchCardProps) {
             <SingleStakeBadge
               modelProbability={bestSafePick.modelProbability}
               odds={bestSafePick.odds}
+              pickCount={pickCount}
             />
           )}
         </div>

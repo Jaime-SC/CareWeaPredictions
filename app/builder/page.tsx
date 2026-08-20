@@ -17,6 +17,11 @@ import {
   EMPTY_MATCHES_MESSAGE,
 } from "@/lib/api-messages";
 import {
+  API_RATE_LIMIT_COOLDOWN_MS,
+  remainingCooldownMs,
+  useApiRateLimitCooldown,
+} from "@/lib/api-rate-limit-cooldown";
+import {
   BUILDER_MODES,
   INSUFFICIENT_MATCHES_MESSAGE,
   WEEKLY_CARTELERA_LABEL,
@@ -79,6 +84,12 @@ export default function BuilderPage() {
   const [generated, setGenerated] = useState(false);
   const [fromCache, setFromCache] = useState(false);
   const [ignoreRotationFilter, setIgnoreRotationFilter] = useState(false);
+  const {
+    isCoolingDown,
+    label: cooldownLabel,
+    arm: armRateCooldown,
+    armFromResponse: armRateLimitFromResponse,
+  } = useApiRateLimitCooldown();
 
   const preset = getStrategyPreset(strategyMode);
   const isSafe = isSafeStrategy(strategyMode);
@@ -135,6 +146,7 @@ export default function BuilderPage() {
 
   const loadSafePicks = useCallback(
     async (opts?: { force?: boolean }) => {
+      if (remainingCooldownMs() > 0) return;
       const force = opts?.force === true;
 
       setLoading(true);
@@ -148,23 +160,22 @@ export default function BuilderPage() {
           `/api/predict?date=${encodeURIComponent(selectedDate)}&safeOnly=true&minProb=0.85&strategyMode=daily-safe${refresh}`
         );
         const data = await res.json().catch(() => ({}));
+        const errMsg =
+          typeof data.error === "string" ? data.error : undefined;
 
         if (!res.ok) {
           setSafePicks([]);
           setGenerated(true);
           const code = data?.code as string | undefined;
-          if (code === "EMPTY") {
-            setEmptyMessage(
-              typeof data.error === "string"
-                ? data.error
-                : EMPTY_MATCHES_MESSAGE
-            );
-          } else {
+          if (armRateLimitFromResponse(res.status, errMsg)) {
             setError(
-              typeof data.error === "string"
-                ? data.error
-                : API_CONNECTION_ERROR_MESSAGE
+              errMsg ??
+                `Plan Free (10/min). Espera ${Math.ceil(API_RATE_LIMIT_COOLDOWN_MS / 1000)}s y vuelve a intentar.`
             );
+          } else if (code === "EMPTY") {
+            setEmptyMessage(errMsg ?? EMPTY_MATCHES_MESSAGE);
+          } else {
+            setError(errMsg ?? API_CONNECTION_ERROR_MESSAGE);
           }
           return;
         }
@@ -172,6 +183,9 @@ export default function BuilderPage() {
         const picks = (data.safePicks ?? []) as SafePickItem[];
         setSafePicks(picks);
         setGenerated(true);
+        if (!data.cached) {
+          armRateCooldown(API_RATE_LIMIT_COOLDOWN_MS);
+        }
         if (picks.length === 0) {
           setEmptyMessage(
             "No hay picks seguros (≥85%) para la fecha seleccionada."
@@ -185,11 +199,12 @@ export default function BuilderPage() {
         setLoading(false);
       }
     },
-    [selectedDate]
+    [selectedDate, armRateCooldown, armRateLimitFromResponse]
   );
 
   const generateFun = useCallback(
     async (_opts?: { force?: boolean }) => {
+      if (remainingCooldownMs() > 0) return;
       setLoading(true);
       setError(null);
       setEmptyMessage(null);
@@ -205,24 +220,23 @@ export default function BuilderPage() {
           }),
         });
         const data = await res.json().catch(() => ({}));
+        const errMsg =
+          typeof data.error === "string" ? data.error : undefined;
 
         if (!res.ok) {
           setParlay(emptyParlayFor("daily-fun"));
           setClipboard("");
           setGenerated(true);
           const code = data?.code as string | undefined;
-          if (code === "EMPTY") {
-            setEmptyMessage(
-              typeof data.error === "string"
-                ? data.error
-                : EMPTY_MATCHES_MESSAGE
-            );
-          } else {
+          if (armRateLimitFromResponse(res.status, errMsg)) {
             setError(
-              typeof data.error === "string"
-                ? data.error
-                : API_CONNECTION_ERROR_MESSAGE
+              errMsg ??
+                `Plan Free (10/min). Espera ${Math.ceil(API_RATE_LIMIT_COOLDOWN_MS / 1000)}s y vuelve a intentar.`
             );
+          } else if (code === "EMPTY") {
+            setEmptyMessage(errMsg ?? EMPTY_MATCHES_MESSAGE);
+          } else {
+            setError(errMsg ?? API_CONNECTION_ERROR_MESSAGE);
           }
           return;
         }
@@ -234,6 +248,7 @@ export default function BuilderPage() {
         setParlay(next);
         setClipboard(nextClipboard);
         setGenerated(true);
+        armRateCooldown(API_RATE_LIMIT_COOLDOWN_MS);
 
         if (next.legs?.length) {
           setFromCache(false);
@@ -248,11 +263,12 @@ export default function BuilderPage() {
         setLoading(false);
       }
     },
-    [selectedDate]
+    [selectedDate, armRateCooldown, armRateLimitFromResponse]
   );
 
   const generateMonopoly = useCallback(
     async (_opts?: { force?: boolean }) => {
+      if (remainingCooldownMs() > 0) return;
       setLoading(true);
       setError(null);
       setEmptyMessage(null);
@@ -268,24 +284,23 @@ export default function BuilderPage() {
           }),
         });
         const data = await res.json().catch(() => ({}));
+        const errMsg =
+          typeof data.error === "string" ? data.error : undefined;
 
         if (!res.ok) {
           setParlay(emptyParlayFor("monopoly-asymmetry"));
           setClipboard("");
           setGenerated(true);
           const code = data?.code as string | undefined;
-          if (code === "EMPTY") {
-            setEmptyMessage(
-              typeof data.error === "string"
-                ? data.error
-                : INSUFFICIENT_MATCHES_MESSAGE
-            );
-          } else {
+          if (armRateLimitFromResponse(res.status, errMsg)) {
             setError(
-              typeof data.error === "string"
-                ? data.error
-                : API_CONNECTION_ERROR_MESSAGE
+              errMsg ??
+                `Plan Free (10/min). Espera ${Math.ceil(API_RATE_LIMIT_COOLDOWN_MS / 1000)}s y vuelve a intentar.`
             );
+          } else if (code === "EMPTY") {
+            setEmptyMessage(errMsg ?? INSUFFICIENT_MATCHES_MESSAGE);
+          } else {
+            setError(errMsg ?? API_CONNECTION_ERROR_MESSAGE);
           }
           return;
         }
@@ -297,6 +312,7 @@ export default function BuilderPage() {
         setParlay(next);
         setClipboard(nextClipboard);
         setGenerated(true);
+        armRateCooldown(API_RATE_LIMIT_COOLDOWN_MS);
 
         if (next.legs?.length) {
           setFromCache(false);
@@ -315,7 +331,7 @@ export default function BuilderPage() {
         setLoading(false);
       }
     },
-    [ignoreRotationFilter]
+    [ignoreRotationFilter, armRateCooldown, armRateLimitFromResponse]
   );
 
   const runPrimaryAction = useCallback(
@@ -418,7 +434,7 @@ export default function BuilderPage() {
                   size="lg"
                   className="min-h-14 w-full max-w-md text-base font-semibold sm:text-lg"
                   onClick={() => runPrimaryAction()}
-                  disabled={loading}
+                  disabled={loading || isCoolingDown}
                   aria-busy={loading}
                   aria-describedby={helperId}
                 >
@@ -427,17 +443,23 @@ export default function BuilderPage() {
                   ) : (
                     <Sparkles className="h-5 w-5" aria-hidden />
                   )}
-                  {loading ? "Generando…" : primaryLabel}
+                  {loading
+                    ? "Generando…"
+                    : isCoolingDown && cooldownLabel
+                      ? `Listo en ${cooldownLabel}`
+                      : primaryLabel}
                 </Button>
                 <p
                   id={helperId}
                   className="max-w-md text-center text-sm leading-relaxed text-slate-300"
                 >
-                  {isSafe
-                    ? "Lista de apuestas individuales: doble oportunidad, DNB y Over 1.5 con probabilidad modelo ≥ 85%."
-                    : isMonopoly
-                      ? "Escaneo lunes a domingo: monopolios domésticos ≥82% que pasen anti-rotación. Sin tope de legs."
-                      : "Piso 80% por leg · cuotas 1.18–1.28 · objetivo ~20x–35x · métricas en unidades (1U)."}
+                  {isCoolingDown
+                    ? "Plan Free: máximo 10 peticiones/minuto. El contador indica cuándo puedes volver a generar."
+                    : isSafe
+                      ? "Lista de apuestas individuales: doble oportunidad, DNB y Over 1.5 con probabilidad modelo ≥ 85%."
+                      : isMonopoly
+                        ? "Escaneo lunes a domingo: monopolios domésticos ≥82% que pasen anti-rotación. Sin tope de legs."
+                        : "Piso 80% por leg · cuotas 1.18–1.28 · objetivo ~20x–35x · métricas en unidades (1U)."}
                 </p>
               </div>
             )}
@@ -477,6 +499,7 @@ export default function BuilderPage() {
             date={selectedDate}
             loading={loading}
             fromCache={fromCache}
+            cooldownLabel={cooldownLabel}
             onRefresh={() => loadSafePicks({ force: true })}
           />
         )}
@@ -488,6 +511,7 @@ export default function BuilderPage() {
             regenerating={loading}
             fromCache={fromCache}
             historyDate={isMonopoly ? todayCl : selectedDate}
+            cooldownLabel={cooldownLabel}
             onRegenerate={() =>
               isMonopoly
                 ? generateMonopoly({ force: true })
@@ -504,7 +528,7 @@ export default function BuilderPage() {
               <Button
                 variant="outline"
                 onClick={() => runPrimaryAction({ force: true })}
-                disabled={loading}
+                disabled={loading || isCoolingDown}
                 aria-busy={loading}
               >
                 {loading ? (
@@ -512,7 +536,11 @@ export default function BuilderPage() {
                 ) : (
                   <Sparkles className="h-4 w-4" aria-hidden />
                 )}
-                {loading ? "Reintentando…" : "Reintentar"}
+                {loading
+                  ? "Reintentando…"
+                  : isCoolingDown && cooldownLabel
+                    ? `Listo en ${cooldownLabel}`
+                    : "Reintentar"}
               </Button>
             </div>
           )}

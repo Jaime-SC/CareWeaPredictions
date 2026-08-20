@@ -829,7 +829,12 @@ export function computeLeagueBreakdown(bets: HistoryBet[]): BreakdownItem[] {
 }
 
 export function formatSignedCLP(value: number): string {
-  const abs = Math.round(Math.abs(value)).toLocaleString("es-CL");
+  const n = Math.round(Math.abs(value) * 100) / 100;
+  const hasCents = Math.round(n * 100) % 100 !== 0;
+  const abs = n.toLocaleString("es-CL", {
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: 2,
+  });
   if (value > 0) return `+$${abs} CLP`;
   if (value < 0) return `-$${abs} CLP`;
   return `$0 CLP`;

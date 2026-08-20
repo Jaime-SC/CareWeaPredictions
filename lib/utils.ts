@@ -16,24 +16,96 @@ export function formatOdds(value: number): string {
   return value.toFixed(2);
 }
 
+/** Redondea montos CLP a máximo 2 decimales. */
+export function roundCLP(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round(value * 100) / 100;
+}
+
+function formatCLPAmount(value: number): string {
+  const n = roundCLP(value);
+  const hasCents = Math.round(Math.abs(n) * 100) % 100 !== 0;
+  return n.toLocaleString("es-CL", {
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: 2,
+  });
+}
+
 export function formatCLP(value: number): string {
-  return `$${Math.round(value).toLocaleString("es-CL")} CLP`;
+  return `$${formatCLPAmount(value)} CLP`;
 }
 
-/** Parse a CLP amount from user input (digits, dots, commas, $). */
+/**
+ * Parse a CLP amount from user input.
+ * Chile: `.` miles, `,` decimal (ej. 10.000,50). También acepta `10000.5`.
+ */
 export function parseStakeCLP(raw: string): number | null {
-  const digits = raw.replace(/[^\d]/g, "");
-  if (!digits) return null;
-  const value = Number(digits);
+  const cleaned = raw.trim().replace(/[$\s]/g, "");
+  if (!cleaned) return null;
+
+  let normalized: string;
+  if (cleaned.includes(",")) {
+    const [intPart, ...rest] = cleaned.split(",");
+    const frac = rest.join("").replace(/\D/g, "").slice(0, 2);
+    const ints = intPart.replace(/\./g, "").replace(/\D/g, "");
+    if (!ints && !frac) return null;
+    normalized = `${ints || "0"}${frac ? `.${frac}` : ""}`;
+  } else if (/^\d+\.\d{1,2}$/.test(cleaned)) {
+    normalized = cleaned;
+  } else {
+    const digits = cleaned.replace(/[^\d]/g, "");
+    if (!digits) return null;
+    normalized = digits;
+  }
+
+  const value = Number(normalized);
   if (!Number.isFinite(value) || value <= 0) return null;
-  return value;
+  return roundCLP(value);
 }
 
-/** Format a digit string as Chilean thousands (10.000). */
+/**
+ * Formatea input de montos en estilo chileno (10.000 o 10.000,50).
+ * Conserva la coma decimal mientras se escribe (máx. 2 dígitos).
+ */
 export function formatStakeInput(raw: string): string {
-  const parsed = parseStakeCLP(raw);
-  if (parsed == null) return "";
-  return parsed.toLocaleString("es-CL");
+  const trimmed = raw.trim();
+  // Número JS / pegado con punto decimal → estilo chileno
+  if (/^\d+\.\d{1,2}$/.test(trimmed)) {
+    const [intPart, frac] = trimmed.split(".");
+    return `${Number(intPart).toLocaleString("es-CL")},${frac}`;
+  }
+
+  let s = trimmed.replace(/[^\d.,]/g, "");
+  if (!s) return "";
+
+  // Una sola coma decimal; el resto de separadores se ignoran en la fracción
+  const commaIdx = s.indexOf(",");
+  let intRaw: string;
+  let frac: string | undefined;
+  if (commaIdx !== -1) {
+    intRaw = s.slice(0, commaIdx);
+    frac = s
+      .slice(commaIdx + 1)
+      .replace(/[^\d]/g, "")
+      .slice(0, 2);
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(s) || !s.includes(".")) {
+    // Solo miles o solo dígitos
+    intRaw = s;
+    frac = undefined;
+  } else if (/^\d+\.\d{1,2}$/.test(s)) {
+    const parts = s.split(".");
+    intRaw = parts[0];
+    frac = parts[1];
+  } else {
+    intRaw = s.replace(/\./g, "");
+    frac = undefined;
+  }
+
+  const intDigits = intRaw.replace(/\D/g, "");
+  if (!intDigits && frac === undefined) return "";
+  const formattedInt = Number(intDigits || "0").toLocaleString("es-CL");
+  if (frac !== undefined) return `${formattedInt},${frac}`;
+  return formattedInt;
 }
 
 /** Standardized unit stake for analytics (1U per ticket). */
@@ -224,53 +296,34 @@ export function formatKickoffDayLabel(
   }
 }
 
-/** Group items by a string key, preserving first-seen order of groups. */
-export function groupByKey<T>(
-  items: T[],
-  keyFn: (item: T) => string
-): { key: string; items: T[] }[] {
-  const map = new Map<string, T[]>();
-  for (const item of items) {
-    const key = keyFn(item) || "Otros";
-    const bucket = map.get(key);
-    if (bucket) bucket.push(item);
-    else map.set(key, [item]);
-  }
-  return Array.from(map.entries()).map(([key, groupItems]) => ({
-    key,
-    items: groupItems,
-  }));
-}
-
-/** Kickoff ISO → ms. Invalid dates sort last. */
+/** Kickoff ISO → ms. Invalid / missing dates sort as oldest (end when desc). */
 export function kickoffTimestamp(iso: string | undefined | null): number {
-  if (!iso) return Number.POSITIVE_INFINITY;
+  if (!iso) return Number.NEGATIVE_INFINITY;
   const t = new Date(iso).getTime();
-  return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+  return Number.isFinite(t) ? t : Number.NEGATIVE_INFINITY;
 }
 
 /**
- * Group by key, sort items by kickoff within each group,
- * then sort groups by earliest kickoff (early → late).
+ * Flat list: kickoff late → early. Same kickoff keeps same competition together
+ * (league name as secondary key). No competition section headers.
  */
-export function groupByKeyThenKickoff<T>(
+export function sortByKickoffDesc<T>(
   items: T[],
-  keyFn: (item: T) => string,
-  kickoffFn: (item: T) => string | undefined | null
-): { key: string; items: T[] }[] {
-  const groups = groupByKey(items, keyFn).map((g) => ({
-    key: g.key,
-    items: [...g.items].sort(
-      (a, b) => kickoffTimestamp(kickoffFn(a)) - kickoffTimestamp(kickoffFn(b))
-    ),
-  }));
-  groups.sort((a, b) => {
-    const ta = kickoffTimestamp(kickoffFn(a.items[0]));
-    const tb = kickoffTimestamp(kickoffFn(b.items[0]));
-    if (ta !== tb) return ta - tb;
-    return a.key.localeCompare(b.key, "es");
+  kickoffFn: (item: T) => string | undefined | null,
+  leagueFn?: (item: T) => string | undefined | null
+): T[] {
+  return [...items].sort((a, b) => {
+    const tb = kickoffTimestamp(kickoffFn(b));
+    const ta = kickoffTimestamp(kickoffFn(a));
+    if (tb !== ta) return tb - ta;
+    if (leagueFn) {
+      const la = (leagueFn(a) || "Otros").trim();
+      const lb = (leagueFn(b) || "Otros").trim();
+      const byLeague = la.localeCompare(lb, "es");
+      if (byLeague !== 0) return byLeague;
+    }
+    return 0;
   });
-  return groups;
 }
 
 /**

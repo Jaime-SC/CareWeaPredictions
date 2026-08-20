@@ -1,6 +1,11 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import {
+  formatDurationShort,
+  msUntilUtcMidnight,
+  useApiRateLimitCooldown,
+} from "@/lib/api-rate-limit-cooldown";
 import { useCallback, useEffect, useState } from "react";
 
 const STORAGE_KEY = "parleylab_api_quota_v2";
@@ -79,6 +84,8 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
   // from localStorage. Populate after mount.
   const [quota, setQuota] = useState<QuotaState | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [dailyResetMs, setDailyResetMs] = useState(0);
+  const cooldown = useApiRateLimitCooldown();
 
   const refresh = useCallback(async (opts?: { sync?: boolean }) => {
     try {
@@ -122,7 +129,68 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
     };
   }, [refresh]);
 
-  if (!mounted || !quota) return null;
+  useEffect(() => {
+    if (!quota || quota.remaining > 0) {
+      setDailyResetMs(0);
+      return;
+    }
+    setDailyResetMs(msUntilUtcMidnight());
+    const id = window.setInterval(() => {
+      setDailyResetMs(msUntilUtcMidnight());
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [quota]);
+
+  if (!mounted) return null;
+
+  if (cooldown.isCoolingDown) {
+    return (
+      <span
+        role="status"
+        aria-live="polite"
+        aria-label={`Límite por minuto del plan Free. Podrás generar de nuevo en ${cooldown.label}.`}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs font-medium tabular-nums text-amber-200",
+          className
+        )}
+      >
+        <span
+          aria-hidden
+          className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-400"
+        />
+        <span className="hidden sm:inline">
+          Plan Free · listo en {cooldown.label}
+        </span>
+        <span className="sm:hidden">Listo en {cooldown.label}</span>
+      </span>
+    );
+  }
+
+  if (!quota) return null;
+
+  if (quota.remaining <= 0) {
+    const resetLabel = formatDurationShort(dailyResetMs);
+    return (
+      <span
+        role="status"
+        aria-live="polite"
+        aria-label={`Cuota diaria agotada. Se reinicia en ${resetLabel} (medianoche UTC).`}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs font-medium tabular-nums text-rose-200",
+          className
+        )}
+      >
+        <span
+          aria-hidden
+          className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-rose-400"
+        />
+        <span className="hidden sm:inline">
+          Cupo diario 0 · reset en {resetLabel}
+        </span>
+        <span className="sm:hidden">Reset en {resetLabel}</span>
+      </span>
+    );
+  }
 
   const { className: tone, dotClass, label } = toneForRemaining(
     quota.remaining

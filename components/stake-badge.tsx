@@ -54,22 +54,23 @@ export function StakeBadge({
 export function SingleStakeBadge({
   modelProbability,
   odds,
+  pickCount = 1,
   className,
 }: {
   modelProbability: number;
   odds: number;
+  /** How many singles the app is showing today — stake shrinks as this grows. */
+  pickCount?: number;
   className?: string;
 }) {
   const settings = useBankrollSettings();
   const recommendation = useMemo(
     () =>
-      calculateSingleStake(
-        settings.totalBankroll,
-        modelProbability,
-        odds,
-        settings
-      ),
-    [settings, modelProbability, odds]
+      calculateSingleStake(settings.totalBankroll, modelProbability, odds, {
+        ...settings,
+        pickCount,
+      }),
+    [settings, modelProbability, odds, pickCount]
   );
   return (
     <StakeBadge
@@ -83,10 +84,13 @@ export function SingleStakeBadge({
 export function ParlayStakeBadge({
   totalOdds,
   combinedProbability,
+  legCount = 1,
   className,
 }: {
   totalOdds: number;
   combinedProbability: number;
+  /** Legs on this ticket — more legs → smaller stake. */
+  legCount?: number;
   className?: string;
 }) {
   const settings = useBankrollSettings();
@@ -96,9 +100,9 @@ export function ParlayStakeBadge({
         settings.totalBankroll,
         totalOdds,
         combinedProbability,
-        settings
+        { ...settings, legCount }
       ),
-    [settings, totalOdds, combinedProbability]
+    [settings, totalOdds, combinedProbability, legCount]
   );
   return (
     <StakeBadge
@@ -111,24 +115,24 @@ export function ParlayStakeBadge({
 
 export function useSingleStakeRecommendation(
   modelProbability: number,
-  odds: number
+  odds: number,
+  pickCount = 1
 ): StakeRecommendation {
   const settings = useBankrollSettings();
   return useMemo(
     () =>
-      calculateSingleStake(
-        settings.totalBankroll,
-        modelProbability,
-        odds,
-        settings
-      ),
-    [settings, modelProbability, odds]
+      calculateSingleStake(settings.totalBankroll, modelProbability, odds, {
+        ...settings,
+        pickCount,
+      }),
+    [settings, modelProbability, odds, pickCount]
   );
 }
 
 export function useParlayStakeRecommendation(
   totalOdds: number,
-  combinedProbability: number
+  combinedProbability: number,
+  legCount = 1
 ): StakeRecommendation {
   const settings = useBankrollSettings();
   return useMemo(
@@ -137,8 +141,8 @@ export function useParlayStakeRecommendation(
         settings.totalBankroll,
         totalOdds,
         combinedProbability,
-        settings
+        { ...settings, legCount }
       ),
-    [settings, totalOdds, combinedProbability]
+    [settings, totalOdds, combinedProbability, legCount]
   );
 }

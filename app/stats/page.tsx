@@ -930,9 +930,12 @@ export default function StatsPage() {
                     <YAxis
                       tick={{ fill: "#cbd5e1", fontSize: 12 }}
                       tickFormatter={(v: number) => {
-                        const abs = Math.round(Math.abs(v)).toLocaleString(
-                          "es-CL"
-                        );
+                        const n = Math.round(Math.abs(v) * 100) / 100;
+                        const hasCents = Math.round(n * 100) % 100 !== 0;
+                        const abs = n.toLocaleString("es-CL", {
+                          minimumFractionDigits: hasCents ? 2 : 0,
+                          maximumFractionDigits: 2,
+                        });
                         return `${v < 0 ? "−" : ""}$${abs}`;
                       }}
                       axisLine={false}

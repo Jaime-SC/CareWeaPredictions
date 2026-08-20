@@ -37,7 +37,7 @@ import {
   formatOdds,
   formatPercent,
   formatStakeInput,
-  groupByKeyThenKickoff,
+  sortByKickoffDesc,
   parseStakeCLP,
 } from "@/lib/utils";
 import { formatValueBadge } from "@/lib/value-finder";
@@ -59,6 +59,8 @@ interface SafePicksListProps {
   loading?: boolean;
   fromCache?: boolean;
   onRefresh?: () => void;
+  /** Free-plan per-minute lockout (mm:ss). Disables refresh while set. */
+  cooldownLabel?: string | null;
 }
 
 export function SafePicksList({
@@ -67,6 +69,7 @@ export function SafePicksList({
   loading = false,
   fromCache = false,
   onRefresh,
+  cooldownLabel = null,
 }: SafePicksListProps) {
   const [registeredKeys, setRegisteredKeys] = useState<Set<string>>(
     () => new Set()
@@ -83,12 +86,12 @@ export function SafePicksList({
     stakeCLP != null && stakeCLP > settings.totalBankroll;
   const lastAutoStake = useRef("");
 
-  const grouped = useMemo(
+  const ordered = useMemo(
     () =>
-      groupByKeyThenKickoff(
+      sortByKickoffDesc(
         picks,
-        (p) => p.leagueName || "Otros",
-        (p) => p.kickoff
+        (p) => p.kickoff,
+        (p) => p.leagueName
       ),
     [picks]
   );
@@ -119,7 +122,7 @@ export function SafePicksList({
       settings.totalBankroll,
       pick.modelProbability,
       pick.odds,
-      settings
+      { ...settings, pickCount: picks.length }
     );
     return rec.amountCLP > 0 ? rec.amountCLP : null;
   }, [picks, settings]);
@@ -235,14 +238,24 @@ export function SafePicksList({
               variant="outline"
               size="sm"
               onClick={onRefresh}
-              disabled={loading}
+              disabled={loading || Boolean(cooldownLabel)}
               aria-busy={loading}
-              aria-label={loading ? "Actualizando picks" : "Actualizar picks"}
+              aria-label={
+                loading
+                  ? "Actualizando picks"
+                  : cooldownLabel
+                    ? `Espera ${cooldownLabel} para actualizar`
+                    : "Actualizar picks"
+              }
             >
               {loading ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
               ) : null}
-              {loading ? "Actualizando…" : "Actualizar"}
+              {loading
+                ? "Actualizando…"
+                : cooldownLabel
+                  ? `Listo en ${cooldownLabel}`
+                  : "Actualizar"}
             </Button>
           )}
         </div>
@@ -265,7 +278,7 @@ export function SafePicksList({
                 </span>
                 <Input
                   id="safe-stake-clp"
-                  inputMode="numeric"
+                  inputMode="decimal"
                   autoComplete="off"
                   placeholder="Ej: 5.000"
                   value={stakeInput}
@@ -285,20 +298,9 @@ export function SafePicksList({
               </p>
             </div>
             )}
-          <div className="max-h-[36rem] space-y-5 overflow-y-auto pr-1">
-            {grouped.map((group) => (
-              <section key={group.key} className="space-y-2">
-                <div className="sticky top-0 z-10 flex items-center justify-between gap-2 rounded-md border border-slate-600 bg-[var(--background-elevated)] px-2.5 py-1.5">
-                  <p className="text-sm font-semibold text-slate-100">
-                    {group.key}
-                  </p>
-                  <span className="text-xs text-slate-300">
-                    {group.items.length} pick
-                    {group.items.length === 1 ? "" : "s"}
-                  </span>
-                </div>
-                <ul className="space-y-2">
-                  {group.items.map((pick) => {
+          <div className="max-h-[36rem] space-y-2 overflow-y-auto pr-1">
+            <ul className="space-y-2">
+              {ordered.map((pick) => {
                     const key = pickKey(pick);
                     const registered = registeredKeys.has(key);
                     const savedStake = registeredStakes[key] ?? pick.stakeCLP;
@@ -311,6 +313,9 @@ export function SafePicksList({
                       >
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                           <div className="min-w-0 space-y-1">
+                            <p className="text-xs text-slate-300">
+                              {pick.leagueName || "Otros"}
+                            </p>
                             <p className="text-sm font-medium text-slate-50">
                               {pick.matchLabel}
                               <span className="ml-2 text-xs font-normal text-slate-300">
@@ -379,6 +384,7 @@ export function SafePicksList({
                             <SingleStakeBadge
                               modelProbability={pick.modelProbability}
                               odds={pick.odds}
+                              pickCount={picks.length}
                             />
                           </div>
                           <div className="flex flex-col items-stretch gap-1 sm:items-end">
@@ -425,9 +431,7 @@ export function SafePicksList({
                       </li>
                     );
                   })}
-                </ul>
-              </section>
-            ))}
+            </ul>
           </div>
           </>
         )}

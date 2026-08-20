@@ -17,6 +17,11 @@ import {
   EMPTY_MATCHES_MESSAGE,
 } from "@/lib/api-messages";
 import {
+  API_RATE_LIMIT_COOLDOWN_MS,
+  remainingCooldownMs,
+  useApiRateLimitCooldown,
+} from "@/lib/api-rate-limit-cooldown";
+import {
   cleanupExpiredDashboardCache,
   isDashboardCacheFresh,
   loadStoredDashboard,
@@ -27,7 +32,7 @@ import {
   formatKickoff,
   formatOdds,
   formatPercent,
-  groupByKeyThenKickoff,
+  sortByKickoffDesc,
 } from "@/lib/utils";
 import { Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import Link from "next/link";
@@ -40,6 +45,12 @@ export default function DashboardPage() {
   const [fromCache, setFromCache] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [emptyMessage, setEmptyMessage] = useState<string | null>(null);
+  const {
+    isCoolingDown,
+    label: cooldownLabel,
+    arm: armRateCooldown,
+    armFromResponse: armRateLimitFromResponse,
+  } = useApiRateLimitCooldown();
 
   const hasPaintedRef = useRef(false);
 
@@ -61,6 +72,8 @@ export default function DashboardPage() {
   const load = useCallback(
     async (opts?: { force?: boolean }) => {
       const force = opts?.force === true;
+      if (force && remainingCooldownMs() > 0) return;
+
       const cached = loadStoredDashboard();
       const hasCached =
         !!cached &&
@@ -88,36 +101,34 @@ export default function DashboardPage() {
           force ? "/api/predict?refresh=1" : "/api/predict"
         );
         const data = await res.json().catch(() => ({}));
+        const errMsg =
+          typeof data.error === "string" ? data.error : undefined;
 
         if (!res.ok) {
           const code = data?.code as string | undefined;
           if (code === "EMPTY") {
-            const message =
-              typeof data.error === "string"
-                ? data.error
-                : EMPTY_MATCHES_MESSAGE;
+            const message = errMsg ?? EMPTY_MATCHES_MESSAGE;
             applySnapshot([], message, false);
             saveStoredDashboard([], message);
             return;
           }
+          if (armRateLimitFromResponse(res.status, errMsg)) {
+            setError(
+              errMsg ??
+                `Plan Free (10/min). Espera ${Math.ceil(API_RATE_LIMIT_COOLDOWN_MS / 1000)}s y vuelve a intentar.`
+            );
+            return;
+          }
           if (hasCached) {
             if (force) {
-              setError(
-                typeof data.error === "string"
-                  ? data.error
-                  : API_CONNECTION_ERROR_MESSAGE
-              );
+              setError(errMsg ?? API_CONNECTION_ERROR_MESSAGE);
             }
             return;
           }
           setPredictions([]);
           setEmptyMessage(null);
           setFromCache(false);
-          setError(
-            typeof data.error === "string"
-              ? data.error
-              : API_CONNECTION_ERROR_MESSAGE
-          );
+          setError(errMsg ?? API_CONNECTION_ERROR_MESSAGE);
           return;
         }
 
@@ -126,6 +137,9 @@ export default function DashboardPage() {
           nextPredictions.length === 0 ? EMPTY_MATCHES_MESSAGE : null;
         applySnapshot(nextPredictions, nextEmpty, Boolean(data.cached));
         saveStoredDashboard(nextPredictions, nextEmpty);
+        if (force) {
+          armRateCooldown(API_RATE_LIMIT_COOLDOWN_MS);
+        }
       } catch {
         if (hasCached) {
           if (force) setError(API_CONNECTION_ERROR_MESSAGE);
@@ -140,7 +154,7 @@ export default function DashboardPage() {
         setRefreshing(false);
       }
     },
-    [applySnapshot]
+    [applySnapshot, armRateCooldown, armRateLimitFromResponse]
   );
 
   useEffect(() => {
@@ -170,22 +184,22 @@ export default function DashboardPage() {
     );
   }, [safePicks]);
 
-  const safePicksByLeague = useMemo(
+  const orderedSafePicks = useMemo(
     () =>
-      groupByKeyThenKickoff(
+      sortByKickoffDesc(
         safePicks.slice(0, 10),
-        (p) => p.prediction.match.leagueName,
-        (p) => p.prediction.match.kickoff
+        (p) => p.prediction.match.kickoff,
+        (p) => p.prediction.match.leagueName
       ),
     [safePicks]
   );
 
-  const predictionsByLeague = useMemo(
+  const orderedPredictions = useMemo(
     () =>
-      groupByKeyThenKickoff(
+      sortByKickoffDesc(
         predictions,
-        (p) => p.match.leagueName,
-        (p) => p.match.kickoff
+        (p) => p.match.kickoff,
+        (p) => p.match.leagueName
       ),
     [predictions]
   );
@@ -216,10 +230,14 @@ export default function DashboardPage() {
           <Button
             variant="outline"
             onClick={() => void load({ force: true })}
-            disabled={busy}
+            disabled={busy || isCoolingDown}
             aria-busy={busy}
             aria-label={
-              busy ? "Actualizando predicciones" : "Actualizar predicciones"
+              busy
+                ? "Actualizando predicciones"
+                : isCoolingDown && cooldownLabel
+                  ? `Espera ${cooldownLabel} para actualizar`
+                  : "Actualizar predicciones"
             }
           >
             {busy ? (
@@ -227,7 +245,11 @@ export default function DashboardPage() {
             ) : (
               <RefreshCw className="h-4 w-4" aria-hidden />
             )}
-            Actualizar
+            {busy
+              ? "Actualizando…"
+              : isCoolingDown && cooldownLabel
+                ? `Listo en ${cooldownLabel}`
+                : "Actualizar"}
           </Button>
           <Link href="/builder" className={buttonVariants()}>
             Generar Combinada
@@ -289,23 +311,11 @@ export default function DashboardPage() {
           </Card>
         ) : (
           <div
-            className="space-y-6"
+            className="grid gap-3 md:grid-cols-2"
             aria-busy={refreshing}
             aria-live="polite"
           >
-            {safePicksByLeague.map((group) => (
-              <div key={group.key} className="space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-slate-100">
-                    {group.key}
-                  </p>
-                  <span className="text-xs text-slate-300">
-                    {group.items.length} pick
-                    {group.items.length === 1 ? "" : "s"}
-                  </span>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  {group.items.map(({ prediction, market }) => (
+            {orderedSafePicks.map(({ prediction, market }) => (
                     <Card
                       key={`${prediction.matchId}-${market.market}`}
                       className="border-emerald-400/25"
@@ -314,12 +324,15 @@ export default function DashboardPage() {
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <CardDescription>
-                              {formatKickoff(prediction.match.kickoff)}
+                              {prediction.match.leagueName}
                             </CardDescription>
                             <CardTitle className="mt-1">
                               {prediction.match.home.name} vs{" "}
                               {prediction.match.away.name}
                             </CardTitle>
+                            <p className="mt-1 text-xs text-slate-300">
+                              {formatKickoff(prediction.match.kickoff)}
+                            </p>
                           </div>
                           <Badge variant="success">
                             Modelo {formatPercent(market.modelProbability)}
@@ -345,12 +358,10 @@ export default function DashboardPage() {
                         <SingleStakeBadge
                           modelProbability={market.modelProbability}
                           odds={market.odds}
+                          pickCount={safePicks.length}
                         />
                       </CardContent>
                     </Card>
-                  ))}
-                </div>
-              </div>
             ))}
           </div>
         )}
@@ -361,24 +372,15 @@ export default function DashboardPage() {
           <h2 id="partidos-analizados" className="text-xl font-semibold text-slate-50">
             Partidos analizados
           </h2>
-          {predictionsByLeague.map((group) => (
-            <div key={group.key} className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-slate-100">
-                  {group.key}
-                </p>
-                <span className="text-xs text-slate-300">
-                  {group.items.length} partido
-                  {group.items.length === 1 ? "" : "s"}
-                </span>
-              </div>
-              <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-                {group.items.map((p) => (
-                  <MatchCard key={p.matchId} prediction={p} />
-                ))}
-              </div>
-            </div>
-          ))}
+          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+            {orderedPredictions.map((p) => (
+              <MatchCard
+                key={p.matchId}
+                prediction={p}
+                pickCount={Math.max(1, safePicks.length)}
+              />
+            ))}
+          </div>
         </section>
       )}
     </div>

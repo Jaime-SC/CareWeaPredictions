@@ -31,7 +31,7 @@ import {
   formatCLP,
   formatOdds,
   formatPercent,
-  groupByKeyThenKickoff,
+  sortByKickoffDesc,
 } from "@/lib/utils";
 import {
   Check,
@@ -760,26 +760,6 @@ function LegDetailRow({ leg }: { leg: HistoryBetLeg }) {
   );
 }
 
-function HistoryLegGroup({
-  group,
-}: {
-  group: { key: string; items: HistoryBetLeg[] };
-}) {
-  return (
-    <section className="space-y-2">
-      <p className="px-1 text-xs font-semibold text-slate-300">{group.key}</p>
-      <ul className="space-y-2">
-        {group.items.map((leg, idx) => (
-          <LegDetailRow
-            key={`${leg.fixtureId}-${leg.market}-${idx}`}
-            leg={leg}
-          />
-        ))}
-      </ul>
-    </section>
-  );
-}
-
 function BetRow({
   bet,
   removing = false,
@@ -796,10 +776,10 @@ function BetRow({
   const hitsVariant = legHitsBadgeVariant(bet.status);
   const statusBadge = ticketStatusBadge(bet.status);
   const unitPnl = ticketProfit(bet);
-  const groupedLegs = groupByKeyThenKickoff(
+  const orderedLegs = sortByKickoffDesc(
     bet.legs,
-    (leg) => leg.leagueName || "Otros",
-    (leg) => leg.kickoff
+    (leg) => leg.kickoff,
+    (leg) => leg.leagueName
   );
 
   return (
@@ -855,11 +835,14 @@ function BetRow({
 
       <div className="border-t border-slate-800/80 px-2 pb-2">
         {isSingle ? (
-          <div className="space-y-3 px-1 py-2">
-            {groupedLegs.map((group) => (
-              <HistoryLegGroup key={group.key} group={group} />
+          <ul className="space-y-2 px-1 py-2">
+            {orderedLegs.map((leg, idx) => (
+              <LegDetailRow
+                key={`${leg.fixtureId}-${leg.market}-${idx}`}
+                leg={leg}
+              />
             ))}
-          </div>
+          </ul>
         ) : (
           <>
             <button
@@ -883,11 +866,14 @@ function BetRow({
             </button>
 
             {expanded && (
-              <div className="space-y-3 px-1 pb-2 pt-1">
-                {groupedLegs.map((group) => (
-                  <HistoryLegGroup key={group.key} group={group} />
+              <ul className="space-y-2 px-1 pb-2 pt-1">
+                {orderedLegs.map((leg, idx) => (
+                  <LegDetailRow
+                    key={`${leg.fixtureId}-${leg.market}-${idx}`}
+                    leg={leg}
+                  />
                 ))}
-              </div>
+              </ul>
             )}
           </>
         )}

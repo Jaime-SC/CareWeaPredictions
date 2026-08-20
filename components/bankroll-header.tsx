@@ -121,7 +121,7 @@ export function BankrollHeader({ className }: { className?: string }) {
               </span>
               <Input
                 id="bankroll-total"
-                inputMode="numeric"
+                inputMode="decimal"
                 autoComplete="off"
                 value={bankrollInput}
                 onChange={(event) =>
@@ -144,7 +144,7 @@ export function BankrollHeader({ className }: { className?: string }) {
               </span>
               <Input
                 id="bankroll-min-stake"
-                inputMode="numeric"
+                inputMode="decimal"
                 autoComplete="off"
                 value={minStakeInput}
                 onChange={(event) =>
@@ -190,7 +190,7 @@ export function BankrollHeader({ className }: { className?: string }) {
               </span>
               <Input
                 id="bankroll-payout"
-                inputMode="numeric"
+                inputMode="decimal"
                 autoComplete="off"
                 value={payoutInput}
                 onChange={(event) =>

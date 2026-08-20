@@ -1,5 +1,6 @@
 import { useCallback, useSyncExternalStore } from "react";
 import type { BankrollSettings } from "@/types";
+import { roundCLP } from "@/lib/utils";
 
 export type { BankrollSettings };
 
@@ -23,7 +24,7 @@ function canUseStorage(): boolean {
 
 function clampBankroll(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_BANKROLL_SETTINGS.totalBankroll;
-  return Math.max(0, Math.round(value));
+  return Math.max(0, roundCLP(value));
 }
 
 function clampRate(value: number, fallback: number): number {
@@ -33,7 +34,7 @@ function clampRate(value: number, fallback: number): number {
 
 function clampStake(value: number, fallback: number): number {
   if (!Number.isFinite(value) || value < 0) return fallback;
-  return Math.round(value);
+  return roundCLP(value);
 }
 
 export function parseBankrollSettings(raw: unknown): BankrollSettings {
@@ -146,7 +147,7 @@ export type DebitBankrollResult =
 
 /** Resta el stake al colocar un ticket. No deja la banca en negativo. */
 export function debitBankroll(amountCLP: number): DebitBankrollResult {
-  const amount = Math.round(amountCLP);
+  const amount = roundCLP(amountCLP);
   const remaining = getClientSnapshot().totalBankroll;
   if (!Number.isFinite(amount) || amount <= 0) {
     return { ok: false, remaining, reason: "invalid" };
@@ -160,7 +161,7 @@ export function debitBankroll(amountCLP: number): DebitBankrollResult {
 
 /** Devuelve el stake si se cancela un ticket pendiente o anulado. */
 export function refundBankroll(amountCLP: number): BankrollSettings {
-  const amount = Math.round(amountCLP);
+  const amount = roundCLP(amountCLP);
   if (!Number.isFinite(amount) || amount <= 0) {
     return getClientSnapshot();
   }

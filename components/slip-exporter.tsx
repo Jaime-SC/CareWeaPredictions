@@ -8,7 +8,7 @@ import {
 } from "@/lib/formatters";
 import type { GeneratedParlay, ParlayLeg } from "@/lib/types";
 import { formatValueBadge } from "@/lib/value-finder";
-import { cn, groupByKeyThenKickoff } from "@/lib/utils";
+import { cn, sortByKickoffDesc } from "@/lib/utils";
 import { Check, Copy } from "lucide-react";
 import { useState } from "react";
 
@@ -23,19 +23,14 @@ export function formatSlipExportText(parlay: GeneratedParlay): string {
     "────────────────────────",
   ];
 
-  const groups = groupByKeyThenKickoff(
+  const ordered = sortByKickoffDesc(
     parlay.legs,
-    (leg) => leg.leagueName || "Otros",
-    (leg) => leg.kickoff
+    (leg) => leg.kickoff,
+    (leg) => leg.leagueName
   );
-  let n = 0;
-  for (const group of groups) {
-    lines.push(`▸ ${group.key}`);
-    for (const leg of group.items) {
-      n += 1;
-      lines.push(...formatSlipLegLines(n, leg));
-    }
-  }
+  ordered.forEach((leg, i) => {
+    lines.push(...formatSlipLegLines(i + 1, leg));
+  });
 
   lines.push("────────────────────────");
   if (parlay.strategyLabel) {
@@ -59,7 +54,7 @@ export function formatSlipLegLines(index: number, leg: ParlayLeg): string[] {
 
   return [
     `${index}. ${leg.matchLabel}`,
-    `   Apuesta: ${betLine} (@${leg.odds.toFixed(2)})`,
+    `   ${leg.leagueName || "Otros"} · Apuesta: ${betLine} (@${leg.odds.toFixed(2)})`,
     `   Condición: ${explicit.condition}`,
     ...formatMarketGuideLines(explicit),
   ];

@@ -42,7 +42,7 @@ import {
 import {
   chileDateString,
   formatKickoffDayLabel,
-  groupByKeyThenKickoff,
+  sortByKickoffDesc,
 } from "./utils";
 import { isAllowedCompetition } from "../config/allowed-leagues";
 import { prioritizeValueLegs, valueRankBonus } from "./value-finder";
@@ -1046,33 +1046,30 @@ export function formatParlayClipboard(
 
   const ref = referenceYmd ?? chileDateString();
 
-  const groups = groupByKeyThenKickoff(
+  const ordered = sortByKickoffDesc(
     parlay.legs,
-    (leg) => leg.leagueName || "Otros",
-    (leg) => leg.kickoff
+    (leg) => leg.kickoff,
+    (leg) => leg.leagueName
   );
 
   let n = 0;
   const legLines: string[] = [];
-  for (const { key: league, items: ordered } of groups) {
-    legLines.push(`▸ ${league}`);
-    for (const l of ordered) {
-      n += 1;
-      const dayLabel = formatKickoffDayLabel(l.kickoff, ref);
-      const explicit = getExplicitPickFromLeg(l);
-      const knockoutLine = l.knockoutContext?.isKnockout
-        ? `     ⚠️ ${l.knockoutContext.note} (${l.knockoutContext.leg})`
-        : undefined;
-      legLines.push(
-        `  ${n}. [${dayLabel} CL] ${l.matchLabel}`,
-        `     Apuesta: ${formatExplicitBetLine(explicit)} @ ${l.odds.toFixed(2)} (${(l.modelProbability * 100).toFixed(1)}%)`,
-        `     Condición: ${explicit.condition}`,
-        ...(knockoutLine ? [knockoutLine] : []),
-        ...formatMarketGuideLines(explicit).map((line) =>
-          line.replace(/^   /, "     ")
-        )
-      );
-    }
+  for (const l of ordered) {
+    n += 1;
+    const dayLabel = formatKickoffDayLabel(l.kickoff, ref);
+    const explicit = getExplicitPickFromLeg(l);
+    const knockoutLine = l.knockoutContext?.isKnockout
+      ? `     ⚠️ ${l.knockoutContext.note} (${l.knockoutContext.leg})`
+      : undefined;
+    legLines.push(
+      `  ${n}. [${dayLabel} CL] ${l.matchLabel}`,
+      `     ${l.leagueName || "Otros"} · Apuesta: ${formatExplicitBetLine(explicit)} @ ${l.odds.toFixed(2)} (${(l.modelProbability * 100).toFixed(1)}%)`,
+      `     Condición: ${explicit.condition}`,
+      ...(knockoutLine ? [knockoutLine] : []),
+      ...formatMarketGuideLines(explicit).map((line) =>
+        line.replace(/^   /, "     ")
+      )
+    );
   }
 
   const lines = [
