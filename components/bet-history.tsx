@@ -211,6 +211,26 @@ function pageItems(current: number, total: number): Array<number | "ellipsis"> {
   return items;
 }
 
+function isYmd(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+/** Inclusive YYYY-MM-DD range; either bound may be empty. */
+function betInDateRange(
+  betDate: string,
+  from: string,
+  to: string
+): boolean {
+  if (from && to) {
+    const start = from <= to ? from : to;
+    const end = from <= to ? to : from;
+    return betDate >= start && betDate <= end;
+  }
+  if (from) return betDate >= from;
+  if (to) return betDate <= to;
+  return true;
+}
+
 export function BetHistory({
   bets,
   removingIds,
@@ -223,11 +243,15 @@ export function BetHistory({
   const searchId = useId();
   const sortId = useId();
   const pageSizeId = useId();
+  const dateFromId = useId();
+  const dateToId = useId();
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(10);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [modeFilter, setModeFilter] = useState<ModeFilter>("ALL");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortBy>("date");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
@@ -241,9 +265,10 @@ export function BetHistory({
     return bets.filter((bet) => {
       if (!statusMatches(bet.status, statusFilter)) return false;
       if (modeFilter !== "ALL" && betModeKey(bet) !== modeFilter) return false;
+      if (!betInDateRange(bet.date, dateFrom, dateTo)) return false;
       return betMatchesSearch(bet, searchQuery);
     });
-  }, [bets, statusFilter, modeFilter, searchQuery]);
+  }, [bets, statusFilter, modeFilter, dateFrom, dateTo, searchQuery]);
 
   const sortedBets = useMemo(() => {
     return [...filteredBets].sort((a, b) =>
@@ -291,6 +316,8 @@ export function BetHistory({
   const filtersActive =
     statusFilter !== "ALL" ||
     modeFilter !== "ALL" ||
+    dateFrom.length > 0 ||
+    dateTo.length > 0 ||
     searchQuery.trim().length > 0;
 
   function resetToFirstPage() {
@@ -304,9 +331,15 @@ export function BetHistory({
     resetToFirstPage();
   }
 
+  function parseDateInput(value: string): string {
+    return isYmd(value) ? value : "";
+  }
+
   function clearFilters() {
     setStatusFilter("ALL");
     setModeFilter("ALL");
+    setDateFrom("");
+    setDateTo("");
     setSearchQuery("");
     setSortBy("date");
     setSortOrder("desc");
@@ -407,6 +440,39 @@ export function BetHistory({
           </div>
 
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+            <div className="grid grid-cols-2 gap-3 lg:w-80">
+              <div className="space-y-1.5">
+                <Label htmlFor={dateFromId}>Desde</Label>
+                <Input
+                  id={dateFromId}
+                  type="date"
+                  value={dateFrom}
+                  max={dateTo || undefined}
+                  onChange={(event) => {
+                    setDateFrom(parseDateInput(event.target.value));
+                    resetToFirstPage();
+                  }}
+                  className="[color-scheme:dark]"
+                  aria-label="Fecha desde"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={dateToId}>Hasta</Label>
+                <Input
+                  id={dateToId}
+                  type="date"
+                  value={dateTo}
+                  min={dateFrom || undefined}
+                  onChange={(event) => {
+                    setDateTo(parseDateInput(event.target.value));
+                    resetToFirstPage();
+                  }}
+                  className="[color-scheme:dark]"
+                  aria-label="Fecha hasta"
+                />
+              </div>
+            </div>
+
             <div className="min-w-0 flex-1 space-y-1.5">
               <Label htmlFor={searchId}>Buscar</Label>
               <div className="relative">

@@ -21,6 +21,7 @@ import {
   CheckCircle2,
   CircleAlert,
   Crown,
+  HelpCircle,
   Hourglass,
   Landmark,
   Shield,
@@ -51,18 +52,18 @@ export function ReadinessGate({ report }: { report: ReadinessReport }) {
               <th className="px-4 py-2.5">Métrica</th>
               <th className="px-4 py-2.5">Umbral mínimo</th>
               <th className="px-4 py-2.5">Actual</th>
-              <th className="px-4 py-2.5">¿Por qué es determinante?</th>
+              <th className="px-4 py-2.5">Estado</th>
             </tr>
           </thead>
           <tbody>
             {report.metrics.map((metric) => (
               <tr key={metric.id} className="border-t border-slate-600/80">
                 <td className="px-4 py-3 align-top">
-                  <div className="flex items-center gap-2">
-                    <StatusDot status={metric.status} />
+                  <div className="flex items-start gap-2">
                     <span className="font-medium text-slate-100">
                       {metric.label}
                     </span>
+                    <MetricWhyHint label={metric.label} why={metric.why} />
                   </div>
                 </td>
                 <td className="px-4 py-3 align-top tabular-nums text-slate-300">
@@ -81,9 +82,13 @@ export function ReadinessGate({ report }: { report: ReadinessReport }) {
                   >
                     {metric.display}
                   </p>
-                  <p className="mt-0.5 text-xs text-slate-400">{metric.detail}</p>
+                  <p className="mt-0.5 max-w-md text-xs leading-relaxed text-slate-400">
+                    {metric.detail}
+                  </p>
                 </td>
-                <td className="px-4 py-3 align-top text-slate-300">{metric.why}</td>
+                <td className="px-4 py-3 align-top">
+                  <StatusBadge status={metric.status} />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -118,19 +123,31 @@ export function ReadinessSummaryCard({
         </Badge>
       </CardHeader>
       <CardContent className="space-y-3">
+        {!report.readyForRealCapital && (
+          <p
+            role="status"
+            className="rounded-xl border border-amber-400/35 bg-amber-950/30 px-3 py-2 text-xs leading-relaxed text-amber-100"
+          >
+            Diagnóstico: tu estrategia aún no está lista para dinero real. Sigue
+            en modo prueba hasta corregir las métricas en rojo.
+          </p>
+        )}
         <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {report.metrics.map((metric) => (
             <li
               key={metric.id}
               className="rounded-xl border border-slate-600/80 bg-slate-950/50 px-3 py-2"
             >
-              <p className="flex items-center gap-1.5 text-xs text-slate-400">
-                <StatusDot status={metric.status} />
+              <div className="flex items-center gap-1.5 text-xs text-slate-400">
                 {metric.label}
-              </p>
+                <MetricWhyHint label={metric.label} why={metric.why} />
+              </div>
               <p className="mt-1 text-sm font-semibold tabular-nums text-slate-100">
                 {metric.display}
               </p>
+              <div className="mt-1.5">
+                <StatusBadge status={metric.status} compact />
+              </div>
             </li>
           ))}
         </ul>
@@ -165,13 +182,13 @@ function VerdictBanner({ report }: { report: ReadinessReport }) {
           <p className="text-base font-semibold text-slate-50">
             {ready
               ? "La base de datos cumple los umbrales para transicionar capital con Kelly fraccionado."
-              : "Todavía no metas dinero serio: faltan umbrales o muestra."}
+              : "Diagnóstico: Tu estrategia aún no está lista para dinero real."}
           </p>
           <p className="mt-1 text-sm leading-relaxed text-slate-200">
-            {report.settledTickets} tickets liquidados · {report.passedCount}/
-            {report.metrics.length} métricas en verde. Banca notional usada para
-            drawdown: {formatCLP(report.initialBankroll)} (50× stake medio, o la
-            que indiques).
+            {ready
+              ? `${report.settledTickets} tickets liquidados · ${report.passedCount}/${report.metrics.length} métricas en verde. Banca notional usada para drawdown: ${formatCLP(report.initialBankroll)} (50× stake medio, o la que indiques).`
+              : "Te sugerimos seguir en modo prueba (paper trading) hasta corregir las métricas en rojo. " +
+                `${report.settledTickets} tickets liquidados · ${report.passedCount}/${report.metrics.length} métricas en verde. Banca notional para drawdown: ${formatCLP(report.initialBankroll)}.`}
           </p>
         </div>
       </CardContent>
@@ -179,19 +196,64 @@ function VerdictBanner({ report }: { report: ReadinessReport }) {
   );
 }
 
-function StatusDot({ status }: { status: ReadinessMetric["status"] }) {
+function StatusBadge({
+  status,
+  compact = false,
+}: {
+  status: ReadinessMetric["status"];
+  compact?: boolean;
+}) {
   if (status === "pass") {
     return (
-      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" aria-label="Cumple" />
+      <Badge
+        variant="success"
+        className={cn("gap-1", compact && "px-2 py-0 text-[10px]")}
+      >
+        <CheckCircle2 className="h-3 w-3" aria-hidden />
+        {compact ? "Aprobado" : "Aprobado / Seguro"}
+      </Badge>
     );
   }
   if (status === "fail") {
     return (
-      <CircleAlert className="h-4 w-4 shrink-0 text-rose-400" aria-label="No cumple" />
+      <Badge
+        variant="danger"
+        className={cn("gap-1", compact && "px-2 py-0 text-[10px]")}
+      >
+        <CircleAlert className="h-3 w-3" aria-hidden />
+        {compact ? "En riesgo" : "En Riesgo / No Apto"}
+      </Badge>
     );
   }
   return (
-    <Hourglass className="h-4 w-4 shrink-0 text-amber-300" aria-label="Muestra insuficiente" />
+    <Badge
+      variant="warning"
+      className={cn("gap-1", compact && "px-2 py-0 text-[10px]")}
+    >
+      <Hourglass className="h-3 w-3" aria-hidden />
+      Datos Insuficientes
+    </Badge>
+  );
+}
+
+/** Native details popover — no tooltip lib. Works on hover focus via open + tap. */
+function MetricWhyHint({ label, why }: { label: string; why: string }) {
+  return (
+    <details className="group relative inline-block shrink-0">
+      <summary
+        className="flex cursor-help list-none items-center rounded-full text-slate-400 outline-none marker:content-none [&::-webkit-details-marker]:hidden hover:text-sky-300 focus-visible:ring-2 focus-visible:ring-sky-400/60"
+        aria-label={`Por qué importa: ${label}`}
+      >
+        <HelpCircle className="h-3.5 w-3.5" aria-hidden />
+      </summary>
+      <div
+        role="note"
+        className="absolute left-0 top-full z-20 mt-1.5 w-72 max-w-[min(18rem,calc(100vw-2rem))] rounded-xl border border-slate-500/80 bg-slate-950 p-3 text-xs leading-relaxed text-slate-200 shadow-lg"
+      >
+        <p className="mb-1 font-medium text-slate-100">¿Por qué importa?</p>
+        <p>{why}</p>
+      </div>
+    </details>
   );
 }
 

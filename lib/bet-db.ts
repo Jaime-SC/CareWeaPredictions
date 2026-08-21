@@ -119,37 +119,48 @@ async function upsertFixture(leg: RecordBetLegInput) {
   const apiFixtureId = parseFixtureId(leg.matchId);
   const { homeTeam, awayTeam } = splitMatchLabel(leg.matchLabel);
   const matchDate = toIsoDateTime(leg.kickoff || undefined);
+  const data = {
+    homeTeam: homeTeam || "Unknown",
+    awayTeam: awayTeam || "Unknown",
+    leagueId: leg.leagueId || "unknown",
+    leagueName: leg.leagueName || "Otros",
+    matchDate,
+    status: "NS" as const,
+  };
 
+  // ponytail: Neon HTTP rejects Prisma.upsert (implicit transaction).
   if (apiFixtureId > 0) {
-    return prisma.matchFixture.upsert({
+    const existing = await prisma.matchFixture.findUnique({
       where: { apiFixtureId },
-      create: {
-        apiFixtureId,
-        homeTeam: homeTeam || "Unknown",
-        awayTeam: awayTeam || "Unknown",
-        leagueId: leg.leagueId || "unknown",
-        leagueName: leg.leagueName || "Otros",
-        matchDate,
-        status: "NS",
-      },
-      update: {
-        homeTeam: homeTeam || undefined,
-        awayTeam: awayTeam || undefined,
-        leagueName: leg.leagueName || undefined,
-        matchDate,
-      },
     });
+    if (existing) {
+      return prisma.matchFixture.update({
+        where: { id: existing.id },
+        data: {
+          homeTeam: homeTeam || undefined,
+          awayTeam: awayTeam || undefined,
+          leagueName: leg.leagueName || undefined,
+          matchDate,
+        },
+      });
+    }
+    try {
+      return await prisma.matchFixture.create({
+        data: { apiFixtureId, ...data },
+      });
+    } catch {
+      const raced = await prisma.matchFixture.findUnique({
+        where: { apiFixtureId },
+      });
+      if (raced) return raced;
+      throw new Error("No se pudo guardar el fixture en Neon.");
+    }
   }
 
   return prisma.matchFixture.create({
     data: {
       apiFixtureId: -(Date.now() + Math.floor(Math.random() * 100_000)),
-      homeTeam: homeTeam || "Unknown",
-      awayTeam: awayTeam || "Unknown",
-      leagueId: leg.leagueId || "unknown",
-      leagueName: leg.leagueName || "Otros",
-      matchDate,
-      status: "NS",
+      ...data,
     },
   });
 }

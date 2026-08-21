@@ -10,6 +10,8 @@ import {
   CardDescription,
   CardHeader,
 } from "@/components/ui/card";
+import { BottomSheet } from "@/components/bottom-sheet";
+import { ParlaySlip } from "@/components/ParlaySlip";
 import { SingleStakeBadge } from "@/components/stake-badge";
 import { calculateSingleStake } from "@/lib/stake-engine";
 import {
@@ -26,7 +28,8 @@ import {
 } from "@/lib/history-tracker";
 import { postBetRecord } from "@/lib/bet-record-client";
 import { contextBadgeLabels } from "@/lib/context-engine";
-import type { SafePickItem } from "@/lib/types";
+import { recalculateParlay } from "@/lib/parlay-recalc";
+import type { GeneratedParlay, ParlayLeg, SafePickItem } from "@/lib/types";
 import {
   formatExplicitBetLine,
   getExplicitPickFromLeg,
@@ -45,13 +48,42 @@ import {
   AlertTriangle,
   Check,
   Flame,
+  Layers,
   Lightbulb,
   Loader2,
   Pin,
   Target,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+function safePickToLeg(p: SafePickItem): ParlayLeg {
+  return {
+    matchId: p.matchId,
+    matchLabel: p.matchLabel,
+    leagueName: p.leagueName,
+    kickoff: p.kickoff,
+    market: p.market,
+    marketLabel: p.marketLabel,
+    odds: p.odds,
+    modelProbability: p.modelProbability,
+    edge: p.edge,
+    contextFlags: p.contextFlags,
+    contextNotes: p.contextNotes,
+    referee: p.referee,
+    venue: p.venue,
+    knockoutContext: p.knockoutContext,
+  };
+}
+
+function buildSafeCombinada(picks: SafePickItem[]): GeneratedParlay {
+  return recalculateParlay(picks.map(safePickToLeg), {
+    stake: 1,
+    strategyMode: "daily-safe",
+    strategyLabel: "Combinada picks seguros",
+    riskTier: "safe",
+  });
+}
 
 interface SafePicksListProps {
   picks: SafePickItem[];
@@ -80,6 +112,11 @@ export function SafePicksList({
   const [stakeInput, setStakeInput] = useState("");
   const [registerMsg, setRegisterMsg] = useState<string | null>(null);
   const [registeringKey, setRegisteringKey] = useState<string | null>(null);
+  const [combinadaOpen, setCombinadaOpen] = useState(false);
+  const [combinadaParlay, setCombinadaParlay] = useState<GeneratedParlay | null>(
+    null
+  );
+  const [combinadaKey, setCombinadaKey] = useState(0);
   const stakeCLP = parseStakeCLP(stakeInput);
   const settings = useBankrollSettings();
   const exceedsBankroll =
@@ -135,6 +172,17 @@ export function SafePicksList({
       setStakeInput(formatted);
     }
   }, [suggestedStake, stakeInput]);
+
+  function openCombinada() {
+    if (picks.length < 2) return;
+    setCombinadaParlay(buildSafeCombinada(picks));
+    setCombinadaKey((k) => k + 1);
+    setCombinadaOpen(true);
+  }
+
+  const closeCombinada = useCallback(() => {
+    setCombinadaOpen(false);
+  }, []);
 
   async function handleRegister(pick: SafePickItem) {
     const key = pickKey(pick);
@@ -208,6 +256,7 @@ export function SafePicksList({
   }
 
   const hasUnregistered = picks.some((pick) => !registeredKeys.has(pickKey(pick)));
+  const canBuildCombinada = picks.length >= 2;
 
   return (
     <Card>
@@ -233,31 +282,44 @@ export function SafePicksList({
               </p>
             )}
           </div>
-          {onRefresh && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onRefresh}
-              disabled={loading || Boolean(cooldownLabel)}
-              aria-busy={loading}
-              aria-label={
-                loading
-                  ? "Actualizando picks"
+          <div className="flex flex-wrap items-center gap-2">
+            {canBuildCombinada && (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={openCombinada}
+                aria-label="Generar combinada con todos los picks seguros"
+              >
+                <Layers className="h-4 w-4" aria-hidden />
+                Generar combinada
+              </Button>
+            )}
+            {onRefresh && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onRefresh}
+                disabled={loading || Boolean(cooldownLabel)}
+                aria-busy={loading}
+                aria-label={
+                  loading
+                    ? "Actualizando picks"
+                    : cooldownLabel
+                      ? `Espera ${cooldownLabel} para actualizar`
+                      : "Actualizar picks"
+                }
+              >
+                {loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                ) : null}
+                {loading
+                  ? "Actualizando…"
                   : cooldownLabel
-                    ? `Espera ${cooldownLabel} para actualizar`
-                    : "Actualizar picks"
-              }
-            >
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              ) : null}
-              {loading
-                ? "Actualizando…"
-                : cooldownLabel
-                  ? `Listo en ${cooldownLabel}`
-                  : "Actualizar"}
-            </Button>
-          )}
+                    ? `Listo en ${cooldownLabel}`
+                    : "Actualizar"}
+              </Button>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -441,6 +503,22 @@ export function SafePicksList({
           </>
         )}
       </CardContent>
+
+      <BottomSheet
+        open={combinadaOpen && combinadaParlay != null}
+        onClose={closeCombinada}
+        title="Combinada de picks seguros"
+        desktopClassName="md:!w-[min(36rem,calc(100vw-2rem))]"
+      >
+        {combinadaParlay ? (
+          <ParlaySlip
+            key={combinadaKey}
+            parlay={combinadaParlay}
+            historyDate={date}
+            embedded
+          />
+        ) : null}
+      </BottomSheet>
     </Card>
   );
 }

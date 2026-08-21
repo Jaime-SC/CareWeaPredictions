@@ -22,12 +22,24 @@ import {
   generateParlay,
   singleDayShortfallNotice,
 } from "@/lib/parlay-generator";
+import {
+  syncAutomatedTeamProfileFlags,
+  warmTeamProfileCache,
+} from "@/lib/team-profiler";
 import type { Match } from "@/lib/types";
 import { chileDateOffset, chileDateString } from "@/lib/utils";
 import {
   getWeeklyDateRange,
   INSUFFICIENT_MATCHES_MESSAGE,
 } from "@/lib/monopoly-engine";
+
+/** Cache-first DT/absences → TeamProfile before Poisson in generateParlay. */
+async function withAutomatedTeamProfiles(matches: Match[]): Promise<Match[]> {
+  if (matches.length === 0) return matches;
+  await syncAutomatedTeamProfileFlags(matches);
+  await warmTeamProfileCache(matches.flatMap((m) => [m.home.id, m.away.id]));
+  return matches;
+}
 
 /**
  * Body/query: { strategyMode, date, multiDay?: boolean }
@@ -107,11 +119,14 @@ async function loadParlayMatchPool(
           404
         );
       }
-      return {
-        matches: day.matches.sort(
+      const matches = await withAutomatedTeamProfiles(
+        day.matches.sort(
           (a, b) =>
             new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime()
-        ),
+        )
+      );
+      return {
+        matches,
         daysFetched: day.daysFetched,
         poolMode: day.poolMode,
         datesUsed: [primaryDate],
@@ -172,7 +187,7 @@ async function loadParlayMatchPool(
   );
 
   return {
-    matches,
+    matches: await withAutomatedTeamProfiles(matches),
     daysFetched,
     poolMode,
     datesUsed,
@@ -186,7 +201,9 @@ async function buildMonopolyParlayResponse(ignoreRotationFilter: boolean) {
   const strategyMode = "monopoly-asymmetry" as const;
   const preset = getStrategyPreset(strategyMode);
   const { matches: rawMatches, daysFetched } = await fetchMonopolyMatchPool();
-  const matches = await enrichMatchesFromLocalData(rawMatches);
+  const matches = await withAutomatedTeamProfiles(
+    await enrichMatchesFromLocalData(rawMatches)
+  );
 
   const parlay = generateParlay(matches, { ...preset, ignoreRotationFilter });
   const clipboard = formatParlayClipboard(parlay, "CLP", week.fromYmd);

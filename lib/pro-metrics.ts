@@ -370,55 +370,55 @@ export function buildReadinessMetrics(input: {
   const metrics: ReadinessMetric[] = [
     {
       id: "sample",
-      label: "Muestra (N)",
-      thresholdLabel: `≥ ${READINESS_THRESHOLDS.minSample}–${READINESS_THRESHOLDS.strongSample} apuestas`,
-      why: "Número mínimo de tickets liquidados para disipar el ruido estadístico y las rachas de suerte.",
+      label: "Volumen de Apuestas (Muestra)",
+      thresholdLabel: `≥ ${READINESS_THRESHOLDS.minSample} a ${READINESS_THRESHOLDS.strongSample} tickets resueltos`,
+      why: "Un ROI positivo en pocos partidos puede ser pura suerte. Necesitamos entre 300 y 500 apuestas para filtrar el ruido y confirmar de manera estadísticamente sólida que tu modelo realmente funciona.",
       value: n,
       display: String(n),
       status: statusFrom(samplePass, n === 0),
       detail:
         n >= READINESS_THRESHOLDS.strongSample
-          ? "Muestra fuerte (≥ 500)."
+          ? "Muestra profesional excelente. La varianza y la suerte están casi totalmente descartadas."
           : samplePass
-            ? "Muestra mínima alcanzada (≥ 300)."
-            : `Faltan ${READINESS_THRESHOLDS.minSample - n} tickets liquidados.`,
+            ? "Muestra mínima alcanzada. Vas por buen camino, aunque llegar a 500 dará una certeza total."
+            : `Aún hay mucho riesgo de racha de suerte. Faltan ${READINESS_THRESHOLDS.minSample - n} apuestas para validar la estrategia de forma segura.`,
     },
     {
       id: "roi",
-      label: "Yield / ROI",
-      thresholdLabel: `+${READINESS_THRESHOLDS.minRoiPct}% a +8%`,
-      why: "En apuestas deportivas, mantener un ROI superior al 5% tras 500 apuestas es rendimiento de nivel profesional.",
+      label: "Rentabilidad (Yield / ROI)",
+      thresholdLabel: `≥ +${READINESS_THRESHOLDS.minRoiPct}% (Nivel Pro: +${READINESS_THRESHOLDS.professionalRoiPct}%)`,
+      why: "Mide cuánto dinero ganas por cada $100 apostados. En apuestas profesionales, un ROI sostenido del +5% tras cientos de apuestas es excelente y supera ampliamente a la mayoría de los fondos de inversión.",
       value: n > 0 ? roiPct : null,
       display: n > 0 ? `${roiPct >= 0 ? "+" : ""}${roiPct.toFixed(1)}%` : "—",
       status: statusFrom(roiPass, n === 0),
       detail:
         n === 0
-          ? "Sin tickets liquidados."
+          ? "Sin tickets liquidados todavía para medir la rentabilidad."
           : roiPct >= READINESS_THRESHOLDS.professionalRoiPct
-            ? "En banda profesional (≥ +5%)."
+            ? "Rendimiento de nivel profesional. Tu ventaja frente a las casas es sobresaliente."
             : roiPass
-              ? "Supera el piso de +4%."
-              : "Por debajo del piso de +4%.",
+              ? "Supera el mínimo recomendado (+4%). Tu estrategia es rentable."
+              : "Por debajo del umbral de seguridad (+4%). La ganancia actual no compensa el riesgo del mercado.",
     },
     {
       id: "clv",
-      label: "CLV (Closing Line Value)",
-      thresholdLabel: `> ${READINESS_THRESHOLDS.minClvRate * 100}% del tiempo`,
-      why: "Mide si la cuota a la que apostaste fue superior a la cuota final con la que inició el partido.",
+      label: "Valor vs. Cierre (CLV)",
+      thresholdLabel: `> ${READINESS_THRESHOLDS.minClvRate * 100}% de los partidos`,
+      why: "Es la 'métrica reina'. Si apuestas a una cuota de 1.90 y el partido cierra en 1.75, entraste con ventaja. Si le ganas al mercado en más del 55% de las veces, es la prueba definitiva de que estás adelantándote a las casas de apuestas.",
       value: clv.rate,
       display: clv.rate == null ? "—" : `${(clv.rate * 100).toFixed(1)}%`,
       status: statusFrom(clvPass, clvThin),
       detail: clvThin
-        ? clv.compared === 0
-          ? "Aún no hay snapshots de cuota de cierre posteriores al pick."
-          : `Solo ${clv.compared} comparaciones (mínimo ${READINESS_THRESHOLDS.minClvSample}).`
-          : `${clv.beats} beats / ${clv.compared} cierres (${clv.pushes} líneas sin movimiento).`,
+        ? "Insuficientes comparaciones de cuota cerca del inicio del partido para emitir un juicio."
+        : clvPass
+          ? "¡Excelente! Constantemente consigues mejores cuotas que las que el mercado ofrece al inicio del partido."
+          : "Estás apostando con cuotas peores o iguales a las de cierre. Esto indica que la casa se está ajustando antes que tú.",
     },
     {
       id: "profitFactor",
-      label: "Profit Factor",
+      label: "Factor de Beneficio (Profit Factor)",
       thresholdLabel: `> ${READINESS_THRESHOLDS.minProfitFactor.toFixed(2)}`,
-      why: "Ganancias brutas divididas entre pérdidas brutas. Indica cuánto ganas por cada peso perdido.",
+      why: "Mide el peso de tus victorias contra tus derrotas (Ganancias Brutas ÷ Pérdidas Brutas). Un valor de 1.20 significa que por cada $1.000 pesos que pierdes, ganas $1.200.",
       value:
         profitFactor == null || !Number.isFinite(profitFactor)
           ? profitFactor == null
@@ -428,36 +428,38 @@ export function buildReadinessMetrics(input: {
       display: pfDisplay,
       status: statusFrom(pfPass, pfThin),
       detail: pfThin
-        ? "Sin tickets liquidados."
+        ? "Sin tickets liquidados todavía para calcular el factor de beneficio."
         : pfPass
-          ? "Más de $1.20 ganado por cada $1 perdido."
-          : "Las pérdidas brutas pesan demasiado frente a las ganancias.",
+          ? "Tus victorias superan con holgura a tus derrotas ($1.20+ ganados por cada $1 perdido)."
+          : "Tus ganancias no están compensando adecuadamente las pérdidas acumuladas.",
     },
     {
       id: "pValue",
-      label: "p-Valor",
-      thresholdLabel: `< ${READINESS_THRESHOLDS.maxPValue}`,
-      why: "Probabilidad de que la ganancia sea casualidad. Si es < 0.05, hay un 95% de certeza de que el modelo no es ruido.",
+      label: "Fiabilidad Estadística (p-Valor)",
+      thresholdLabel: `< ${READINESS_THRESHOLDS.maxPValue} (Confianza del 95%)`,
+      why: "Es el detector de 'suerte'. Mide la probabilidad de que tus resultados sean fruto del azar. Un p-valor menor a 0.05 confirma con un 95% de certeza que tienes un modelo ganador y no una simple racha.",
       value: pValue,
       display: pValue == null ? "—" : pValue < 0.001 ? "< 0.001" : pValue.toFixed(3),
       status: statusFrom(pPass, pThin),
       detail: pThin
-        ? "Se necesitan ≥ 30 retornos para un z-test fiable."
+        ? "Se necesitan al menos 30 apuestas cerradas para calcular la significación estadística."
         : pPass
-          ? "Rechaza azar al 95% (una cola)."
-          : "Aún no se distingue de una racha de suerte.",
+          ? "Matemáticamente probado: Hay un 95%+ de certeza de que tus ganancias no son casualidad."
+          : "Riesgo alto de azar: Estadísticamente, aún no se puede descartar que tus resultados sean solo una racha de suerte.",
     },
     {
       id: "maxDrawdown",
-      label: "Max Drawdown",
-      thresholdLabel: `< ${READINESS_THRESHOLDS.maxDrawdownPct}% de la banca`,
-      why: "La peor racha de caídas desde un máximo. Indica qué tan protegido está el capital en el peor escenario.",
+      label: "Caída Máxima (Max Drawdown)",
+      thresholdLabel: `< ${READINESS_THRESHOLDS.maxDrawdownPct}% del capital`,
+      why: "Mide la peor caída en picada de tu saldo desde su punto más alto. Controlar el Drawdown por debajo del 20% es lo que evita que una mala racha quiebre tu cuenta.",
       value: dd.pct,
       display: dd.pct == null ? "—" : `${dd.pct.toFixed(1)}%`,
       status: statusFrom(ddPass, ddThin),
       detail: ddThin
-        ? "Sin curva de banca todavía."
-        : `Caída máxima ${Math.round(dd.amount).toLocaleString("es-CL")} sobre banca notional ${Math.round(bankroll).toLocaleString("es-CL")}.`,
+        ? "Sin curva de banca todavía para medir la caída máxima."
+        : ddPass
+          ? "Caída máxima bajo control. Tu gestión de riesgo y tamaño de apuesta (sizing) son saludables."
+          : `Alerta de riesgo: La cuenta cayó un ${dd.pct!.toFixed(1)}%, lo cual es peligroso. Revisa la gestión de stake o reduce el tamaño de apuesta.`,
     },
   ];
 

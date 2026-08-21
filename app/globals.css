@@ -180,8 +180,11 @@ body {
   bottom: 0;
   z-index: 61;
   max-height: min(92dvh, 100%);
+  overflow-x: hidden;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  touch-action: pan-y;
   border-radius: 1.25rem 1.25rem 0 0;
   background: rgba(28, 28, 30, 0.96);
   -webkit-backdrop-filter: blur(24px) saturate(1.4);

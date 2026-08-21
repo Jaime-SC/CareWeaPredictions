@@ -3,6 +3,7 @@
  * Never issues live API-Football requests.
  */
 import { prisma } from "./db";
+import { warmTeamProfileCache } from "./team-profiler";
 import type { Match, TeamInjury, TeamStats } from "./types";
 import { classifyInjuryRole } from "./context-engine";
 import { isKnockoutFixtureText } from "./knockout-engine";
@@ -554,6 +555,7 @@ export async function enrichMatchesFromLocalData(
     loadFinishedFromMatchFixture(),
     loadFinishedFromApiCache(),
     loadInjuriesFromApiCache(),
+    warmTeamProfileCache(matches.flatMap((m) => [m.home.id, m.away.id])),
   ]);
   const fixtures = dedupeFixtures([...dbRows, ...cacheRows]);
   if (fixtures.length === 0 && injuryIndex.byTeam.size === 0) return matches;

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { maybeRecalibrateAfterSettlement } from "@/lib/auto-tuner";
 import { errorMessage, jsonError } from "@/lib/api-response";
 import { settlePendingTickets } from "@/lib/settlement";
+import { maybeUpdateTeamProfilesAfterSettlement } from "@/lib/team-profiler";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -19,9 +20,10 @@ const NO_STORE_HEADERS = {
 export async function POST() {
   try {
     const result = await settlePendingTickets();
-    const calibration = await maybeRecalibrateAfterSettlement(
-      result.updatedLegsCount
-    );
+    const [calibration, teamProfiles] = await Promise.all([
+      maybeRecalibrateAfterSettlement(result.updatedLegsCount),
+      maybeUpdateTeamProfilesAfterSettlement(result.updatedLegsCount),
+    ]);
     return NextResponse.json(
       {
         success: result.ok,
@@ -46,6 +48,12 @@ export async function POST() {
               sampleSize: calibration.sampleSize,
               calibratedAt: calibration.weights.calibratedAt,
               message: calibration.message,
+            }
+          : null,
+        teamProfiles: teamProfiles
+          ? {
+              teamsUpserted: teamProfiles.teamsUpserted,
+              matchesUsed: teamProfiles.matchesUsed,
             }
           : null,
       },

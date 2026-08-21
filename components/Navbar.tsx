@@ -11,12 +11,14 @@ import {
   FlaskConical,
   LayoutDashboard,
   Layers,
+  Users,
 } from "lucide-react";
 
 const links = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/builder", label: "Generador", icon: Layers },
   { href: "/stats", label: "Estadísticas", icon: BarChart3 },
+  { href: "/teams", label: "Equipos", icon: Users },
   { href: "/health", label: "Salud", icon: Activity },
 ];
 

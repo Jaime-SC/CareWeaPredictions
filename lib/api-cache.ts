@@ -80,13 +80,29 @@ export function ttlMinutesForFixtureDate(dateYmd: string): number | null {
   return null;
 }
 
+function expiresAtMs(
+  value: Date | string | number | null | undefined
+): number | null {
+  if (value instanceof Date) {
+    const t = value.getTime();
+    return Number.isFinite(t) ? t : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const t = Date.parse(value);
+    return Number.isFinite(t) ? t : null;
+  }
+  return null;
+}
+
 export async function getCachedPayload<T>(cacheKey: string): Promise<T | null> {
   try {
     const row = await prisma.cachedApiResponse.findUnique({
       where: { id: cacheKey },
     });
     if (!row) return null;
-    if (row.expiresAt.getTime() <= Date.now()) return null;
+    const exp = expiresAtMs(row.expiresAt);
+    if (exp == null || exp <= Date.now()) return null;
     return JSON.parse(row.payload) as T;
   } catch (err) {
     console.warn(`[api-cache] Failed reading key=${cacheKey}:`, err);
@@ -103,20 +119,27 @@ export async function upsertCachedPayload(
   const expiresAt = expiresAtFromTtl(ttlMinutes);
   const body = JSON.stringify(payload);
   try {
-    await prisma.cachedApiResponse.upsert({
+    // ponytail: Neon HTTP rejects Prisma.upsert (implicit transaction).
+    const existing = await prisma.cachedApiResponse.findUnique({
       where: { id: cacheKey },
-      create: {
-        id: cacheKey,
-        endpoint,
-        payload: body,
-        expiresAt,
-      },
-      update: {
-        endpoint,
-        payload: body,
-        expiresAt,
-      },
     });
+    if (existing) {
+      await prisma.cachedApiResponse.update({
+        where: { id: cacheKey },
+        data: { endpoint, payload: body, expiresAt },
+      });
+      return;
+    }
+    try {
+      await prisma.cachedApiResponse.create({
+        data: { id: cacheKey, endpoint, payload: body, expiresAt },
+      });
+    } catch {
+      await prisma.cachedApiResponse.update({
+        where: { id: cacheKey },
+        data: { endpoint, payload: body, expiresAt },
+      });
+    }
   } catch (err) {
     console.warn(`[api-cache] Failed upsert key=${cacheKey}:`, err);
   }
@@ -164,22 +187,19 @@ export async function syncApiQuotaFromHeaders(
   }
 
   try {
-    const row = await prisma.apiQuotaDaily.upsert({
-      where: { date },
-      create: {
-        date,
-        callCount: parsed.used,
-        limit: parsed.limit,
-        remaining: parsed.remaining,
-        fromHeaders: true,
-      },
-      update: {
-        callCount: parsed.used,
-        limit: parsed.limit,
-        remaining: parsed.remaining,
-        fromHeaders: true,
-      },
-    });
+    // ponytail: Neon HTTP rejects Prisma.upsert (implicit transaction).
+    const data = {
+      callCount: parsed.used,
+      limit: parsed.limit,
+      remaining: parsed.remaining,
+      fromHeaders: true,
+    };
+    const existing = await prisma.apiQuotaDaily.findUnique({ where: { date } });
+    const row = existing
+      ? await prisma.apiQuotaDaily.update({ where: { date }, data })
+      : await prisma.apiQuotaDaily.create({ data: { date, ...data } }).catch(
+          async () => prisma.apiQuotaDaily.update({ where: { date }, data })
+        );
     return {
       date: row.date,
       used: row.callCount,

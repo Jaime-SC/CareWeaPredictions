@@ -8,12 +8,14 @@ import {
   BarChart3,
   Layers,
   LayoutDashboard,
+  Users,
 } from "lucide-react";
 
 const tabs = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/builder", label: "Generador", icon: Layers },
   { href: "/stats", label: "Estadísticas", icon: BarChart3 },
+  { href: "/teams", label: "Equipos", icon: Users },
   { href: "/health", label: "Salud", icon: Activity },
 ] as const;
 

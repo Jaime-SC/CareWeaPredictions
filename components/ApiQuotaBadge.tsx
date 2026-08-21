@@ -130,13 +130,16 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
   }, [refresh]);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || !quota || quota.remaining > 0) {
+      setDailyResetMs(0);
+      return;
+    }
     setDailyResetMs(msUntilUtcMidnight());
     const id = window.setInterval(() => {
       setDailyResetMs(msUntilUtcMidnight());
     }, 1000);
     return () => window.clearInterval(id);
-  }, [mounted]);
+  }, [mounted, quota]);
 
   if (!mounted) return null;
 
@@ -165,9 +168,8 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
 
   if (!quota) return null;
 
-  const resetLabel = formatDurationShort(dailyResetMs);
-
   if (quota.remaining <= 0) {
+    const resetLabel = formatDurationShort(dailyResetMs);
     return (
       <span
         role="status"
@@ -197,8 +199,7 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
   return (
     <span
       role="status"
-      aria-label={`Cuota oficial API-Football del ${quota.date}: ${quota.used} de ${quota.limit} usadas (${quota.remaining} restantes). Se reinicia en ${resetLabel} (medianoche UTC). Estado ${label}.`}
-      title={`API ${quota.used}/${quota.limit} · ${quota.remaining} restantes`}
+      aria-label={`Cuota oficial API-Football del ${quota.date}: ${quota.used} de ${quota.limit} usadas, ${quota.remaining} restantes. Estado ${label}.`}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium tabular-nums ring-1",
         tone,
@@ -209,7 +210,12 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
         aria-hidden
         className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dotClass)}
       />
-      <span>Reset en {resetLabel}</span>
+      <span className="hidden sm:inline">
+        API Quota: {quota.used} / {quota.limit} · {quota.remaining} restantes
+      </span>
+      <span className="sm:hidden">
+        API {quota.used}/{quota.limit} · {quota.remaining} restantes
+      </span>
     </span>
   );
 }

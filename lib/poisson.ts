@@ -19,6 +19,11 @@ import {
   loadModelWeights,
   resolveMinProbability,
 } from "./model-weights";
+import {
+  applyTeamProfileCalibration,
+  keyAbsenceLambdaFactorForSide,
+  peekTeamProfile,
+} from "./team-profiler";
 import { applyTuningToProbability } from "./tuning-config";
 
 const FATIGUE_XG_FACTOR = 0.9;
@@ -118,6 +123,16 @@ export function estimateExpectedGoals(match: Match): {
   const inj = injuryLambdaFactors(match);
   lambdaHome *= inj.homeAttack * inj.awayDefense;
   lambdaAway *= inj.awayAttack * inj.homeDefense;
+
+  // TeamProfile / match injuries: −15% λ when key absences detected
+  lambdaHome *= keyAbsenceLambdaFactorForSide(
+    match.home.id,
+    match.home.injuries
+  );
+  lambdaAway *= keyAbsenceLambdaFactorForSide(
+    match.away.id,
+    match.away.injuries
+  );
 
   lambdaHome *= formLambdaFactor(match.home.form);
   lambdaAway *= formLambdaFactor(match.away.form);
@@ -461,12 +476,28 @@ export function predictMatchMarkets(
   const baseProbs = marketProbsFromMatrix(matrix);
 
   const ctx = applyContextToMarkets(resolved, baseProbs);
-  const probs = applyKnockoutMarketAdjustments(resolved, ctx.probs);
+  const knockoutProbs = applyKnockoutMarketAdjustments(resolved, ctx.probs);
+  // Venue-gated TeamProfile boosts (N≥4 home/away) + clamp ≤+8% / ≤0.92
+  const profileCal = applyTeamProfileCalibration(
+    knockoutProbs,
+    peekTeamProfile(resolved.home.id),
+    peekTeamProfile(resolved.away.id)
+  );
+  const probs = profileCal.probs;
   const knockoutFlags = knockoutEval.flags;
-  const mergedFlags = [...new Set([...ctx.contextFlags, ...knockoutFlags])];
-  const mergedNotes = knockoutContext
-    ? [...ctx.contextNotes, knockoutContext.note]
-    : ctx.contextNotes;
+  const mergedFlags = [
+    ...new Set([
+      ...ctx.contextFlags,
+      ...knockoutFlags,
+      ...profileCal.flags,
+    ]),
+  ];
+  const mergedNotes = [
+    ...(knockoutContext
+      ? [...ctx.contextNotes, knockoutContext.note]
+      : ctx.contextNotes),
+    ...profileCal.notes,
+  ];
 
   const markets: MarketPrediction[] = (
     Object.keys(probs) as MarketType[]

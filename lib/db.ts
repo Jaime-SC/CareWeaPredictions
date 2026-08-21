@@ -27,7 +27,7 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 /** Bump when Prisma schema fields change so a stale singleton is dropped. */
-const PRISMA_SCHEMA_ID = "bankroll-settings-v1";
+const PRISMA_SCHEMA_ID = "team-profile-guards-v3";
 
 if (globalForPrisma.prismaSchemaId !== PRISMA_SCHEMA_ID) {
   globalForPrisma.prisma = undefined;

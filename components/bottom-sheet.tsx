@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { X } from "lucide-react";
 
@@ -22,6 +23,11 @@ export function BottomSheet({
   desktopClassName?: string;
 }) {
   const titleId = useId();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -39,9 +45,9 @@ export function BottomSheet({
     };
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  return (
+  return createPortal(
     <>
       <button
         type="button"
@@ -76,6 +82,7 @@ export function BottomSheet({
         </div>
         <div className="px-4 pb-2">{children}</div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }

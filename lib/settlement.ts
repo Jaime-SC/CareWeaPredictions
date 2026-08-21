@@ -473,48 +473,38 @@ export async function settlePendingTickets(): Promise<SettlementResult> {
     else if (nextStatus === "void") ticketsVoided += 1;
   }
 
-  const writes: Array<Promise<unknown>> = [];
+  // Sequential writes: Prisma batches Promise.all into a transaction,
+  // and Neon HTTP throws "Transactions are not supported in HTTP mode".
   for (const [id, data] of fixturePatches) {
-    writes.push(prisma.matchFixture.update({ where: { id }, data }));
+    await prisma.matchFixture.update({ where: { id }, data });
   }
   if (predictionWonIds.length > 0) {
-    writes.push(
-      prisma.prediction.updateMany({
-        where: { id: { in: predictionWonIds } },
-        data: { outcome: "WON" },
-      })
-    );
+    await prisma.prediction.updateMany({
+      where: { id: { in: predictionWonIds } },
+      data: { outcome: "WON" },
+    });
   }
   if (predictionLostIds.length > 0) {
-    writes.push(
-      prisma.prediction.updateMany({
-        where: { id: { in: predictionLostIds } },
-        data: { outcome: "LOST" },
-      })
-    );
+    await prisma.prediction.updateMany({
+      where: { id: { in: predictionLostIds } },
+      data: { outcome: "LOST" },
+    });
   }
   if (predictionVoidIds.length > 0) {
-    writes.push(
-      prisma.prediction.updateMany({
-        where: { id: { in: predictionVoidIds } },
-        data: { outcome: "VOID", odds: 1 },
-      })
-    );
+    await prisma.prediction.updateMany({
+      where: { id: { in: predictionVoidIds } },
+      data: { outcome: "VOID", odds: 1 },
+    });
   }
   for (const patch of ticketPatches) {
-    writes.push(
-      prisma.accumulatorTicket.update({
-        where: { id: patch.id },
-        data: {
-          status: patch.status,
-          totalOdds: patch.totalOdds,
-          payoutCLP: patch.payoutCLP,
-        },
-      })
-    );
-  }
-  if (writes.length > 0) {
-    await Promise.all(writes);
+    await prisma.accumulatorTicket.update({
+      where: { id: patch.id },
+      data: {
+        status: patch.status,
+        totalOdds: patch.totalOdds,
+        payoutCLP: patch.payoutCLP,
+      },
+    });
   }
 
   const metrics = await computeGlobalSettlementMetrics();

@@ -414,6 +414,18 @@ async function apiGet<T>(
   }
 }
 
+/** Cache-first GET for callers outside this module (team profiler, etc.). */
+export async function apiFootballGet<T>(
+  path: string,
+  opts?: {
+    ttlMinutes?: number | null;
+    cacheKey?: string;
+    forceRefresh?: boolean;
+  }
+): Promise<ApiEnvelope<T>> {
+  return apiGet<T>(path, resolveApiKey(), opts);
+}
+
 /**
  * Load team IDs that play in verified top-tier leagues.
  * Uses recent free-plan-accessible seasons; cached in-process.

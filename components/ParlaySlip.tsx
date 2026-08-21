@@ -91,6 +91,8 @@ interface ParlaySlipProps {
   onRegenerate?: () => void;
   /** Free-plan per-minute lockout (mm:ss). Disables regenerate while set. */
   cooldownLabel?: string | null;
+  /** Skip Card chrome when hosted inside BottomSheet / modal. */
+  embedded?: boolean;
 }
 
 export function ParlaySlip({
@@ -101,6 +103,7 @@ export function ParlaySlip({
   historyDate,
   onRegenerate,
   cooldownLabel = null,
+  embedded = false,
 }: ParlaySlipProps) {
   const [registered, setRegistered] = useState(false);
   const [registerMsg, setRegisterMsg] = useState<string | null>(null);
@@ -198,6 +201,10 @@ export function ParlaySlip({
 
   const persistToNeon = useCallback(async () => {
     if (activeParlay.legs.length === 0) return;
+    if (embedded && activeParlay.legs.length < 2) {
+      setRegisterMsg("Deja al menos 2 selecciones para registrar una combinada.");
+      return;
+    }
 
     const date = historyDate ?? chileDateString();
     const alreadyDb = dbTickets
@@ -278,7 +285,7 @@ export function ParlaySlip({
         "Guardada localmente; sin conexión a Neon. Reintenta para sincronizar."
       );
     }
-  }, [activeParlay, dbTickets, historyDate, stakeInput]);
+  }, [activeParlay, dbTickets, embedded, historyDate, stakeInput]);
 
   const isEdited = keptLegs.length !== parlay.legs.length;
   const originalCount = parlay.legs.length;
@@ -342,52 +349,55 @@ export function ParlaySlip({
 
   let legNumber = 0;
 
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold tracking-tight text-white">
-              Tu combinada
-            </h2>
-            <CardDescription>
-              {activeParlay.legs.length} selecciones
-              {isEdited ? ` de ${originalCount}` : ""}
-            </CardDescription>
-            {activeParlay.strategyLabel && (
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Badge
-                  variant={
-                    activeParlay.riskTier === "fun" ? "warning" : "success"
-                  }
-                >
-                  {activeParlay.strategyLabel}
-                </Badge>
-              </div>
-            )}
-            {activeParlay.legs.length > 0 && (
-              <p className="mt-2 inline-flex items-center rounded-full bg-[#30d158]/15 px-2.5 py-1 text-sm font-medium text-[#30d158] ring-1 ring-[#30d158]/25">
-                {activeParlay.legs.length} partidos seleccionados para la
-                apuesta real
-              </p>
-            )}
-            {activeParlay.successProbabilityLabel && (
-              <p className="mt-2 text-sm font-medium text-[#30d158]">
-                {activeParlay.successProbabilityLabel}
-              </p>
-            )}
-            {activeParlay.fillNotice && (
-              <p className="mt-2 text-sm text-[#ffd60a]">
-                {activeParlay.fillNotice}
-              </p>
-            )}
+  const header = (
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        {!embedded && (
+          <h2 className="text-lg font-semibold tracking-tight text-white">
+            Tu combinada
+          </h2>
+        )}
+        <CardDescription>
+          {activeParlay.legs.length} selecciones
+          {isEdited ? ` de ${originalCount}` : ""}
+          {embedded ? " · quita las que no te convenzan" : ""}
+        </CardDescription>
+        {activeParlay.strategyLabel && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Badge
+              variant={
+                activeParlay.riskTier === "fun" ? "warning" : "success"
+              }
+            >
+              {activeParlay.strategyLabel}
+            </Badge>
           </div>
-          <Badge variant={riskVariant}>
-            {RISK_LABELS[activeParlay.riskLevel]}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
+        )}
+        {activeParlay.legs.length > 0 && (
+          <p className="mt-2 inline-flex items-center rounded-full bg-[#30d158]/15 px-2.5 py-1 text-sm font-medium text-[#30d158] ring-1 ring-[#30d158]/25">
+            {activeParlay.legs.length} partidos seleccionados para la
+            apuesta real
+          </p>
+        )}
+        {activeParlay.successProbabilityLabel && (
+          <p className="mt-2 text-sm font-medium text-[#30d158]">
+            {activeParlay.successProbabilityLabel}
+          </p>
+        )}
+        {activeParlay.fillNotice && (
+          <p className="mt-2 text-sm text-[#ffd60a]">
+            {activeParlay.fillNotice}
+          </p>
+        )}
+      </div>
+      <Badge variant={riskVariant}>
+        {RISK_LABELS[activeParlay.riskLevel]}
+      </Badge>
+    </div>
+  );
+
+  const body = (
+    <>
         {activeLegs.length === 0 ? (
           <div className="space-y-3 rounded-2xl border border-dashed border-white/15 p-6 text-center">
             <p className="text-sm text-neutral-400">
@@ -402,7 +412,13 @@ export function ParlaySlip({
             )}
           </div>
         ) : (
-          <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
+          <div
+            className={
+              embedded
+                ? "space-y-2 pr-1"
+                : "max-h-[28rem] space-y-2 overflow-y-auto pr-1"
+            }
+          >
             <ul className="space-y-2">
               {orderedLegs.map((leg) => {
                 legNumber += 1;
@@ -450,9 +466,11 @@ export function ParlaySlip({
             {activeParlay.riskLabel}
             {" · "}
             Edge medio {formatPercent(activeParlay.averageEdge)}
-            {activeParlay.hitTarget
-              ? " · Objetivo ~20x–35x alcanzado"
-              : " · Cerca del objetivo"}
+            {activeParlay.riskTier === "fun"
+              ? activeParlay.hitTarget
+                ? " · Objetivo ~20x–35x alcanzado"
+                : " · Cerca del objetivo"
+              : ""}
             {isEdited
               ? ` · Editado (−${originalCount - activeParlay.legs.length})`
               : ""}
@@ -529,11 +547,13 @@ export function ParlaySlip({
                 />
               </div>
               <p id="parlay-stake-help" className="text-sm text-neutral-400">
-                {stakeCLP != null && potentialReturn != null
-                  ? exceedsBankroll
-                    ? `El monto supera la banca disponible (${formatCLP(bankroll.totalBankroll)}).`
-                    : `Apuesta ${formatCLP(stakeCLP)} · se descuenta de la banca · retorno potencial ${formatCLP(potentialReturn)}`
-                  : "Escribe el monto en pesos chilenos para habilitar el registro."}
+                {embedded && activeParlay.legs.length < 2
+                  ? "Necesitas al menos 2 selecciones para registrar la combinada."
+                  : stakeCLP != null && potentialReturn != null
+                    ? exceedsBankroll
+                      ? `El monto supera la banca disponible (${formatCLP(bankroll.totalBankroll)}).`
+                      : `Apuesta ${formatCLP(stakeCLP)} · se descuenta de la banca · retorno potencial ${formatCLP(potentialReturn)}`
+                    : "Escribe el monto en pesos chilenos para habilitar el registro."}
               </p>
             </div>
             <Button
@@ -541,6 +561,7 @@ export function ParlaySlip({
               variant={registered ? "secondary" : "default"}
               disabled={
                 registered ||
+                (embedded && activeParlay.legs.length < 2) ||
                 (!findExistingParlay(activeParlay, loadBets()) &&
                   (stakeCLP == null || exceedsBankroll))
               }
@@ -573,7 +594,22 @@ export function ParlaySlip({
             )}
           </div>
         )}
-      </CardContent>
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div className="space-y-4 pb-2">
+        {header}
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>{header}</CardHeader>
+      <CardContent className="space-y-4">{body}</CardContent>
     </Card>
   );
 }

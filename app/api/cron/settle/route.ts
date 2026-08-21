@@ -6,6 +6,7 @@ import {
 } from "@/lib/auto-tuner";
 import { errorMessage, jsonError } from "@/lib/api-response";
 import { env } from "@/lib/env";
+import { maybeUpdateTeamProfilesAfterSettlement } from "@/lib/team-profiler";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -61,6 +62,9 @@ async function handle(request: NextRequest) {
       calibration = await maybeRecalibrateAfterSettlement(newlySettledCount);
     }
 
+    const teamProfiles =
+      await maybeUpdateTeamProfilesAfterSettlement(newlySettledCount);
+
     return NextResponse.json({
       success: result.ok,
       ...result,
@@ -68,6 +72,12 @@ async function handle(request: NextRequest) {
       winRatePct: Number((result.winRate * 100).toFixed(2)),
       roiPct: Number(result.roi.toFixed(2)),
       calibration: calibrationPayload(calibration),
+      teamProfiles: teamProfiles
+        ? {
+            teamsUpserted: teamProfiles.teamsUpserted,
+            matchesUsed: teamProfiles.matchesUsed,
+          }
+        : null,
     });
   } catch (error) {
     console.error("[api/cron/settle]", error);

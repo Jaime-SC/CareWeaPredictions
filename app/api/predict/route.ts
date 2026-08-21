@@ -15,6 +15,10 @@ import {
 } from "@/lib/parlay-defaults";
 import { enrichMatchesFromLocalData } from "@/lib/fixture-context";
 import { buildMatchPredictions } from "@/lib/parlay-generator";
+import {
+  syncAutomatedTeamProfileFlags,
+  warmTeamProfileCache,
+} from "@/lib/team-profiler";
 import type { MatchPrediction, SafePickItem } from "@/lib/types";
 import { chileDateString } from "@/lib/utils";
 
@@ -84,6 +88,11 @@ export async function GET(request: NextRequest) {
         expandIfFewerThan: 8,
       });
     const matches = await enrichMatchesFromLocalData(rawMatches);
+    // Auto DT / key absences → TeamProfile before Poisson λ & calibration
+    await syncAutomatedTeamProfileFlags(matches);
+    await warmTeamProfileCache(
+      matches.flatMap((m) => [m.home.id, m.away.id])
+    );
 
     let predictions = buildMatchPredictions(matches, {
       minSafeProbability: minProb,
@@ -174,6 +183,10 @@ export async function POST(request: NextRequest) {
       date,
     });
     const matches = await enrichMatchesFromLocalData(rawMatches);
+    await syncAutomatedTeamProfileFlags(matches);
+    await warmTeamProfileCache(
+      matches.flatMap((m) => [m.home.id, m.away.id])
+    );
     const filtered = matchIds
       ? matches.filter((m) => matchIds.includes(m.id))
       : matches;
