@@ -10,6 +10,10 @@ const envSchema = z.object({
     }),
   DIRECT_URL: z.string().optional(),
   FOOTBALL_API_KEY: z.string().optional(),
+  /** The Odds API (optional fill-gaps for bookmaker lines). */
+  ODDS_API_KEY: z.string().optional(),
+  /** Football-Data.org token (optional; used by /api/backtest). */
+  FOOTBALL_DATA_API_KEY: z.string().optional(),
   CRON_SECRET: z.string().optional(),
   API_FOOTBALL_DAILY_LIMIT: z.string().optional(),
 });
@@ -17,12 +21,19 @@ const envSchema = z.object({
 export type AppEnv = z.infer<typeof envSchema>;
 
 function parseEnv(): AppEnv {
+  const trimOpt = (v: string | undefined) => {
+    const t = v?.trim();
+    return t ? t : undefined;
+  };
+
   const parsed = envSchema.safeParse({
     DATABASE_URL: process.env.DATABASE_URL,
     DIRECT_URL: process.env.DIRECT_URL,
-    FOOTBALL_API_KEY: process.env.FOOTBALL_API_KEY,
-    CRON_SECRET: process.env.CRON_SECRET,
-    API_FOOTBALL_DAILY_LIMIT: process.env.API_FOOTBALL_DAILY_LIMIT,
+    FOOTBALL_API_KEY: trimOpt(process.env.FOOTBALL_API_KEY),
+    ODDS_API_KEY: trimOpt(process.env.ODDS_API_KEY),
+    FOOTBALL_DATA_API_KEY: trimOpt(process.env.FOOTBALL_DATA_API_KEY),
+    CRON_SECRET: trimOpt(process.env.CRON_SECRET),
+    API_FOOTBALL_DAILY_LIMIT: trimOpt(process.env.API_FOOTBALL_DAILY_LIMIT),
   });
 
   if (!parsed.success) {

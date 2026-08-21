@@ -171,6 +171,21 @@ export interface Match {
   referee?: string | null;
   /** Venue name (API-Football). */
   venue?: string | null;
+  /** Open-Meteo matchday weather (optional enrichment). */
+  weather?: {
+    precipMmH: number;
+    factor: number;
+    alert?: string;
+    lat?: number;
+    lon?: number;
+    date?: string;
+  };
+  /** League table ranks (API-Football /standings). */
+  standings?: {
+    homeRank: number | null;
+    awayRank: number | null;
+    awayRankGap: number | null;
+  };
 }
 
 /** Canonical alias used by persistence / API-Football fixture rows. */
@@ -183,6 +198,13 @@ export interface MarketPrediction {
   modelProbability: number;
   impliedProbability: number;
   edge: number;
+  /**
+   * Spec value: FairOdds=1/P, Value%=(Book/Fair−1)×100 ≥ 5.
+   * Coexists with `edge` (P_model − 1/odds).
+   */
+  isValueBet?: boolean;
+  /** Value margin percent from FairOdds (spec). */
+  valueMarginPercent?: number;
   isSafePick: boolean;
   expectedGoals?: { home: number; away: number };
   /** Context-engine multiplier applied to the raw Poisson probability. */
@@ -236,6 +258,8 @@ export interface SafePickItem {
   odds: number;
   modelProbability: number;
   edge: number;
+  isValueBet?: boolean;
+  valueMarginPercent?: number;
   contextFlags?: string[];
   contextNotes?: string[];
   confidenceModifier?: number;

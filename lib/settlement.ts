@@ -218,7 +218,6 @@ export async function settlePendingTickets(): Promise<SettlementResult> {
   const errors: string[] = [];
   const apiIds = new Set<number>();
   const kickoffsById: Record<number, string> = {};
-  let needsLiveRefresh = false;
 
   for (const ticket of pendingTickets) {
     for (const pred of ticket.predictions) {
@@ -231,21 +230,16 @@ export async function settlePendingTickets(): Promise<SettlementResult> {
       kickoffsById[pred.fixture.apiFixtureId] = toIsoDateTime(
         pred.fixture.matchDate
       );
-      const st = pred.fixture.status;
-      const hasTerminalCache =
-        (isFixtureFinished(st) && Boolean(pred.fixture.finalScore)) ||
-        isFixtureVoided(st);
-      if (!hasTerminalCache) needsLiveRefresh = true;
     }
   }
 
   let fixtures: FixtureResult[] = [];
   try {
     if (apiIds.size > 0) {
-      // Free plan: fetch by Chile civil date (1 call/day), not ?ids= (Pro-only).
-      // forceRefresh only when SQLite still lacks FT/void — otherwise reuse cache.
+      // Always force live refresh for due PENDING legs so tickets do not stick
+      // behind a stale CachedApiResponse (uncached settlement).
       fixtures = await fetchFixturesByIds(Array.from(apiIds), {
-        forceRefresh: needsLiveRefresh,
+        forceRefresh: true,
         kickoffsById,
       });
     }

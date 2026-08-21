@@ -2,13 +2,19 @@
  * Value bet edge detector: model probability vs bookmaker implied probability.
  * Edge = P_model − P_implied. Flag when Edge ≥ +5%.
  *
+ * Spec FairOdds path (coexists): FairOdds = 1/P,
+ * Value% = (BookOdds/FairOdds − 1)×100 ≥ 5 → isValueBet.
+ *
  * Intentionally self-contained (no poisson / model-weights) so client
  * components can import badges without pulling Node `fs` into the browser.
  */
 import type { ParlayLeg } from "./types";
 
-/** Minimum edge (5pp) to flag a value bet. */
+/** Minimum edge (5pp) to flag a value bet (legacy edge metric). */
 export const VALUE_EDGE_THRESHOLD = 0.05;
+
+/** Spec: minimum Value% using FairOdds = 1/P_model. */
+export const VALUE_MARGIN_THRESHOLD_PCT = 5;
 
 /**
  * Bookmaker implied probability: P_implied = 1 / odds.
@@ -23,6 +29,37 @@ export function bookmakerImpliedProbability(odds: number): number {
  */
 export function valueEdge(modelProbability: number, odds: number): number {
   return modelProbability - bookmakerImpliedProbability(odds);
+}
+
+/** Fair decimal odds from model probability (no overround). */
+export function fairOdds(modelProbability: number): number {
+  if (!(modelProbability > 0) || modelProbability >= 1) return Infinity;
+  return 1 / modelProbability;
+}
+
+/**
+ * Spec value margin: ((Bookmaker_Odds / Fair_Odds) − 1) × 100.
+ * Returns 0 when inputs are unusable.
+ */
+export function valueMarginPercent(
+  modelProbability: number,
+  bookmakerOdds: number
+): number {
+  if (!(bookmakerOdds > 1) || !(modelProbability > 0) || modelProbability >= 1) {
+    return 0;
+  }
+  const fair = fairOdds(modelProbability);
+  if (!Number.isFinite(fair) || fair <= 0) return 0;
+  return (bookmakerOdds / fair - 1) * 100;
+}
+
+/** Spec isValueBet when Value% ≥ 5. */
+export function isValueBet(
+  modelProbability: number,
+  bookmakerOdds: number,
+  thresholdPct = VALUE_MARGIN_THRESHOLD_PCT
+): boolean {
+  return valueMarginPercent(modelProbability, bookmakerOdds) >= thresholdPct;
 }
 
 export function formatValueBadge(edge: number): string | null {

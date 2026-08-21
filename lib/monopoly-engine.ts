@@ -8,7 +8,6 @@ import {
 import {
   calculateEdge,
   estimateExpectedGoals,
-  fairDecimalOdds,
   hasBookmakerOdds,
   impliedProbability,
   MARKET_LABELS,
@@ -33,6 +32,8 @@ import {
   knockoutMarketLabel,
   toKnockoutContext,
 } from "./knockout-engine";
+import { failsMarketSanity } from "./filters";
+import { isValueBet, valueMarginPercent } from "./value-finder";
 import { chileDateOffset, chileDateString, getWeeklyDateRange } from "./utils";
 export type { WeeklyDateRange } from "./utils";
 export { getWeeklyDateRange };
@@ -270,7 +271,7 @@ function oddsForResolvedMarket(
   })();
   if (Number.isFinite(live) && live > 1) return live;
 
-  // Derive DNB from 1X2 when the book omits the line.
+  // Derive DNB from 1X2 when the book omits the line (still real book prices).
   if (market === "dnb_away" && board.home > 1 && board.away > 1) {
     const pHome = 1 / board.home;
     const pAway = 1 / board.away;
@@ -278,7 +279,8 @@ function oddsForResolvedMarket(
     if (denom > 0) return Number((1 / (pAway / denom)).toFixed(3));
   }
 
-  return fairDecimalOdds(probability);
+  // Ban synthetic / fair-odds fallback — no explicit book line → reject.
+  return 0;
 }
 
 function monopolyPoissonBoard(match: Match): {
@@ -332,16 +334,25 @@ function toPrediction(
   const implied = impliedProbability(odds);
   const knockoutEval = evaluateKnockoutContext(match);
   const knockoutContext = toKnockoutContext(knockoutEval);
+  const modelProbability = Math.min(0.99, Math.max(0, probability));
+  const sanity = failsMarketSanity(match, market, modelProbability, odds);
   return {
     market,
     label: knockoutMarketLabel(MARKET_LABELS[market], knockoutEval),
     odds,
-    modelProbability: Math.min(0.99, Math.max(0, probability)),
+    modelProbability,
     impliedProbability: implied,
     edge: calculateEdge(probability, odds),
-    isSafePick: probability >= MONOPOLY_MIN_PROBABILITY && odds > 1,
+    valueMarginPercent: Number(
+      valueMarginPercent(modelProbability, odds).toFixed(2)
+    ),
+    isValueBet: isValueBet(modelProbability, odds),
+    isSafePick:
+      !sanity.fail &&
+      probability >= MONOPOLY_MIN_PROBABILITY &&
+      odds > 1,
     expectedGoals: estimateExpectedGoals(match),
-    contextFlags: knockoutEval.flags,
+    contextFlags: [...new Set([...knockoutEval.flags, ...sanity.flags])],
     knockoutContext,
   };
 }
@@ -377,8 +388,11 @@ export function resolveMonopolyMarket(
     .filter((c) => c.p >= MONOPOLY_MIN_PROBABILITY)
     .sort((a, b) => b.p - a.p);
 
-  if (eligible.length === 0) return null;
-  return toPrediction(match, eligible[0].market, eligible[0].p);
+  for (const c of eligible) {
+    const pick = toPrediction(match, c.market, c.p);
+    if (pick.odds > 1 && pick.isSafePick) return pick;
+  }
+  return null;
 }
 
 function applyDominancePriors(match: Match, isHomeTeam: boolean): Match {

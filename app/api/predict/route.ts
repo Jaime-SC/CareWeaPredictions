@@ -14,6 +14,7 @@ import {
   resolveStrategyMode,
 } from "@/lib/parlay-defaults";
 import { enrichMatchesFromLocalData } from "@/lib/fixture-context";
+import { enrichMatchesFromExternalSources } from "@/lib/sources/enrich";
 import { buildMatchPredictions } from "@/lib/parlay-generator";
 import {
   syncAutomatedTeamProfileFlags,
@@ -21,6 +22,20 @@ import {
 } from "@/lib/team-profiler";
 import type { MatchPrediction, SafePickItem } from "@/lib/types";
 import { chileDateString } from "@/lib/utils";
+
+async function withExternalEnrichment(
+  matches: Awaited<ReturnType<typeof enrichMatchesFromLocalData>>
+) {
+  await syncAutomatedTeamProfileFlags(matches);
+  await warmTeamProfileCache(
+    matches.flatMap((m) => [m.home.id, m.away.id])
+  );
+  const enriched = await enrichMatchesFromExternalSources(matches);
+  await warmTeamProfileCache(
+    enriched.flatMap((m) => [m.home.id, m.away.id])
+  );
+  return enriched;
+}
 
 function isValidDate(value: string | null): value is string {
   return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -87,11 +102,8 @@ export async function GET(request: NextRequest) {
         poolMode,
         expandIfFewerThan: 8,
       });
-    const matches = await enrichMatchesFromLocalData(rawMatches);
-    // Auto DT / key absences → TeamProfile before Poisson λ & calibration
-    await syncAutomatedTeamProfileFlags(matches);
-    await warmTeamProfileCache(
-      matches.flatMap((m) => [m.home.id, m.away.id])
+    const matches = await withExternalEnrichment(
+      await enrichMatchesFromLocalData(rawMatches)
     );
 
     let predictions = buildMatchPredictions(matches, {
@@ -128,6 +140,8 @@ export async function GET(request: NextRequest) {
             modelProbability: m.modelProbability,
             impliedProbability: m.impliedProbability,
             edge: m.edge,
+            isValueBet: m.isValueBet,
+            valueMarginPercent: m.valueMarginPercent,
             isSafePick: m.isSafePick,
             contextFlags: m.contextFlags ?? p.contextFlags,
             contextNotes: p.contextNotes,
@@ -182,10 +196,8 @@ export async function POST(request: NextRequest) {
     const { matches: rawMatches, source } = await fetchUpcomingMatches({
       date,
     });
-    const matches = await enrichMatchesFromLocalData(rawMatches);
-    await syncAutomatedTeamProfileFlags(matches);
-    await warmTeamProfileCache(
-      matches.flatMap((m) => [m.home.id, m.away.id])
+    const matches = await withExternalEnrichment(
+      await enrichMatchesFromLocalData(rawMatches)
     );
     const filtered = matchIds
       ? matches.filter((m) => matchIds.includes(m.id))

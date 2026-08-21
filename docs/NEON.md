@@ -40,8 +40,9 @@ npm run db:migrate:http
 - Tickets registrados (`AccumulatorTicket`)
 - Caché de respuestas API-Football y cuota diaria
 - Configuración de bankroll (`BankrollSettings`)
+- Perfiles de equipo (`TeamProfile`: forma, venue splits, guards)
 
-Así, stats, liquidación y banca quedan alineados entre PCs.
+Así, stats, liquidación, banca y perfiles quedan alineados entre PCs.
 
 ## Scripts útiles
 

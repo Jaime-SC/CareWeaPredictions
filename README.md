@@ -18,8 +18,14 @@ Motor de predicción basado en modelos de **Poisson** y análisis estadístico p
 - 🔴 **Integración en tiempo real con API-Football** — fixtures live sin datos mock.
 - 🎲 **Generador de combinadas de alta cuota (Modo Diversión)** — parlays automáticos en un clic.
 - 🛡️ **Selección de Picks Individuales de Alta Probabilidad (Modo Seguro)** — mercados con probabilidad elevada y cuotas controladas.
-- 📊 **Panel de estadísticas dinámico** — verificación automática de marcadores reales.
-- 💾 **Persistencia en Neon (PostgreSQL)** — historial, stats y predicciones se comparten entre PCs.
+- 📊 **Panel de estadísticas dinámico** — liquidación automática (FT/AET/PEN) y métricas solo sobre liquidados.
+- 💾 **Persistencia en Neon (PostgreSQL)** — historial, stats, bankroll y perfiles se comparten entre PCs.
+- 👥 **Perfiles de equipo** — forma rolling, splits local/visita, lesiones y guards contextuales (`/teams`).
+- 💰 **Bankroll + Kelly** — stake sugerido, débito/reembolso y sync en Neon.
+- 🛰️ **Enrich multi-fuente (opcional)** — ESPN, clima, Odds API y standings sin sustituir API-Football.
+- 🧭 **Guía de casas chilenas** — pestaña exacta (Betano / JugaBet / Coolbet) y warnings anti-error.
+
+Catálogo completo: [`docs/FEATURES.md`](./docs/FEATURES.md).
 
 ---
 
@@ -35,6 +41,8 @@ Motor de predicción basado en modelos de **Poisson** y análisis estadístico p
 | **Neon** (PostgreSQL serverless) | Base de datos en la nube (plan Free) |
 | **Prisma** | ORM + migraciones (`prisma/schema.prisma`) |
 | **Poisson / Dixon-Coles** | Modelo de predicción (`lib/poisson.ts`) |
+| **Zod** | Validación de entorno (`lib/env.ts`) |
+| **Vercel Cron** | Auto-settlement cada 2 h (`vercel.json`) |
 
 ---
 
@@ -58,8 +66,9 @@ La app **ya no usa SQLite local** como fuente de verdad. Persistimos analytics, 
 | `AccumulatorTicket` | Combinadas y picks individuales registrados |
 | `CachedApiResponse` / cuota API | Caché HTTP y contadores de rate-limit |
 | `BankrollSettings` | Banca y límites de riesgo sincronizados |
+| `TeamProfile` | Forma, splits local/visita, lesiones y guards |
 
-Conexión en código: Prisma + adapter Neon (`lib/db.ts`). Plantilla de URLs: [`.env.example`](./.env.example). Guía corta: [`docs/NEON.md`](./docs/NEON.md).
+Conexión en código: Prisma + adapter Neon (`lib/db.ts`). Plantilla de URLs: [`.env.example`](./.env.example). Guías: [`docs/NEON.md`](./docs/NEON.md) · [`docs/FEATURES.md`](./docs/FEATURES.md).
 
 ### Variables requeridas
 
@@ -108,6 +117,13 @@ cp .env.example .env.local
 FOOTBALL_API_KEY=tu_api_key_aqui
 ```
 
+Opcional (enrich / backtest):
+
+```env
+# ODDS_API_KEY=
+# FOOTBALL_DATA_API_KEY=
+```
+
 5. Crea las tablas y, si vienes de SQLite local, importa el historial:
 
 ```bash
@@ -140,10 +156,17 @@ Abre [http://localhost:3000](http://localhost:3000).
 | `/` | Landing |
 | `/dashboard` | Safe picks sobre fixtures live |
 | `/builder` | Generador de combinada (Modo Diversión) |
+| `/stats` | Analytics + historial + sync de marcadores |
+| `/teams` | Perfiles de equipo (forma, venue, lesiones) |
+| `/health` | Salud del algoritmo / calibración |
 | `/api/matches` | Partidos live |
 | `/api/predict` | Predicciones Poisson |
 | `/api/parlay` | Generar acumulador automático |
+| `/api/settle` | Liquidar tickets PENDING |
 | `/api/results` | Verificación de marcadores |
+| `/api/bankroll` | Banca persistida en Neon |
+| `/api/teams/profiles` | Perfiles de equipo |
+| `/api/cron/settle` | Cron de liquidación (Vercel) |
 
 ---
 

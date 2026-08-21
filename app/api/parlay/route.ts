@@ -15,6 +15,7 @@ import {
   resolveStrategyMode,
 } from "@/lib/parlay-defaults";
 import { enrichMatchesFromLocalData } from "@/lib/fixture-context";
+import { enrichMatchesFromExternalSources } from "@/lib/sources/enrich";
 import {
   DEFAULT_TARGET_LEG_COUNT,
   filterEliteWhitelistMatches,
@@ -33,12 +34,14 @@ import {
   INSUFFICIENT_MATCHES_MESSAGE,
 } from "@/lib/monopoly-engine";
 
-/** Cache-first DT/absences → TeamProfile before Poisson in generateParlay. */
+/** Cache-first DT/absences → external sources → TeamProfile before Poisson. */
 async function withAutomatedTeamProfiles(matches: Match[]): Promise<Match[]> {
   if (matches.length === 0) return matches;
   await syncAutomatedTeamProfileFlags(matches);
   await warmTeamProfileCache(matches.flatMap((m) => [m.home.id, m.away.id]));
-  return matches;
+  const enriched = await enrichMatchesFromExternalSources(matches);
+  await warmTeamProfileCache(enriched.flatMap((m) => [m.home.id, m.away.id]));
+  return enriched;
 }
 
 /**

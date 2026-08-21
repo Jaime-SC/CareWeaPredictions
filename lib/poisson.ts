@@ -25,6 +25,9 @@ import {
   peekTeamProfile,
 } from "./team-profiler";
 import { applyTuningToProbability } from "./tuning-config";
+import { isValueBet, valueMarginPercent } from "./value-finder";
+import { failsMarketSanity } from "./filters";
+import { applyStandingsAwayPenalty } from "./standings";
 
 const FATIGUE_XG_FACTOR = 0.9;
 const MAX_GOALS = 8;
@@ -133,6 +136,13 @@ export function estimateExpectedGoals(match: Match): {
     match.away.id,
     match.away.injuries
   );
+
+  // Open-Meteo: heavy rain / snow → total xG × 0.90
+  const weatherFactor = match.weather?.factor ?? 1;
+  if (weatherFactor > 0 && weatherFactor < 1) {
+    lambdaHome *= weatherFactor;
+    lambdaAway *= weatherFactor;
+  }
 
   lambdaHome *= formLambdaFactor(match.home.form);
   lambdaAway *= formLambdaFactor(match.away.form);
@@ -483,13 +493,21 @@ export function predictMatchMarkets(
     peekTeamProfile(resolved.home.id),
     peekTeamProfile(resolved.away.id)
   );
-  const probs = profileCal.probs;
+  const standingsCal = applyStandingsAwayPenalty(
+    profileCal.probs,
+    resolved.standings
+  );
+  const probs = standingsCal.probs;
   const knockoutFlags = knockoutEval.flags;
   const mergedFlags = [
     ...new Set([
       ...ctx.contextFlags,
       ...knockoutFlags,
       ...profileCal.flags,
+      ...standingsCal.flags,
+      ...(resolved.weather?.factor != null && resolved.weather.factor < 1
+        ? ["WEATHER_ADVERSE"]
+        : []),
     ]),
   ];
   const mergedNotes = [
@@ -497,6 +515,8 @@ export function predictMatchMarkets(
       ? [...ctx.contextNotes, knockoutContext.note]
       : ctx.contextNotes),
     ...profileCal.notes,
+    ...standingsCal.notes,
+    ...(resolved.weather?.alert ? [resolved.weather.alert] : []),
   ];
 
   const markets: MarketPrediction[] = (
@@ -513,6 +533,13 @@ export function predictMatchMarkets(
     const blockedByDerby = isMarketBlockedByDerby(resolved, market);
     const implied = impliedProbability(odds);
     const edge = modelProbability - implied;
+    const valuePct = valueMarginPercent(modelProbability, odds);
+    const sanity = failsMarketSanity(
+      resolved,
+      market,
+      modelProbability,
+      odds
+    );
     const effectiveMin = resolveMinProbability(
       baseMinProb,
       market,
@@ -524,6 +551,7 @@ export function predictMatchMarkets(
     const marketFlags = [
       ...(marketCtx?.contextFlags ?? []),
       ...knockoutFlags,
+      ...sanity.flags,
     ];
 
     return {
@@ -533,9 +561,12 @@ export function predictMatchMarkets(
       modelProbability,
       impliedProbability: implied,
       edge,
+      valueMarginPercent: Number(valuePct.toFixed(2)),
+      isValueBet: isValueBet(modelProbability, odds),
       isSafePick:
         !mktCfg.disabled &&
         !blockedByDerby &&
+        !sanity.fail &&
         odds > 1 &&
         modelProbability >= effectiveMin &&
         odds >= minOdds &&

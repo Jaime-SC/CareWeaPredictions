@@ -19,12 +19,15 @@ import {
   refundBankroll,
   useBankrollSettings,
 } from "@/lib/bankroll-store";
+import { fetchBuilderTickets } from "@/lib/builder-restore";
 import {
   addBetFromSinglePick,
+  collectRegisteredIndividualPickKeys,
   findExistingSinglePick,
   individualPickKey,
   loadBets,
   remapLocalBetId,
+  type HistoryBet,
 } from "@/lib/history-tracker";
 import { postBetRecord } from "@/lib/bet-record-client";
 import { contextBadgeLabels } from "@/lib/context-engine";
@@ -109,6 +112,7 @@ export function SafePicksList({
   const [registeredStakes, setRegisteredStakes] = useState<
     Record<string, number>
   >({});
+  const [dbTickets, setDbTickets] = useState<HistoryBet[] | null>(null);
   const [stakeInput, setStakeInput] = useState("");
   const [registerMsg, setRegisterMsg] = useState<string | null>(null);
   const [registeringKey, setRegisteringKey] = useState<string | null>(null);
@@ -138,19 +142,48 @@ export function SafePicksList({
   }
 
   useEffect(() => {
-    const keys = new Set<string>();
+    let cancelled = false;
+    (async () => {
+      const tickets = await fetchBuilderTickets();
+      if (!cancelled) setDbTickets(tickets);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [date]);
+
+  useEffect(() => {
+    const localBets = loadBets();
+    const sourceBets = dbTickets ? [...localBets, ...dbTickets] : localBets;
+    const keys = collectRegisteredIndividualPickKeys(picks, sourceBets);
     const stakes: Record<string, number> = {};
+    const visible = new Set(picks.map(pickKey));
+
     for (const pick of picks) {
-      if (!pick.registered) continue;
       const key = pickKey(pick);
-      keys.add(key);
-      if (typeof pick.stakeCLP === "number" && pick.stakeCLP > 0) {
-        stakes[key] = pick.stakeCLP;
-      }
+      if (pick.registered) keys.add(key);
+      if (!keys.has(key)) continue;
+      const existing = findExistingSinglePick(pick, sourceBets);
+      const stake = existing?.stakeCLP ?? pick.stakeCLP;
+      if (typeof stake === "number" && stake > 0) stakes[key] = stake;
     }
-    setRegisteredKeys(keys);
-    setRegisteredStakes(stakes);
-  }, [picks, date]);
+
+    // Keep session-registered picks that still appear after regenerate
+    setRegisteredKeys((prev) => {
+      const next = new Set(keys);
+      for (const key of prev) {
+        if (visible.has(key)) next.add(key);
+      }
+      return next;
+    });
+    setRegisteredStakes((prev) => {
+      const next = { ...stakes };
+      for (const [key, stake] of Object.entries(prev)) {
+        if (visible.has(key) && next[key] == null) next[key] = stake;
+      }
+      return next;
+    });
+  }, [picks, date, dbTickets]);
 
   const suggestedStake = useMemo(() => {
     const pick = picks.find((item) => item.odds > 1 && item.modelProbability > 0);
@@ -203,6 +236,11 @@ export function SafePicksList({
 
     setRegisteringKey(key);
     setRegisterMsg(null);
+    setRegisteredKeys((prev) => new Set(prev).add(key));
+    setRegisteredStakes((prev) => ({
+      ...prev,
+      [key]: local.stakeCLP,
+    }));
     try {
       const data = await postBetRecord({
         date,
@@ -233,14 +271,14 @@ export function SafePicksList({
         return;
       }
 
-      setRegisteredKeys((prev) => new Set(prev).add(key));
-      setRegisteredStakes((prev) => ({
-        ...prev,
-        [key]: local.stakeCLP,
-      }));
       if (typeof data.ticketId === "string") {
         remapLocalBetId(local.id, data.ticketId);
       }
+      setDbTickets((prev) => {
+        if (!prev) return prev;
+        if (prev.some((t) => t.id === (data.ticketId ?? local.id))) return prev;
+        return [local, ...prev];
+      });
       setRegisterMsg(
         data.duplicate
           ? "Pick ya registrado en la base de datos."

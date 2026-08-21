@@ -16,6 +16,14 @@ export const CACHE_TTL_MINUTES = {
   STATUS: 5,
   /** Per-fixture bookmaker odds (6–12h; 12h keeps parlay regen on CACHE HIT) */
   ODDS: 720,
+  /** ESPN team injuries / news */
+  ESPN: 720,
+  /** The Odds API fill-gaps (per sport/region snapshot) */
+  ODDS_API: 360,
+  /** Open-Meteo matchday forecast */
+  WEATHER: 1440,
+  /** Football-Data.org historical results */
+  FOOTBALL_DATA: 1440,
 } as const;
 
 /** Free-plan style daily budget shown in the UI. */
@@ -106,6 +114,22 @@ export async function getCachedPayload<T>(cacheKey: string): Promise<T | null> {
     return JSON.parse(row.payload) as T;
   } catch (err) {
     console.warn(`[api-cache] Failed reading key=${cacheKey}:`, err);
+    return null;
+  }
+}
+
+/** Return cached JSON even if TTL expired (429 / offline fallback). */
+export async function getCachedPayloadAllowStale<T>(
+  cacheKey: string
+): Promise<T | null> {
+  try {
+    const row = await prisma.cachedApiResponse.findUnique({
+      where: { id: cacheKey },
+    });
+    if (!row) return null;
+    return JSON.parse(row.payload) as T;
+  } catch (err) {
+    console.warn(`[api-cache] Failed stale read key=${cacheKey}:`, err);
     return null;
   }
 }
