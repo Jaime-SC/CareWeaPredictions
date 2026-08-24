@@ -10,6 +10,7 @@ import {
   upsertCachedPayload,
 } from "./api-cache";
 import type { Match, MarketType } from "./types";
+import { getTargetSeason } from "./utils/season-mapper";
 
 /** Away rank this many places worse than home → dampen away win / DNB. */
 export const STANDINGS_RANK_GAP = 10;
@@ -52,12 +53,10 @@ function normalizeName(name: string): string {
     .trim();
 }
 
-function currentSeasonYear(kickoffIso?: string): number {
+function seasonForLeague(leagueId: number, kickoffIso?: string): number {
   const t = kickoffIso ? Date.parse(kickoffIso) : Date.now();
   const d = new Date(Number.isFinite(t) ? t : Date.now());
-  const y = d.getUTCFullYear();
-  const m = d.getUTCMonth(); // 0-based; European seasons flip ~July
-  return m >= 6 ? y : y - 1;
+  return getTargetSeason(leagueId, d);
 }
 
 function parseTable(
@@ -86,7 +85,7 @@ export async function fetchLeagueStandings(
   season?: number
 ): Promise<LeagueStandingsTable | null> {
   if (!Number.isFinite(leagueId) || leagueId <= 0) return null;
-  const seasonYear = season ?? currentSeasonYear();
+  const seasonYear = season ?? seasonForLeague(leagueId);
   const cacheKey = buildCacheKey("standings", {
     league: leagueId,
     season: seasonYear,
@@ -103,6 +102,7 @@ export async function fetchLeagueStandings(
         cacheKey,
       }
     );
+    if (!json) return null;
     const table = parseTable(leagueId, seasonYear, json.response ?? []);
     if (Object.keys(table.byTeamId).length === 0) return null;
     await upsertCachedPayload(
@@ -203,7 +203,10 @@ export async function attachStandingsToMatches(
   const tables = new Map<number, LeagueStandingsTable>();
   let liveLeft = STANDINGS_LIVE_BUDGET;
   for (const leagueId of byLeague.keys()) {
-    const season = currentSeasonYear(byLeague.get(leagueId)?.[0]?.kickoff);
+    const season = seasonForLeague(
+      leagueId,
+      byLeague.get(leagueId)?.[0]?.kickoff
+    );
     const cacheKey = buildCacheKey("standings", {
       league: leagueId,
       season,

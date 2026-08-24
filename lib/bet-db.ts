@@ -560,11 +560,15 @@ export async function updateTicketStatusInDb(
     data: { status: dbStatus },
   });
 
-  if (status === "won" || status === "lost" || status === "void") {
-    // Manual override: mark all legs accordingly when ticket-level override
-    if (status === "void") {
-      await prisma.prediction.updateMany({
-        where: { ticketId },
+  if (status === "void") {
+    // Neon HTTP: no updateMany (Prisma wraps it in a transaction).
+    const legs = await prisma.prediction.findMany({
+      where: { ticketId },
+      select: { id: true },
+    });
+    for (const leg of legs) {
+      await prisma.prediction.update({
+        where: { id: leg.id },
         data: { outcome: "VOID" },
       });
     }
@@ -631,28 +635,21 @@ export async function syncOutcomesFromHistory(
     }
   }
 
-  const writes: Array<Promise<unknown>> = [];
+  // Sequential: Prisma batches Promise.all into a txn; Neon HTTP rejects it.
   for (const patch of ticketStatusUpdates) {
-    writes.push(
-      prisma.accumulatorTicket.update({
-        where: { id: patch.id },
-        data: { status: patch.status },
-      })
-    );
+    await prisma.accumulatorTicket.update({
+      where: { id: patch.id },
+      data: { status: patch.status },
+    });
   }
   for (const patch of predictionUpdates) {
-    writes.push(
-      prisma.prediction.update({
-        where: { id: patch.id },
-        data: { outcome: patch.outcome },
-      })
-    );
+    await prisma.prediction.update({
+      where: { id: patch.id },
+      data: { outcome: patch.outcome },
+    });
   }
   for (const [id, data] of fixturePatches) {
-    writes.push(prisma.matchFixture.update({ where: { id }, data }));
-  }
-  if (writes.length > 0) {
-    await Promise.all(writes);
+    await prisma.matchFixture.update({ where: { id }, data });
   }
   return updated;
 }

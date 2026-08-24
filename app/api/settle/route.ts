@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { maybeRecalibrateAfterSettlement } from "@/lib/auto-tuner";
+import { maybeUpdateBrierLearning } from "@/lib/learning-engine";
 import { errorMessage, jsonError } from "@/lib/api-response";
 import { settlePendingTickets } from "@/lib/settlement";
 import { maybeUpdateTeamProfilesAfterSettlement } from "@/lib/team-profiler";
@@ -20,10 +21,17 @@ const NO_STORE_HEADERS = {
 export async function POST() {
   try {
     const result = await settlePendingTickets();
-    const [calibration, teamProfiles] = await Promise.all([
-      maybeRecalibrateAfterSettlement(result.updatedLegsCount),
-      maybeUpdateTeamProfilesAfterSettlement(result.updatedLegsCount),
-    ]);
+    // Sequential: concurrent Prisma calls (Promise.all) are batched into a
+    // transaction, which Neon HTTP rejects.
+    const calibration = await maybeRecalibrateAfterSettlement(
+      result.updatedLegsCount
+    );
+    const brierLearning = await maybeUpdateBrierLearning(
+      result.updatedLegsCount
+    );
+    const teamProfiles = await maybeUpdateTeamProfilesAfterSettlement(
+      result.updatedLegsCount
+    );
     return NextResponse.json(
       {
         success: result.ok,
@@ -48,6 +56,16 @@ export async function POST() {
               sampleSize: calibration.sampleSize,
               calibratedAt: calibration.weights.calibratedAt,
               message: calibration.message,
+            }
+          : null,
+        brierLearning: brierLearning
+          ? {
+              overallMeanBrier: brierLearning.overallMeanBrier,
+              leaguesAdjusted: brierLearning.leaguesAdjusted,
+              marketsAdjusted: brierLearning.marketsAdjusted,
+              teamsAdjusted: brierLearning.teamsAdjusted,
+              sampleSize: brierLearning.sampleSize,
+              message: brierLearning.message,
             }
           : null,
         teamProfiles: teamProfiles

@@ -467,26 +467,26 @@ export async function settlePendingTickets(): Promise<SettlementResult> {
     else if (nextStatus === "void") ticketsVoided += 1;
   }
 
-  // Sequential writes: Prisma batches Promise.all into a transaction,
-  // and Neon HTTP throws "Transactions are not supported in HTTP mode".
+  // Neon HTTP rejects Prisma transactions. Avoid Promise.all batches and
+  // updateMany/createMany (Prisma 5.22 wraps those in an internal txn).
   for (const [id, data] of fixturePatches) {
     await prisma.matchFixture.update({ where: { id }, data });
   }
-  if (predictionWonIds.length > 0) {
-    await prisma.prediction.updateMany({
-      where: { id: { in: predictionWonIds } },
+  for (const id of predictionWonIds) {
+    await prisma.prediction.update({
+      where: { id },
       data: { outcome: "WON" },
     });
   }
-  if (predictionLostIds.length > 0) {
-    await prisma.prediction.updateMany({
-      where: { id: { in: predictionLostIds } },
+  for (const id of predictionLostIds) {
+    await prisma.prediction.update({
+      where: { id },
       data: { outcome: "LOST" },
     });
   }
-  if (predictionVoidIds.length > 0) {
-    await prisma.prediction.updateMany({
-      where: { id: { in: predictionVoidIds } },
+  for (const id of predictionVoidIds) {
+    await prisma.prediction.update({
+      where: { id },
       data: { outcome: "VOID", odds: 1 },
     });
   }

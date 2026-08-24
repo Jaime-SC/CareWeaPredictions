@@ -1,5 +1,6 @@
 "use client";
 
+import { AiJudgeBadge } from "@/components/ai-judge-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -7,6 +8,7 @@ import { BottomSheet } from "@/components/bottom-sheet";
 import { SingleStakeBadge } from "@/components/stake-badge";
 import { contextBadgeLabels } from "@/lib/context-engine";
 import type { MatchPrediction } from "@/lib/types";
+import { restrictedCompetitionBadge } from "@/types/leagues";
 import { formatKickoff, formatOdds, formatPercent } from "@/lib/utils";
 import { ChevronRight, MapPin, Plus, User } from "lucide-react";
 import { useCallback, useState } from "react";
@@ -33,6 +35,10 @@ export function MatchCard({
   const valueEdge = bestSafePick
     ? Math.round(bestSafePick.edge * 100)
     : null;
+  const categoryBadge = restrictedCompetitionBadge(
+    match.leagueId,
+    match.leagueName
+  );
 
   return (
     <Card className="lift cv-auto overflow-hidden">
@@ -41,6 +47,15 @@ export function MatchCard({
           <span className="max-w-full truncate rounded-full bg-white/8 px-2.5 py-0.5 text-[11px] font-medium text-neutral-300 ring-1 ring-white/10">
             {match.leagueName}
           </span>
+          {categoryBadge ? (
+            <Badge
+              variant="info"
+              className="max-w-[16rem] truncate font-normal"
+              title={categoryBadge}
+            >
+              {categoryBadge}
+            </Badge>
+          ) : null}
           <span className="text-xs tabular-nums text-neutral-500">
             {formatKickoff(match.kickoff)}
           </span>
@@ -49,6 +64,9 @@ export function MatchCard({
               Safe Pick
             </Badge>
           )}
+          {prediction.aiJudge ? (
+            <AiJudgeBadge verdict={prediction.aiJudge} />
+          ) : null}
           {valueEdge != null && valueEdge > 0 && (
             <Badge variant="info">Value +{valueEdge}%</Badge>
           )}

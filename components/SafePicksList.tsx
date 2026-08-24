@@ -33,6 +33,7 @@ import { postBetRecord } from "@/lib/bet-record-client";
 import { contextBadgeLabels } from "@/lib/context-engine";
 import { recalculateParlay } from "@/lib/parlay-recalc";
 import type { GeneratedParlay, ParlayLeg, SafePickItem } from "@/lib/types";
+import { restrictedCompetitionBadge } from "@/types/leagues";
 import {
   formatExplicitBetLine,
   getExplicitPickFromLeg,
@@ -406,6 +407,10 @@ export function SafePicksList({
                     const savedStake = registeredStakes[key] ?? pick.stakeCLP;
                     const valueBadge = formatValueBadge(pick.edge);
                     const explicit = getExplicitPickFromLeg(pick);
+                    const categoryBadge = restrictedCompetitionBadge(
+                      undefined,
+                      pick.leagueName
+                    );
                     return (
                       <li
                         key={key}
@@ -417,6 +422,15 @@ export function SafePicksList({
                               <span className="rounded-full bg-white/8 px-2.5 py-0.5 text-[11px] font-medium text-neutral-300 ring-1 ring-white/10">
                                 {pick.leagueName || "Otros"}
                               </span>
+                              {categoryBadge ? (
+                                <Badge
+                                  variant="info"
+                                  className="max-w-[16rem] truncate font-normal"
+                                  title={categoryBadge}
+                                >
+                                  {categoryBadge}
+                                </Badge>
+                              ) : null}
                               <span className="text-xs tabular-nums text-neutral-500">
                                 {formatKickoffTime(pick.kickoff)} CL
                               </span>

@@ -14,6 +14,8 @@ import {
   isRecentManagerStart,
   type TeamProfileSnapshot,
 } from "@/lib/team-profile-shared";
+import { isTeamProfileOriginLeagueId } from "@/config/allowed-leagues";
+import { getLeagueDisplayName } from "@/lib/utils/league-labels";
 import { cn, formatPercent } from "@/lib/utils";
 import {
   ChevronDown,
@@ -59,6 +61,17 @@ function hasRecentManager(p: TeamProfileSnapshot): boolean {
   return Boolean(
     p.lastManagerChangeDate && isRecentManagerStart(p.lastManagerChangeDate)
   );
+}
+
+/** Accordion key: domestic origin display name, else "Otros". */
+function profileLeagueGroupKey(profile: TeamProfileSnapshot): string {
+  const id = profile.primaryLeagueId;
+  if (id != null && isTeamProfileOriginLeagueId(id)) {
+    return getLeagueDisplayName(id);
+  }
+  const named = profile.leagueName?.trim();
+  if (named && named !== "Otros") return named;
+  return "Otros";
 }
 
 function sortProfiles(
@@ -158,8 +171,8 @@ function TeamCard({
             <p className="truncate text-sm font-semibold text-white">
               {profile.teamName}
             </p>
-            <Badge variant="default" className="max-w-[7.5rem] shrink-0 truncate px-2 py-0 text-[10px]">
-              {profile.leagueName ?? "Otros"}
+            <Badge variant="default" className="max-w-[12rem] shrink-0 truncate px-2 py-0 text-[10px]">
+              {profileLeagueGroupKey(profile)}
             </Badge>
           </div>
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -247,7 +260,7 @@ export default function TeamsPage() {
       list = list.filter((p) => p.teamName.toLowerCase().includes(q));
     }
     if (league !== "all") {
-      list = list.filter((p) => (p.leagueName ?? "Otros") === league);
+      list = list.filter((p) => profileLeagueGroupKey(p) === league);
     }
     if (status === "absences") {
       list = list.filter((p) => p.keyAbsencesCount > 0);
@@ -260,13 +273,30 @@ export default function TeamsPage() {
   const grouped = useMemo(() => {
     const map = new Map<string, TeamProfileSnapshot[]>();
     for (const p of filtered) {
-      const key = p.leagueName?.trim() || "Otros";
+      const key = profileLeagueGroupKey(p);
       const arr = map.get(key);
       if (arr) arr.push(p);
       else map.set(key, [p]);
     }
-    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b, "es"));
+    // "Otros" only when teams truly lack a domestic origin league id
+    return [...map.entries()].sort(([a], [b]) => {
+      if (a === "Otros") return 1;
+      if (b === "Otros") return -1;
+      return a.localeCompare(b, "es");
+    });
   }, [filtered]);
+
+  const leagueOptions = useMemo(() => {
+    const fromApi = leagues.filter((n) => n && n !== "Otros");
+    const fromProfiles = [
+      ...new Set(profiles.map(profileLeagueGroupKey).filter((k) => k !== "Otros")),
+    ];
+    const merged = [...new Set([...fromApi, ...fromProfiles])].sort((a, b) =>
+      a.localeCompare(b, "es")
+    );
+    const hasOtros = profiles.some((p) => profileLeagueGroupKey(p) === "Otros");
+    return hasOtros ? [...merged, "Otros"] : merged;
+  }, [leagues, profiles]);
 
   const rebuild = async () => {
     setRebuilding(true);
@@ -385,7 +415,7 @@ export default function TeamsPage() {
                 className={selectClass}
               >
                 <option value="all">Todas las ligas</option>
-                {leagues.map((name) => (
+                {leagueOptions.map((name) => (
                   <option key={name} value={name}>
                     {name}
                   </option>

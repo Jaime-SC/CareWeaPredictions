@@ -6,7 +6,11 @@
 export type TeamProfileSnapshot = {
   teamId: number;
   teamName: string;
-  /** Most recent league seen in MatchFixture history (dashboard grouping). */
+  /** Domestic origin league id (API-Football) — preferred grouping key. */
+  primaryLeagueId?: number | null;
+  /** Country derived from primaryLeagueId (Italia / Brasil / …). */
+  country?: string | null;
+  /** Display label from primaryLeagueId (never ambiguous bare "Serie A"). */
   leagueName?: string | null;
   totalMatchesAnalyzed: number;
   homeMatchesCount: number;
@@ -24,6 +28,8 @@ export type TeamProfileSnapshot = {
   cleanSheetRateAway: number;
   lastManagerChangeDate?: string | null;
   keyAbsencesCount: number;
+  /** Brier-driven Poisson multiplier (1 = neutral). */
+  brierCalibrationFactor?: number;
   updatedAt?: string;
 };
 

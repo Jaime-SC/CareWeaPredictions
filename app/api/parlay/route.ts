@@ -20,7 +20,7 @@ import {
   DEFAULT_TARGET_LEG_COUNT,
   filterEliteWhitelistMatches,
   formatParlayClipboard,
-  generateParlay,
+  generateParlayAudited,
   singleDayShortfallNotice,
 } from "@/lib/parlay-generator";
 import {
@@ -208,7 +208,10 @@ async function buildMonopolyParlayResponse(ignoreRotationFilter: boolean) {
     await enrichMatchesFromLocalData(rawMatches)
   );
 
-  const parlay = generateParlay(matches, { ...preset, ignoreRotationFilter });
+  const parlay = await generateParlayAudited(matches, {
+    ...preset,
+    ignoreRotationFilter,
+  });
   const clipboard = formatParlayClipboard(parlay, "CLP", week.fromYmd);
   const insufficient =
     parlay.status === "INSUFFICIENT_MATCHES" ||
@@ -285,7 +288,7 @@ async function buildAutoParlayResponse(
         : matches
     );
 
-    const parlay = generateParlay(scopedMatches, {
+    const parlay = await generateParlayAudited(scopedMatches, {
       ...config,
       // Soften exact-15 pressure when single-day supply is thin
       maxLegs: Math.max(

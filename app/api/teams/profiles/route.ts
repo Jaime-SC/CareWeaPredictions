@@ -24,9 +24,12 @@ export async function GET(request: NextRequest) {
       ...new Set(
         profiles
           .map((p) => p.leagueName?.trim())
-          .filter((n): n is string => Boolean(n))
+          .filter((n): n is string => Boolean(n) && n !== "Otros")
       ),
     ].sort((a, b) => a.localeCompare(b, "es"));
+    if (profiles.some((p) => (p.leagueName ?? "Otros") === "Otros")) {
+      leagues.push("Otros");
+    }
     return NextResponse.json({
       success: true,
       profiles,
@@ -50,9 +53,12 @@ export async function POST() {
       ...new Set(
         profiles
           .map((p) => p.leagueName?.trim())
-          .filter((n): n is string => Boolean(n))
+          .filter((n): n is string => Boolean(n) && n !== "Otros")
       ),
     ].sort((a, b) => a.localeCompare(b, "es"));
+    if (profiles.some((p) => (p.leagueName ?? "Otros") === "Otros")) {
+      leagues.push("Otros");
+    }
     return NextResponse.json({
       success: true,
       ...result,

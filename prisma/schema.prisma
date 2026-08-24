@@ -127,6 +127,10 @@ model TeamProfile {
   /// API-Football team id
   teamId               Int      @unique
   teamName             String
+  /// Domestic origin league (API-Football id) — grouping key, not display name
+  primaryLeagueId      Int?
+  /// Country label derived from primaryLeagueId (e.g. Italia / Brasil)
+  country              String?
   totalMatchesAnalyzed Int      @default(0)
   /// Settled samples in rolling window as home / away
   homeMatchesCount     Int      @default(0)
@@ -149,7 +153,10 @@ model TeamProfile {
   lastManagerChangeDate DateTime?
   /// Key attacking-line absences known for this team (λ dampener)
   keyAbsencesCount     Int      @default(0)
+  /// Brier-driven Poisson probability multiplier (1 = neutral)
+  brierCalibrationFactor Float  @default(1)
   updatedAt            DateTime @updatedAt
 
   @@index([teamName])
+  @@index([primaryLeagueId])
 }

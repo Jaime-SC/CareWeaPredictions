@@ -23,7 +23,9 @@ Motor de predicción basado en modelos de **Poisson** y análisis estadístico p
 - 👥 **Perfiles de equipo** — forma rolling, splits local/visita, lesiones y guards contextuales (`/teams`).
 - 💰 **Bankroll + Kelly** — stake sugerido, débito/reembolso y sync en Neon.
 - 🛰️ **Enrich multi-fuente (opcional)** — ESPN, clima, Odds API y standings sin sustituir API-Football.
-- 🧭 **Guía de casas chilenas** — pestaña exacta (Betano / JugaBet / Coolbet) y warnings anti-error.
+- 🧠 **Brier learning** — calibración continua por error de probabilidad (liga/mercado/equipo).
+- 🤖 **AI Judge (opcional)** — auditoría Gemini con Google Search antes de registrar picks.
+- 🌍 **Ligas y origen** — whitelist ampliada, labels UEFA/CONMEBOL/Serie A y season mapping.
 
 Catálogo completo: [`docs/FEATURES.md`](./docs/FEATURES.md).
 
@@ -117,9 +119,10 @@ cp .env.example .env.local
 FOOTBALL_API_KEY=tu_api_key_aqui
 ```
 
-Opcional (enrich / backtest):
+Opcional (enrich / backtest / AI Judge):
 
 ```env
+# GEMINI_API_KEY=
 # ODDS_API_KEY=
 # FOOTBALL_DATA_API_KEY=
 ```

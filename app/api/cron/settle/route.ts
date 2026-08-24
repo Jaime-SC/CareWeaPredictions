@@ -4,6 +4,7 @@ import {
   MIN_SETTLEMENT_CALIBRATION_BATCH,
   maybeRecalibrateAfterSettlement,
 } from "@/lib/auto-tuner";
+import { maybeUpdateBrierLearning } from "@/lib/learning-engine";
 import { errorMessage, jsonError } from "@/lib/api-response";
 import { env } from "@/lib/env";
 import { maybeUpdateTeamProfilesAfterSettlement } from "@/lib/team-profiler";
@@ -42,6 +43,20 @@ function calibrationPayload(
   };
 }
 
+function brierPayload(
+  result: Awaited<ReturnType<typeof maybeUpdateBrierLearning>>
+) {
+  if (!result) return null;
+  return {
+    overallMeanBrier: result.overallMeanBrier,
+    leaguesAdjusted: result.leaguesAdjusted,
+    marketsAdjusted: result.marketsAdjusted,
+    teamsAdjusted: result.teamsAdjusted,
+    sampleSize: result.sampleSize,
+    message: result.message,
+  };
+}
+
 async function handle(request: NextRequest) {
   if (!authorize(request)) {
     return NextResponse.json(
@@ -57,9 +72,14 @@ async function handle(request: NextRequest) {
     let calibration: Awaited<
       ReturnType<typeof maybeRecalibrateAfterSettlement>
     > = null;
+    let brierLearning: Awaited<
+      ReturnType<typeof maybeUpdateBrierLearning>
+    > = null;
 
     if (newlySettledCount >= MIN_SETTLEMENT_CALIBRATION_BATCH) {
+      // ROI auto-tuner first, then Brier factors (both write model-weights).
       calibration = await maybeRecalibrateAfterSettlement(newlySettledCount);
+      brierLearning = await maybeUpdateBrierLearning(newlySettledCount);
     }
 
     const teamProfiles =
@@ -72,6 +92,7 @@ async function handle(request: NextRequest) {
       winRatePct: Number((result.winRate * 100).toFixed(2)),
       roiPct: Number(result.roi.toFixed(2)),
       calibration: calibrationPayload(calibration),
+      brierLearning: brierPayload(brierLearning),
       teamProfiles: teamProfiles
         ? {
             teamsUpserted: teamProfiles.teamsUpserted,

@@ -195,7 +195,11 @@ export function isSafeMonopolyFixture(
     };
   }
 
-  if (Number(fixture.league.id) !== side.team.leagueId) {
+  const fixtureLeagueId = Number(fixture.league.id);
+  if (fixtureLeagueId !== side.team.leagueId) {
+    console.log(
+      `[MONOPOLY DROP] ${side.team.teamName}: League mismatch (${fixtureLeagueId} != ${side.team.leagueId})`
+    );
     return {
       isSafe: false,
       reason: "NOT_DOMESTIC_LEAGUE",
@@ -211,6 +215,9 @@ export function isSafeMonopolyFixture(
   );
 
   if (nearbyContinental && options?.ignoreRotationFilter !== true) {
+    console.log(
+      `[MONOPOLY DROP] ${side.team.teamName}: ROTATION_RISK (Continental match within 4 days)`
+    );
     return {
       isSafe: false,
       reason: "ROTATION_RISK",
@@ -224,6 +231,9 @@ export function isSafeMonopolyFixture(
     typeof poissonProbability === "number" &&
     poissonProbability < MONOPOLY_MIN_PROBABILITY
   ) {
+    console.log(
+      `[MONOPOLY DROP] ${side.team.teamName}: LOW_PROBABILITY (${(poissonProbability * 100).toFixed(1)}% < 82%)`
+    );
     return {
       isSafe: false,
       reason: "BELOW_PROBABILITY_FLOOR",
@@ -384,13 +394,30 @@ export function resolveMonopolyMarket(
         { market: "x2", p: board.x2 },
       ];
 
+  const teamName = isHomeTeam ? match.home.name : match.away.name;
   const eligible = candidates
     .filter((c) => c.p >= MONOPOLY_MIN_PROBABILITY)
     .sort((a, b) => b.p - a.p);
 
+  if (eligible.length === 0) {
+    const best = Math.max(0, ...candidates.map((c) => c.p));
+    console.log(
+      `[MONOPOLY DROP] ${teamName}: LOW_PROBABILITY (${(best * 100).toFixed(1)}% < 82%)`
+    );
+    return null;
+  }
+
+  let missingOdds = false;
   for (const c of eligible) {
     const pick = toPrediction(match, c.market, c.p);
-    if (pick.odds > 1 && pick.isSafePick) return pick;
+    if (!(pick.odds > 1)) {
+      missingOdds = true;
+      continue;
+    }
+    if (pick.isSafePick) return pick;
+  }
+  if (missingOdds) {
+    console.log(`[MONOPOLY DROP] ${teamName}: MISSING_BOOKMAKER_ODDS`);
   }
   return null;
 }

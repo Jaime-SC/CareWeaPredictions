@@ -10,6 +10,7 @@ import {
 import { classifyInjuryRole } from "./context-engine";
 import { fixtureIdFromMatchId } from "./odds-mapper";
 import { countKeyAbsencesFromLists } from "./team-profile-shared";
+import { seasonFallbackCandidates } from "./utils/season-mapper";
 
 /** Explicit 12h as requested (equals CACHE_TTL_MINUTES.ODDS). */
 export const INJURIES_TTL_MINUTES = 720;
@@ -124,13 +125,18 @@ function goalsScore(row: PlayerStatRow, teamId: number): number {
 
 /** Cache-only topscorers / squad stats (0 live calls). */
 async function loadCachedTopAttackers(
-  teamId: number
+  teamId: number,
+  leagueId?: number
 ): Promise<Array<{ id?: number; name?: string }>> {
-  const season = new Date().getFullYear();
-  const keys = [
+  const now = new Date();
+  const seasons =
+    leagueId != null && Number.isFinite(leagueId)
+      ? [...seasonFallbackCandidates(leagueId, now)]
+      : [now.getFullYear(), now.getFullYear() - 1];
+  const keys = seasons.flatMap((season) => [
     `players_topscorers_team_${teamId}_season_${season}`,
     `players_team_${teamId}_season_${season}`,
-  ];
+  ]);
   for (const cacheKey of keys) {
     try {
       const hit = await getCachedPayload<ApiEnvelope<PlayerStatRow[]>>(cacheKey);
@@ -192,6 +198,7 @@ export async function checkMatchInjuries(
     persistProfiles?: boolean;
     /** When false, never live-fetch (cache only). Default true. */
     allowLive?: boolean;
+    leagueId?: number | string | null;
   }
 ): Promise<MatchInjuryCheck> {
   const empty = (teamId: number, name: string): SideInjuryResult => ({
@@ -240,7 +247,7 @@ export async function checkMatchInjuries(
         }
       );
       liveFetched = true;
-      if (!envelopeHasErrors(json.errors)) {
+      if (json && !envelopeHasErrors(json.errors)) {
         rows = json.response ?? [];
       }
     }
@@ -272,12 +279,19 @@ export async function checkMatchInjuries(
   if (opts?.persistProfiles !== false) {
     try {
       const { updateTeamProfileFlags } = await import("./team-profiler");
-      await updateTeamProfileFlags(homeTeamId, homeName, {
-        keyAbsencesCount: homeCount,
-      });
-      await updateTeamProfileFlags(awayTeamId, awayName, {
-        keyAbsencesCount: awayCount,
-      });
+      const leagueOpt = { leagueId: opts?.leagueId };
+      await updateTeamProfileFlags(
+        homeTeamId,
+        homeName,
+        { keyAbsencesCount: homeCount },
+        leagueOpt
+      );
+      await updateTeamProfileFlags(
+        awayTeamId,
+        awayName,
+        { keyAbsencesCount: awayCount },
+        leagueOpt
+      );
     } catch (err) {
       console.warn("[injuries-checker] profile persist failed:", err);
     }
@@ -292,6 +306,7 @@ export async function checkMatchInjuries(
 export async function applyInjuryChecksToMatchPool(
   matches: Array<{
     id: string;
+    leagueId?: string | number;
     home: { id?: number; name: string };
     away: { id?: number; name: string };
   }>,
@@ -333,6 +348,7 @@ export async function applyInjuryChecksToMatchPool(
       awayName: m.away.name,
       persistProfiles: true,
       allowLive,
+      leagueId: m.leagueId,
     });
     fixturesChecked += 1;
     if (result.liveFetched) liveFetches += 1;

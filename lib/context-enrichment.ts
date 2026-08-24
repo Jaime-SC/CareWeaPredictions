@@ -3,12 +3,20 @@
  * Quota-aware: prefers SQLite cache, then a tiny live batch under Free plan.
  */
 import type { Match, TeamInjury, TeamStats } from "./types";
-import { classifyInjuryRole } from "./context-engine";
+import {
+  classifyInjuryRole,
+  needsPreviousSeasonBlend,
+} from "./context-engine";
 import {
   CACHE_TTL_MINUTES,
   getCachedPayload,
 } from "./api-cache";
 import { fixtureIdFromMatchId } from "./odds-mapper";
+import {
+  blendSeasonStat,
+  getTargetSeason,
+  seasonFallbackCandidates,
+} from "./utils/season-mapper";
 
 type ApiEnvelope<T> = {
   response?: T;
@@ -60,7 +68,7 @@ const CONTEXT_LIVE_BATCH = 4;
 type LiveGetter = <T>(
   path: string,
   opts?: { ttlMinutes?: number | null; cacheKey?: string }
-) => Promise<ApiEnvelope<T>>;
+) => Promise<ApiEnvelope<T> | null>;
 
 function hasErrors(errors: ApiEnvelope<unknown>["errors"]): boolean {
   if (!errors) return false;
@@ -163,16 +171,48 @@ function parseInjuries(
   return out;
 }
 
-function applyTeamStats(team: TeamStats, stats: TeamStatsRow | undefined, venue: "home" | "away"): TeamStats {
-  if (!stats?.goals) return team;
-  const scoredAvg =
-    venue === "home"
-      ? num(stats.goals.for?.average?.home, team.homeGoalsScoredAvg ?? team.goalsScoredAvg)
-      : num(stats.goals.for?.average?.away, team.awayGoalsScoredAvg ?? team.goalsScoredAvg);
-  const concededAvg =
-    venue === "home"
-      ? num(stats.goals.against?.average?.home, team.homeGoalsConcededAvg ?? team.goalsConcededAvg)
-      : num(stats.goals.against?.average?.away, team.awayGoalsConcededAvg ?? team.goalsConcededAvg);
+function playedTotal(stats: TeamStatsRow | undefined): number {
+  if (!stats?.fixtures?.played) return 0;
+  const total = stats.fixtures.played.total;
+  if (typeof total === "number" && Number.isFinite(total)) return total;
+  return (
+    (stats.fixtures.played.home ?? 0) + (stats.fixtures.played.away ?? 0)
+  );
+}
+
+function venueAvgs(
+  stats: TeamStatsRow | undefined,
+  venue: "home" | "away"
+): { scored: number; conceded: number } {
+  if (!stats?.goals) return { scored: 0, conceded: 0 };
+  return {
+    scored:
+      venue === "home"
+        ? num(stats.goals.for?.average?.home)
+        : num(stats.goals.for?.average?.away),
+    conceded:
+      venue === "home"
+        ? num(stats.goals.against?.average?.home)
+        : num(stats.goals.against?.average?.away),
+  };
+}
+
+function applyTeamStats(
+  team: TeamStats,
+  stats: TeamStatsRow | undefined,
+  venue: "home" | "away",
+  previousStats?: TeamStatsRow | null
+): TeamStats {
+  const cur = venueAvgs(stats, venue);
+  const played = playedTotal(stats);
+  let scoredAvg = cur.scored;
+  let concededAvg = cur.conceded;
+
+  if (previousStats && needsPreviousSeasonBlend(played)) {
+    const prev = venueAvgs(previousStats, venue);
+    scoredAvg = blendSeasonStat(cur.scored, prev.scored, played);
+    concededAvg = blendSeasonStat(cur.conceded, prev.conceded, played);
+  }
 
   if (scoredAvg <= 0 && concededAvg <= 0) return team;
 
@@ -196,6 +236,35 @@ function applyTeamStats(team: TeamStats, stats: TeamStatsRow | undefined, venue:
           awayGoalsConcededAvg: Number(concededAvg.toFixed(3)),
         }),
   };
+}
+
+async function loadTeamStatsRow(
+  teamId: number,
+  leagueId: number,
+  season: number,
+  liveGet: LiveGetter | undefined,
+  liveBudget: { left: number }
+): Promise<TeamStatsRow | null> {
+  const cacheKey = `team_stats_${teamId}_${leagueId}_${season}`;
+  try {
+    const cached = await getCachedPayload<ApiEnvelope<TeamStatsRow[]>>(cacheKey);
+    const hit = cached?.response?.[0];
+    if (hit) return hit;
+    if (!liveGet || liveBudget.left <= 0) return null;
+    const json = await liveGet<TeamStatsRow[]>(
+      `/teams/statistics?team=${teamId}&league=${leagueId}&season=${season}`,
+      { ttlMinutes: CACHE_TTL_MINUTES.ROSTER, cacheKey }
+    );
+    liveBudget.left -= 1;
+    if (!json || hasErrors(json.errors)) return null;
+    return json.response?.[0] ?? null;
+  } catch (err) {
+    console.warn(
+      `[context-enrichment] team stats failed team=${teamId} season=${season}:`,
+      err
+    );
+    return null;
+  }
 }
 
 async function readCachedH2h(
@@ -237,15 +306,16 @@ export async function enrichMatchContextFeatures(
       let h2h = await readCachedH2h(homeId, awayId);
       if (!h2h && liveBudget > 0 && liveGet) {
         try {
+          // Free plan: omit `last` (restricted); parseH2h still slices to 4 locally
           const json = await liveGet<H2hRow[]>(
-            `/fixtures/headtohead?h2h=${homeId}-${awayId}&last=4`,
+            `/fixtures/headtohead?h2h=${homeId}-${awayId}`,
             {
               ttlMinutes: CACHE_TTL_MINUTES.ODDS,
               cacheKey,
             }
           );
           liveBudget -= 1;
-          if (!hasErrors(json.errors)) {
+          if (json && !hasErrors(json.errors)) {
             h2h = parseH2h(
               json.response ?? [],
               homeId,
@@ -281,7 +351,7 @@ export async function enrichMatchContextFeatures(
             { ttlMinutes: CACHE_TTL_MINUTES.ODDS, cacheKey }
           );
           liveBudget -= 1;
-          if (!hasErrors(json.errors)) rows = json.response ?? [];
+          if (json && !hasErrors(json.errors)) rows = json.response ?? [];
         } catch (err) {
           console.warn("[context-enrichment] injuries fetch failed:", err);
         }
@@ -309,49 +379,57 @@ export async function enrichMatchContextFeatures(
       awayId != null &&
       (match.away.awayGoalsScoredAvg == null || match.away.awayGoalsScoredAvg <= 0);
     const leagueId = Number(match.leagueId);
-    const season = new Date(match.kickoff).getUTCFullYear();
+    const kickoffDate = new Date(match.kickoff);
+    const season =
+      Number.isFinite(leagueId) && Number.isFinite(kickoffDate.getTime())
+        ? getTargetSeason(leagueId, kickoffDate)
+        : kickoffDate.getFullYear();
+    const [, prevSeason] = Number.isFinite(leagueId)
+      ? seasonFallbackCandidates(leagueId, kickoffDate)
+      : ([season, season - 1] as const);
+    const budget = { left: liveBudget };
 
-    if (needHomeStats && Number.isFinite(leagueId) && liveBudget > 0 && liveGet) {
-      const cacheKey = `team_stats_${homeId}_${leagueId}_${season}`;
-      try {
-        const cached = await getCachedPayload<ApiEnvelope<TeamStatsRow[]>>(cacheKey);
-        let row = cached?.response?.[0];
-        if (!row) {
-          const json = await liveGet<TeamStatsRow[]>(
-            `/teams/statistics?team=${homeId}&league=${leagueId}&season=${season}`,
-            { ttlMinutes: CACHE_TTL_MINUTES.ROSTER, cacheKey }
-          );
-          liveBudget -= 1;
-          row = json.response?.[0];
-        }
-        if (row) {
-          next = { ...next, home: applyTeamStats(next.home, row, "home") };
-        }
-      } catch (err) {
-        console.warn("[context-enrichment] home stats failed:", err);
+    if (needHomeStats && Number.isFinite(leagueId) && homeId != null) {
+      const current = await loadTeamStatsRow(
+        homeId,
+        leagueId,
+        season,
+        liveGet,
+        budget
+      );
+      const previous =
+        current && needsPreviousSeasonBlend(playedTotal(current))
+          ? await loadTeamStatsRow(homeId, leagueId, prevSeason, liveGet, budget)
+          : null;
+      if (current) {
+        next = {
+          ...next,
+          home: applyTeamStats(next.home, current, "home", previous),
+        };
       }
     }
 
-    if (needAwayStats && Number.isFinite(leagueId) && liveBudget > 0 && liveGet) {
-      const cacheKey = `team_stats_${awayId}_${leagueId}_${season}`;
-      try {
-        const cached = await getCachedPayload<ApiEnvelope<TeamStatsRow[]>>(cacheKey);
-        let row = cached?.response?.[0];
-        if (!row) {
-          const json = await liveGet<TeamStatsRow[]>(
-            `/teams/statistics?team=${awayId}&league=${leagueId}&season=${season}`,
-            { ttlMinutes: CACHE_TTL_MINUTES.ROSTER, cacheKey }
-          );
-          liveBudget -= 1;
-          row = json.response?.[0];
-        }
-        if (row) {
-          next = { ...next, away: applyTeamStats(next.away, row, "away") };
-        }
-      } catch (err) {
-        console.warn("[context-enrichment] away stats failed:", err);
+    if (needAwayStats && Number.isFinite(leagueId) && awayId != null) {
+      const current = await loadTeamStatsRow(
+        awayId,
+        leagueId,
+        season,
+        liveGet,
+        budget
+      );
+      const previous =
+        current && needsPreviousSeasonBlend(playedTotal(current))
+          ? await loadTeamStatsRow(awayId, leagueId, prevSeason, liveGet, budget)
+          : null;
+      if (current) {
+        next = {
+          ...next,
+          away: applyTeamStats(next.away, current, "away", previous),
+        };
       }
     }
+
+    liveBudget = budget.left;
 
     out.push(next);
   }

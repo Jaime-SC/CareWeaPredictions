@@ -43,6 +43,8 @@ export type FetchWithCacheOptions<T> = {
   resolveTtl?: (data: T) => number | null;
   /** Extra fetch init (defaults to no Next data-cache for live quota control) */
   fetchInit?: RequestInit;
+  /** Skip envelope-error warn for Free-plan restrictions (apiGet logs once). */
+  quietPlanErrors?: boolean;
 };
 
 function sanitizeKeyPart(value: string): string {
@@ -381,10 +383,22 @@ export async function fetchWithCache<T>(
       );
 
   if (hasEnvelopeErrors) {
-    console.warn(
-      `[api-football] envelope errors key=${cacheKey}:`,
-      envelopeErrors
-    );
+    const errDetail = Array.isArray(envelopeErrors)
+      ? envelopeErrors.join("; ")
+      : envelopeErrors && typeof envelopeErrors === "object"
+        ? Object.values(envelopeErrors as Record<string, string>).join("; ")
+        : String(envelopeErrors ?? "");
+    const quietPlan =
+      options.quietPlanErrors &&
+      /plan|subscription|not available|your subscription|free plans do not|does not have access|date/i.test(
+        errDetail
+      );
+    if (!quietPlan) {
+      console.warn(
+        `[api-football] envelope errors key=${cacheKey}:`,
+        envelopeErrors
+      );
+    }
     return data;
   }
 

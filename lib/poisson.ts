@@ -16,6 +16,7 @@ import {
 import {
   getLeagueWeight,
   getMarketWeight,
+  getTeamBrierFactor,
   loadModelWeights,
   resolveMinProbability,
 } from "./model-weights";
@@ -31,6 +32,20 @@ import { applyStandingsAwayPenalty } from "./standings";
 
 const FATIGUE_XG_FACTOR = 0.9;
 const MAX_GOALS = 8;
+/** Combined league × market × team Brier multiplier bounds. */
+const BRIER_COMBINED_MIN = 0.82;
+const BRIER_COMBINED_MAX = 1.12;
+
+function clampBrierCombined(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(BRIER_COMBINED_MAX, Math.max(BRIER_COMBINED_MIN, value));
+}
+
+function teamPairBrierFactor(home: number, away: number): number {
+  const h = Number.isFinite(home) ? home : 1;
+  const a = Number.isFinite(away) ? away : 1;
+  return Math.sqrt(Math.max(0.01, h) * Math.max(0.01, a));
+}
 
 /** Avoid divide-by-zero / empty stub averages collapsing every match to the same λ. */
 function safeRatio(value: number, leagueAvg: number): number {
@@ -430,7 +445,33 @@ export function hasBookmakerOdds(odds: MatchOdds): boolean {
 /** Fair decimal odds from a model probability (small overround). */
 export function fairDecimalOdds(probability: number, margin = 1.03): number {
   const p = Math.min(0.97, Math.max(0.05, probability));
-  return Number(Math.max(1.05, (margin / p)).toFixed(3));
+  return Number(Math.max(1.05, margin / p).toFixed(3));
+}
+
+/** Build a full MatchOdds board from Poisson probs (margin 1 = pure fair). */
+export function fairOddsBoardFromProbs(
+  probs: Record<MarketType, number>,
+  margin = 1
+): MatchOdds {
+  const f = (p: number) => fairDecimalOdds(p, margin);
+  return {
+    home: f(probs.home),
+    draw: f(probs.draw),
+    away: f(probs.away),
+    doubleChance1X: f(probs["1x"]),
+    doubleChanceX2: f(probs.x2),
+    over05: f(probs.over_0_5),
+    over15: f(probs.over_1_5),
+    over25: f(probs.over_2_5),
+    under35: f(probs.under_3_5),
+    under45: f(probs.under_4_5),
+    homeScores: f(probs.home_scores),
+    awayScores: f(probs.away_scores),
+    homeOver15: f(probs.home_over_1_5),
+    awayOver15: f(probs.away_over_1_5),
+    dnbHome: f(probs.dnb_home),
+    dnbAway: f(probs.dnb_away),
+  };
 }
 
 export function predictMatchMarkets(
@@ -450,29 +491,13 @@ export function predictMatchMarkets(
   const derby = isHighRiskDerby(match);
   const knockoutEval = evaluateKnockoutContext(match);
   const knockoutContext = toKnockoutContext(knockoutEval);
+  const usedFairOdds = !hasBookmakerOdds(match.odds);
 
-  if (!hasBookmakerOdds(match.odds)) {
-    const xg = estimateExpectedGoals(match);
-    return {
-      expectedGoals: xg,
-      markets: [],
-      isDerby: derby,
-      contextFlags: [
-        "UNAVAILABLE_NO_REAL_ODDS",
-        ...knockoutEval.flags,
-      ],
-      contextNotes: knockoutContext
-        ? ["Sin cuotas reales de casa de apuestas", knockoutContext.note]
-        : ["Sin cuotas reales de casa de apuestas"],
-    };
-  }
-
-  const resolved = match;
   const weights = loadModelWeights();
   const leagueCfg = getLeagueWeight(
-    resolved.leagueName,
+    match.leagueName,
     weights,
-    resolved.leagueId
+    match.leagueId
   );
   const baseMinProb = options?.minSafeProbability ?? 0.8;
   const minOdds = Math.max(
@@ -481,23 +506,34 @@ export function predictMatchMarkets(
   );
   const maxOdds = options?.maxSafeOdds ?? 1.28;
 
-  const xg = estimateExpectedGoals(resolved);
+  const xg = estimateExpectedGoals(match);
   const matrix = buildScoreMatrix(xg.home, xg.away);
   const baseProbs = marketProbsFromMatrix(matrix);
 
-  const ctx = applyContextToMarkets(resolved, baseProbs);
-  const knockoutProbs = applyKnockoutMarketAdjustments(resolved, ctx.probs);
-  // Venue-gated TeamProfile boosts (N≥4 home/away) + clamp ≤+8% / ≤0.92
+  const ctx = applyContextToMarkets(match, baseProbs);
+  const knockoutProbs = applyKnockoutMarketAdjustments(match, ctx.probs);
   const profileCal = applyTeamProfileCalibration(
     knockoutProbs,
-    peekTeamProfile(resolved.home.id),
-    peekTeamProfile(resolved.away.id)
+    peekTeamProfile(match.home.id),
+    peekTeamProfile(match.away.id)
   );
   const standingsCal = applyStandingsAwayPenalty(
     profileCal.probs,
-    resolved.standings
+    match.standings
   );
   const probs = standingsCal.probs;
+  const resolved = match;
+
+  const homeProfile = peekTeamProfile(match.home.id);
+  const awayProfile = peekTeamProfile(match.away.id);
+  const leagueBrier = leagueCfg.brierCalibrationFactor ?? 1;
+  const teamBrier = teamPairBrierFactor(
+    homeProfile?.brierCalibrationFactor ??
+      getTeamBrierFactor(match.home.name, weights),
+    awayProfile?.brierCalibrationFactor ??
+      getTeamBrierFactor(match.away.name, weights)
+  );
+
   const knockoutFlags = knockoutEval.flags;
   const mergedFlags = [
     ...new Set([
@@ -505,6 +541,7 @@ export function predictMatchMarkets(
       ...knockoutFlags,
       ...profileCal.flags,
       ...standingsCal.flags,
+      ...(usedFairOdds ? ["POISSON_FAIR_ODDS"] : []),
       ...(resolved.weather?.factor != null && resolved.weather.factor < 1
         ? ["WEATHER_ADVERSE"]
         : []),
@@ -516,30 +553,35 @@ export function predictMatchMarkets(
       : ctx.contextNotes),
     ...profileCal.notes,
     ...standingsCal.notes,
+    ...(usedFairOdds
+      ? ["Cuotas estimadas por Poisson (sin board de casa de apuestas)"]
+      : []),
     ...(resolved.weather?.alert ? [resolved.weather.alert] : []),
   ];
 
   const markets: MarketPrediction[] = (
     Object.keys(probs) as MarketType[]
   ).map((market) => {
-    const odds = oddsForMarket(resolved.odds, market);
     const rawProb = probs[market];
     const tunedProb = applyTuningToProbability(rawProb, resolved, market);
+    const mktCfg = getMarketWeight(market, weights);
+    const brierMul = clampBrierCombined(
+      leagueBrier * (mktCfg.brierCalibrationFactor ?? 1) * teamBrier
+    );
     const modelProbability = Math.min(
       0.99,
-      Math.max(0, tunedProb * leagueCfg.probabilityScale)
+      Math.max(0, tunedProb * leagueCfg.probabilityScale * brierMul)
     );
-    const mktCfg = getMarketWeight(market, weights);
+    const odds = usedFairOdds
+      ? fairDecimalOdds(modelProbability, 1)
+      : oddsForMarket(resolved.odds, market);
     const blockedByDerby = isMarketBlockedByDerby(resolved, market);
     const implied = impliedProbability(odds);
     const edge = modelProbability - implied;
     const valuePct = valueMarginPercent(modelProbability, odds);
-    const sanity = failsMarketSanity(
-      resolved,
-      market,
-      modelProbability,
-      odds
-    );
+    const sanity = usedFairOdds
+      ? { fail: false, flags: [] as string[] }
+      : failsMarketSanity(resolved, market, modelProbability, odds);
     const effectiveMin = resolveMinProbability(
       baseMinProb,
       market,
@@ -552,6 +594,7 @@ export function predictMatchMarkets(
       ...(marketCtx?.contextFlags ?? []),
       ...knockoutFlags,
       ...sanity.flags,
+      ...(usedFairOdds ? ["POISSON_FAIR_ODDS"] : []),
     ];
 
     return {
@@ -562,7 +605,7 @@ export function predictMatchMarkets(
       impliedProbability: implied,
       edge,
       valueMarginPercent: Number(valuePct.toFixed(2)),
-      isValueBet: isValueBet(modelProbability, odds),
+      isValueBet: usedFairOdds ? false : isValueBet(modelProbability, odds),
       isSafePick:
         !mktCfg.disabled &&
         !blockedByDerby &&

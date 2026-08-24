@@ -19,6 +19,10 @@ export interface LeagueWeightConfig {
   minOdds: number;
   /** Additive boost to min probability for this league. */
   minProbabilityBoost: number;
+  /** Brier-driven multiplier on Poisson probs (1 = neutral). */
+  brierCalibrationFactor?: number;
+  /** Running mean Brier Score for this league. */
+  meanBrierScore?: number;
   leagueId?: string;
   leagueName?: string;
   winRate?: number;
@@ -32,9 +36,21 @@ export interface MarketWeightConfig {
   /** Extra minimum model probability for this market. */
   minProbability: number;
   disabled: boolean;
+  /** Brier-driven multiplier on Poisson probs (1 = neutral). */
+  brierCalibrationFactor?: number;
+  meanBrierScore?: number;
   roi?: number;
   winRate?: number;
   sampleSize?: number;
+}
+
+/** Per-team Brier calibration (also mirrored on TeamProfile when matched). */
+export interface TeamBrierWeightConfig {
+  brierCalibrationFactor: number;
+  meanBrierScore?: number;
+  sampleSize?: number;
+  teamId?: number;
+  teamName?: string;
 }
 
 export interface ModelWeights {
@@ -58,12 +74,18 @@ export interface ModelWeights {
   };
   leagues: Record<string, LeagueWeightConfig>;
   markets: Record<string, MarketWeightConfig>;
+  /** Team-name keyed Brier factors from learning-engine. */
+  teams?: Record<string, TeamBrierWeightConfig>;
   summary: {
     leaguesAdjusted: number;
     marketsAdjusted: number;
     message: string;
   };
 }
+
+/** Hard clamps for Brier calibration factors. */
+export const BRIER_CALIBRATION_MIN = 0.85;
+export const BRIER_CALIBRATION_MAX = 1.08;
 
 export const DEFAULT_MODEL_WEIGHTS: ModelWeights = {
   version: 1,
@@ -81,6 +103,7 @@ export const DEFAULT_MODEL_WEIGHTS: ModelWeights = {
   },
   leagues: {},
   markets: {},
+  teams: {},
   summary: {
     leaguesAdjusted: 0,
     marketsAdjusted: 0,
@@ -117,6 +140,16 @@ function normalizeLeagueConfig(
     ),
     minOdds: clampNumber(raw.minOdds, MIN_ODDS_FLOOR, MIN_ODDS_CEILING, defaultMinOdds),
     minProbabilityBoost: clampNumber(raw.minProbabilityBoost, -0.08, 0.12, 0),
+    brierCalibrationFactor: clampNumber(
+      raw.brierCalibrationFactor,
+      BRIER_CALIBRATION_MIN,
+      BRIER_CALIBRATION_MAX,
+      1
+    ),
+    meanBrierScore:
+      typeof raw.meanBrierScore === "number" && Number.isFinite(raw.meanBrierScore)
+        ? raw.meanBrierScore
+        : undefined,
     leagueId: typeof raw.leagueId === "string" ? raw.leagueId : undefined,
     leagueName: typeof raw.leagueName === "string" ? raw.leagueName : undefined,
     winRate: typeof raw.winRate === "number" ? raw.winRate : undefined,
@@ -130,9 +163,39 @@ function normalizeMarketConfig(raw: MarketWeightConfig): MarketWeightConfig {
     weight: clampNumber(raw.weight, 0.2, 1.3, 1),
     minProbability: clampNumber(raw.minProbability, 0, 0.95, 0),
     disabled: Boolean(raw.disabled),
+    brierCalibrationFactor: clampNumber(
+      raw.brierCalibrationFactor,
+      BRIER_CALIBRATION_MIN,
+      BRIER_CALIBRATION_MAX,
+      1
+    ),
+    meanBrierScore:
+      typeof raw.meanBrierScore === "number" && Number.isFinite(raw.meanBrierScore)
+        ? raw.meanBrierScore
+        : undefined,
     roi: typeof raw.roi === "number" ? raw.roi : undefined,
     winRate: typeof raw.winRate === "number" ? raw.winRate : undefined,
     sampleSize: typeof raw.sampleSize === "number" ? raw.sampleSize : undefined,
+  };
+}
+
+function normalizeTeamBrierConfig(
+  raw: TeamBrierWeightConfig
+): TeamBrierWeightConfig {
+  return {
+    brierCalibrationFactor: clampNumber(
+      raw.brierCalibrationFactor,
+      BRIER_CALIBRATION_MIN,
+      BRIER_CALIBRATION_MAX,
+      1
+    ),
+    meanBrierScore:
+      typeof raw.meanBrierScore === "number" && Number.isFinite(raw.meanBrierScore)
+        ? raw.meanBrierScore
+        : undefined,
+    sampleSize: typeof raw.sampleSize === "number" ? raw.sampleSize : undefined,
+    teamId: typeof raw.teamId === "number" ? raw.teamId : undefined,
+    teamName: typeof raw.teamName === "string" ? raw.teamName : undefined,
   };
 }
 
@@ -176,6 +239,12 @@ function normalizeWeights(raw: Partial<ModelWeights> | null): ModelWeights {
     markets[key] = normalizeMarketConfig(cfg);
   }
 
+  const teams: Record<string, TeamBrierWeightConfig> = {};
+  for (const [key, cfg] of Object.entries(raw.teams ?? {})) {
+    if (!key || !cfg) continue;
+    teams[key] = normalizeTeamBrierConfig(cfg);
+  }
+
   return {
     version: typeof raw.version === "number" ? raw.version : 1,
     calibratedAt:
@@ -184,6 +253,7 @@ function normalizeWeights(raw: Partial<ModelWeights> | null): ModelWeights {
     global,
     leagues,
     markets,
+    teams,
     summary: {
       ...DEFAULT_MODEL_WEIGHTS.summary,
       ...(raw.summary ?? {}),
@@ -303,6 +373,7 @@ export function getLeagueWeight(
       probabilityScale: 1,
       minOdds: weights.global.defaultMinOdds,
       minProbabilityBoost: 0,
+      brierCalibrationFactor: 1,
     }
   );
 }
@@ -317,8 +388,30 @@ export function getMarketWeight(
       weight: 1,
       minProbability: 0,
       disabled: false,
+      brierCalibrationFactor: 1,
     }
   );
+}
+
+/** Team Brier factor from model-weights (name or id); 1 if unknown. */
+export function getTeamBrierFactor(
+  teamNameOrId: string | number | undefined | null,
+  weights = loadModelWeights()
+): number {
+  if (teamNameOrId == null) return 1;
+  const teams = weights.teams ?? {};
+  const raw = String(teamNameOrId).trim();
+  if (!raw) return 1;
+  const direct = teams[raw];
+  if (direct) return direct.brierCalibrationFactor ?? 1;
+  const lower = raw.toLowerCase();
+  for (const [key, cfg] of Object.entries(teams)) {
+    if (key.toLowerCase() === lower) return cfg.brierCalibrationFactor ?? 1;
+    if (cfg.teamId != null && String(cfg.teamId) === raw) {
+      return cfg.brierCalibrationFactor ?? 1;
+    }
+  }
+  return 1;
 }
 
 /** Effective minimum probability for a market in a league. */

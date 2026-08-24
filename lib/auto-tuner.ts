@@ -399,6 +399,8 @@ export function calibrateModelParameters(
           (v) => clamp(v, -0.08, 0.12)
         )
       ),
+      brierCalibrationFactor: prev.brierCalibrationFactor ?? 1,
+      meanBrierScore: prev.meanBrierScore,
       leagueId: agg.leagueId,
       leagueName: agg.leagueName,
       winRate: round4(wr),
@@ -474,6 +476,8 @@ export function calibrateModelParameters(
       ),
       disabled:
         n >= MIN_SAMPLE_FULL ? target.disabled : Boolean(prev.disabled),
+      brierCalibrationFactor: prev.brierCalibrationFactor ?? 1,
+      meanBrierScore: prev.meanBrierScore,
       roi: Number((r * 100).toFixed(2)),
       winRate: round4(wr),
       sampleSize: n,
@@ -568,6 +572,7 @@ export function calibrateModelParameters(
     },
     leagues,
     markets,
+    teams: previous.teams ?? {},
     summary: {
       leaguesAdjusted,
       marketsAdjusted,

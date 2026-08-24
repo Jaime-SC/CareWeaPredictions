@@ -7,8 +7,6 @@ export type LeagueId =
   | "copa-libertadores"
   | "copa-sudamericana"
   | "serie-a"
-  | "bundesliga"
-  | "ligue-1"
   | "brasileirao"
   | "liga-profesional"
   | "liga-pro-ecuador"
@@ -214,6 +212,14 @@ export interface MarketPrediction {
   knockoutContext?: KnockoutContext;
 }
 
+/** Gemini Search-grounded qualitative audit of a fixture. */
+export interface AIVerdict {
+  approved: boolean;
+  vetoReason: string | null;
+  confidenceScore: number;
+  summary: string;
+}
+
 export interface MatchPrediction {
   matchId: string;
   match: Match;
@@ -223,6 +229,8 @@ export interface MatchPrediction {
   contextFlags?: string[];
   contextNotes?: string[];
   knockoutContext?: KnockoutContext;
+  /** Present when Gemini Search audited this fixture. */
+  aiJudge?: AIVerdict;
 }
 
 /** Canonical alias for a scored match + markets bundle. */
@@ -246,6 +254,8 @@ export interface ParlayLeg {
   /** Set when monopoly anti-rotation was bypassed and a continental fixture is nearby. */
   warning?: "NEARBY_INTERNATIONAL_MATCH_PRESENT";
   knockoutContext?: KnockoutContext;
+  /** Gemini Search audit — only attached when the judge actually ran. */
+  aiJudge?: AIVerdict;
 }
 
 export interface SafePickItem {

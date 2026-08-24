@@ -9,6 +9,19 @@ import type {
   TeamInjury,
   TeamStats,
 } from "./types";
+import { EARLY_SEASON_MIN_MATCHES } from "./utils/season-mapper";
+
+export {
+  EARLY_SEASON_MIN_MATCHES,
+  earlySeasonCurrentWeight,
+  getTargetSeason,
+  seasonFallbackCandidates,
+} from "./utils/season-mapper";
+
+/** True when current-season sample is too thin for stand-alone Poisson λ. */
+export function needsPreviousSeasonBlend(matchesPlayed: number): boolean {
+  return matchesPlayed < EARLY_SEASON_MIN_MATCHES;
+}
 
 export interface ContextResult {
   finalProbability: number;

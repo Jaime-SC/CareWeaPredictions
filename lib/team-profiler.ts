@@ -8,6 +8,18 @@
 import { prisma } from "./db";
 import { isFixtureFinished } from "./match-status";
 import {
+  isTeamProfileOriginLeagueId,
+  parseLeagueId,
+} from "../config/allowed-leagues";
+import {
+  getLeagueCountry,
+  getLeagueDisplayName,
+} from "./utils/league-labels";
+import {
+  needsDomesticLeagueRemap,
+  resolveDomesticLeagueByTeamId,
+} from "./team-league-resolve";
+import {
   MANAGER_CHANGE_COOLDOWN_DAYS,
   countKeyAbsencesFromLists,
   isRecentManagerStart,
@@ -104,6 +116,8 @@ function weightedRate(hits: number, weight: number): number {
 type ProfileRow = {
   teamId: number;
   teamName: string;
+  primaryLeagueId?: number | null;
+  country?: string | null;
   totalMatchesAnalyzed: number;
   homeMatchesCount?: number | null;
   awayMatchesCount?: number | null;
@@ -120,6 +134,7 @@ type ProfileRow = {
   cleanSheetRateAway?: number | null;
   lastManagerChangeDate?: Date | string | null;
   keyAbsencesCount?: number | null;
+  brierCalibrationFactor?: number | null;
   updatedAt?: Date | string;
 };
 
@@ -135,9 +150,18 @@ function toIsoOrNull(
 }
 
 function toSnapshot(row: ProfileRow): TeamProfileSnapshot {
+  const primaryLeagueId =
+    row.primaryLeagueId != null && Number.isFinite(row.primaryLeagueId)
+      ? row.primaryLeagueId
+      : null;
   return {
     teamId: row.teamId,
     teamName: row.teamName,
+    primaryLeagueId,
+    country: row.country ?? getLeagueCountry(primaryLeagueId),
+    leagueName: primaryLeagueId != null
+      ? getLeagueDisplayName(primaryLeagueId)
+      : undefined,
     totalMatchesAnalyzed: row.totalMatchesAnalyzed,
     homeMatchesCount: row.homeMatchesCount ?? 0,
     awayMatchesCount: row.awayMatchesCount ?? 0,
@@ -154,6 +178,11 @@ function toSnapshot(row: ProfileRow): TeamProfileSnapshot {
     cleanSheetRateAway: row.cleanSheetRateAway ?? 0,
     lastManagerChangeDate: toIsoOrNull(row.lastManagerChangeDate),
     keyAbsencesCount: row.keyAbsencesCount ?? 0,
+    brierCalibrationFactor:
+      typeof row.brierCalibrationFactor === "number" &&
+      Number.isFinite(row.brierCalibrationFactor)
+        ? row.brierCalibrationFactor
+        : 1,
     updatedAt:
       row.updatedAt instanceof Date
         ? row.updatedAt.toISOString()
@@ -345,30 +374,81 @@ function profileWriteData(
   };
 }
 
+function warnProfilePersist(teamName: string): void {
+  console.warn(
+    `[TEAM PROFILER WARNING] Could not persist profile for ${teamName}. Continuing in-memory.`
+  );
+}
+
 async function httpUpsertProfile(
   teamId: number,
-  data: Omit<TeamProfileSnapshot, "teamId" | "updatedAt">
-): Promise<void> {
-  const payload = profileWriteData(data);
-  const existing = await prisma.teamProfile.findUnique({ where: { teamId } });
-  if (existing) {
-    await prisma.teamProfile.update({
-      where: { id: existing.id },
-      data: payload,
-    });
-    return;
+  data: Omit<TeamProfileSnapshot, "teamId" | "updatedAt">,
+  options?: { leagueId?: number | null }
+): Promise<boolean> {
+  const leagueId = options?.leagueId;
+  if (
+    leagueId != null &&
+    Number.isFinite(leagueId) &&
+    !isTeamProfileOriginLeagueId(leagueId)
+  ) {
+    console.log(
+      `[team-profiler] skip upsert ${data.teamName} (teamId=${teamId}): league ${leagueId} not profile-origin`
+    );
+    return false;
   }
+
+  const payload = {
+    ...profileWriteData(data),
+    ...(leagueId != null && isTeamProfileOriginLeagueId(leagueId)
+      ? {
+          primaryLeagueId: leagueId,
+          country: getLeagueCountry(leagueId),
+        }
+      : {}),
+  };
+
   try {
-    await prisma.teamProfile.create({
-      data: { teamId, ...payload },
-    });
+    const existing = await prisma.teamProfile.findUnique({ where: { teamId } });
+    if (existing) {
+      await prisma.teamProfile.update({
+        where: { id: existing.id },
+        data: payload,
+      });
+      return true;
+    }
+
+    // New rows only for clubs from domestic 1ª/2ª origin leagues
+    if (leagueId == null || !isTeamProfileOriginLeagueId(leagueId)) {
+      console.log(
+        `[team-profiler] skip create ${data.teamName} (teamId=${teamId}): missing/unanalyzed origin league`
+      );
+      return false;
+    }
+
+    try {
+      await prisma.teamProfile.create({
+        data: {
+          teamId,
+          ...payload,
+          primaryLeagueId: leagueId,
+          country: getLeagueCountry(leagueId),
+        },
+      });
+    } catch {
+      const raced = await prisma.teamProfile.findUnique({ where: { teamId } });
+      if (!raced) {
+        warnProfilePersist(data.teamName);
+        return true; // in-memory path still usable by caller
+      }
+      await prisma.teamProfile.update({
+        where: { id: raced.id },
+        data: payload,
+      });
+    }
+    return true;
   } catch {
-    const raced = await prisma.teamProfile.findUnique({ where: { teamId } });
-    if (!raced) throw new Error(`No se pudo guardar TeamProfile ${teamId}`);
-    await prisma.teamProfile.update({
-      where: { id: raced.id },
-      data: payload,
-    });
+    warnProfilePersist(data.teamName);
+    return true;
   }
 }
 
@@ -388,6 +468,7 @@ export async function updateTeamProfilesFromSettledMatches(): Promise<{
       finalScore: true,
       status: true,
       matchDate: true,
+      leagueId: true,
     },
     orderBy: { matchDate: "desc" },
     take: 5_000,
@@ -399,15 +480,28 @@ export async function updateTeamProfilesFromSettledMatches(): Promise<{
 
   const { byFixture, byName } = await loadTeamIdMaps();
   const eventsByTeam = new Map<number, TeamEvent[]>();
+  /** Prefer a domestic origin leagueId when upserting each team. */
+  const originLeagueByTeam = new Map<number, number>();
   let matchesUsed = 0;
 
-  const push = (teamId: number, event: TeamEvent) => {
+  const push = (teamId: number, event: TeamEvent, leagueId: number | null) => {
     const list = eventsByTeam.get(teamId);
     if (list) list.push(event);
     else eventsByTeam.set(teamId, [event]);
+    if (
+      leagueId != null &&
+      isTeamProfileOriginLeagueId(leagueId) &&
+      !originLeagueByTeam.has(teamId)
+    ) {
+      originLeagueByTeam.set(teamId, leagueId);
+    }
   };
 
   for (const row of rows) {
+    const leagueId = parseLeagueId(row.leagueId);
+    // Stats only from active domestic 1ª/2ª — skip cups/UEFA/purged leagues
+    if (leagueId == null || !isTeamProfileOriginLeagueId(leagueId)) continue;
+
     const score = parseScore(row.finalScore);
     if (!score) continue;
     const mapped = byFixture.get(row.apiFixtureId);
@@ -425,24 +519,32 @@ export async function updateTeamProfilesFromSettledMatches(): Promise<{
     matchesUsed += 1;
 
     if (homeId != null) {
-      push(homeId, {
-        at,
-        venue: "home",
-        scored: score.home,
-        conceded: score.away,
-        totalGoals: total,
-        teamName: mapped?.home || row.homeTeam,
-      });
+      push(
+        homeId,
+        {
+          at,
+          venue: "home",
+          scored: score.home,
+          conceded: score.away,
+          totalGoals: total,
+          teamName: mapped?.home || row.homeTeam,
+        },
+        leagueId
+      );
     }
     if (awayId != null) {
-      push(awayId, {
-        at,
-        venue: "away",
-        scored: score.away,
-        conceded: score.home,
-        totalGoals: total,
-        teamName: mapped?.away || row.awayTeam,
-      });
+      push(
+        awayId,
+        {
+          at,
+          venue: "away",
+          scored: score.away,
+          conceded: score.home,
+          totalGoals: total,
+          teamName: mapped?.away || row.awayTeam,
+        },
+        leagueId
+      );
     }
   }
 
@@ -483,8 +585,18 @@ export async function updateTeamProfilesFromSettledMatches(): Promise<{
       lastManagerChangeDate: cutoffIso,
       keyAbsencesCount: meta?.keyAbsencesCount ?? 0,
     });
-    await httpUpsertProfile(teamId, snapshot);
-    profileCache.set(teamId, { teamId, ...snapshot });
+    const saved = await httpUpsertProfile(teamId, snapshot, {
+      leagueId: originLeagueByTeam.get(teamId) ?? null,
+    });
+    if (!saved) continue;
+    const lid = originLeagueByTeam.get(teamId) ?? null;
+    profileCache.set(teamId, {
+      teamId,
+      ...snapshot,
+      primaryLeagueId: lid,
+      country: lid != null ? getLeagueCountry(lid) : null,
+      leagueName: lid != null ? getLeagueDisplayName(lid) : "Otros",
+    });
     teamsUpserted += 1;
   }
 
@@ -549,41 +661,52 @@ export async function searchTeamProfiles(
   }
 }
 
-/** Map team → most recent MatchFixture.leagueName (by kickoff). */
+/** Attach display league from primaryLeagueId; remap cup/null → domestic origin. */
 async function attachLeagueNames(
   profiles: TeamProfileSnapshot[]
 ): Promise<TeamProfileSnapshot[]> {
   if (profiles.length === 0) return profiles;
-  try {
-    const fixtures = await prisma.matchFixture.findMany({
-      where: { finalScore: { not: null } },
-      select: {
-        homeTeam: true,
-        awayTeam: true,
-        leagueName: true,
-        matchDate: true,
-      },
-      orderBy: { matchDate: "desc" },
-      take: 5_000,
-    });
-    const byTeam = new Map<string, string>();
-    for (const fx of fixtures) {
-      const league = fx.leagueName?.trim();
-      if (!league) continue;
-      const homeKey = normalizeName(fx.homeTeam);
-      const awayKey = normalizeName(fx.awayTeam);
-      if (homeKey && !byTeam.has(homeKey)) byTeam.set(homeKey, league);
-      if (awayKey && !byTeam.has(awayKey)) byTeam.set(awayKey, league);
+
+  const needsResolve = profiles.some((p) =>
+    needsDomesticLeagueRemap(p.primaryLeagueId)
+  );
+  let domestic = new Map<number, number>();
+  if (needsResolve) {
+    try {
+      domestic = await resolveDomesticLeagueByTeamId();
+    } catch (err) {
+      console.warn("[team-profiler] domestic league resolve failed:", err);
     }
-    return profiles.map((p) => ({
-      ...p,
-      leagueName:
-        byTeam.get(normalizeName(p.teamName)) ?? p.leagueName ?? "Otros",
-    }));
-  } catch (err) {
-    console.warn("[team-profiler] league attach failed:", err);
-    return profiles.map((p) => ({ ...p, leagueName: p.leagueName ?? "Otros" }));
   }
+
+  return profiles.map((p) => {
+    let primaryLeagueId =
+      p.primaryLeagueId != null &&
+      Number.isFinite(p.primaryLeagueId) &&
+      !needsDomesticLeagueRemap(p.primaryLeagueId)
+        ? p.primaryLeagueId
+        : null;
+
+    if (primaryLeagueId == null) {
+      primaryLeagueId = domestic.get(p.teamId) ?? null;
+    }
+
+    if (primaryLeagueId == null) {
+      return {
+        ...p,
+        primaryLeagueId: null,
+        leagueName: "Otros",
+        country: null,
+      };
+    }
+
+    return {
+      ...p,
+      primaryLeagueId,
+      country: getLeagueCountry(primaryLeagueId),
+      leagueName: getLeagueDisplayName(primaryLeagueId),
+    };
+  });
 }
 
 /** Persist manual / automated flag overrides on TeamProfile. */
@@ -593,10 +716,11 @@ export async function updateTeamProfileFlags(
   patch: {
     lastManagerChangeDate?: string | null;
     keyAbsencesCount?: number;
-  }
+  },
+  options?: { leagueId?: number | string | null }
 ): Promise<TeamProfileSnapshot | null> {
   if (!Number.isFinite(teamId) || teamId <= 0) return null;
-  await patchTeamProfileFlags(teamId, teamName, patch);
+  await patchTeamProfileFlags(teamId, teamName, patch, options);
   try {
     const row = await prisma.teamProfile.findUnique({ where: { teamId } });
     if (!row) return null;
@@ -757,6 +881,15 @@ export async function maybeUpdateTeamProfilesAfterSettlement(
   }
 }
 
+/** Patch in-memory Brier factor after learning-engine persists to DB. */
+export function patchCachedBrierFactor(teamId: number, factor: number): void {
+  const cur = profileCache.get(teamId);
+  if (!cur) return;
+  const n = Number(factor);
+  if (!Number.isFinite(n)) return;
+  profileCache.set(teamId, { ...cur, brierCalibrationFactor: n });
+}
+
 // ── Automated coach / key-injury detection (API-Football) ──────────────
 
 /** Max uncached live calls per sync pass (Free-plan quota). */
@@ -810,46 +943,67 @@ async function patchTeamProfileFlags(
   patch: {
     lastManagerChangeDate?: string | null;
     keyAbsencesCount?: number;
-  }
+  },
+  options?: { leagueId?: number | string | null }
 ): Promise<void> {
-  const existing = await prisma.teamProfile.findUnique({ where: { teamId } });
-  if (existing) {
-    await prisma.teamProfile.update({
-      where: { id: existing.id },
-      data: {
-        ...(patch.lastManagerChangeDate !== undefined
-          ? {
+  const leagueId = parseLeagueId(options?.leagueId ?? null);
+  const displayName = teamName || `Team ${teamId}`;
+
+  try {
+    const existing = await prisma.teamProfile.findUnique({ where: { teamId } });
+
+    // Updates OK for existing analyzable clubs (even mid-cup / UEFA).
+    // Creates require a domestic 1ª/2ª origin league id.
+    if (!existing) {
+      if (leagueId == null || !isTeamProfileOriginLeagueId(leagueId)) {
+        console.log(
+          `[team-profiler] skip create flags ${displayName}: missing/unanalyzed origin league`
+        );
+      } else {
+        try {
+          await prisma.teamProfile.create({
+            data: {
+              teamId,
+              teamName: displayName,
+              totalMatchesAnalyzed: 0,
+              homeMatchesCount: 0,
+              awayMatchesCount: 0,
+              keyAbsencesCount: patch.keyAbsencesCount ?? 0,
               lastManagerChangeDate: patch.lastManagerChangeDate
                 ? new Date(patch.lastManagerChangeDate)
                 : null,
-            }
-          : {}),
-        ...(patch.keyAbsencesCount !== undefined
-          ? { keyAbsencesCount: patch.keyAbsencesCount }
-          : {}),
-        teamName: teamName || existing.teamName,
-      },
-    });
-  } else {
-    try {
-      await prisma.teamProfile.create({
-        data: {
-          teamId,
-          teamName: teamName || `Team ${teamId}`,
-          totalMatchesAnalyzed: 0,
-          homeMatchesCount: 0,
-          awayMatchesCount: 0,
-          keyAbsencesCount: patch.keyAbsencesCount ?? 0,
-          lastManagerChangeDate: patch.lastManagerChangeDate
-            ? new Date(patch.lastManagerChangeDate)
-            : null,
-        },
-      });
-    } catch {
-      const raced = await prisma.teamProfile.findUnique({ where: { teamId } });
-      if (!raced) return;
+              primaryLeagueId: leagueId,
+              country: getLeagueCountry(leagueId),
+            },
+          });
+        } catch {
+          const raced = await prisma.teamProfile.findUnique({
+            where: { teamId },
+          });
+          if (raced) {
+            await prisma.teamProfile.update({
+              where: { id: raced.id },
+              data: {
+                ...(patch.lastManagerChangeDate !== undefined
+                  ? {
+                      lastManagerChangeDate: patch.lastManagerChangeDate
+                        ? new Date(patch.lastManagerChangeDate)
+                        : null,
+                    }
+                  : {}),
+                ...(patch.keyAbsencesCount !== undefined
+                  ? { keyAbsencesCount: patch.keyAbsencesCount }
+                  : {}),
+              },
+            });
+          } else {
+            warnProfilePersist(displayName);
+          }
+        }
+      }
+    } else {
       await prisma.teamProfile.update({
-        where: { id: raced.id },
+        where: { id: existing.id },
         data: {
           ...(patch.lastManagerChangeDate !== undefined
             ? {
@@ -861,9 +1015,12 @@ async function patchTeamProfileFlags(
           ...(patch.keyAbsencesCount !== undefined
             ? { keyAbsencesCount: patch.keyAbsencesCount }
             : {}),
+          teamName: teamName || existing.teamName,
         },
       });
     }
+  } catch {
+    warnProfilePersist(displayName);
   }
 
   const cached = profileCache.get(teamId);
@@ -878,7 +1035,7 @@ async function patchTeamProfileFlags(
         ? { keyAbsencesCount: patch.keyAbsencesCount }
         : {}),
     });
-  } else {
+  } else if (leagueId != null && isTeamProfileOriginLeagueId(leagueId)) {
     profileCache.set(teamId, {
       teamId,
       teamName: teamName || `Team ${teamId}`,
@@ -898,6 +1055,7 @@ async function patchTeamProfileFlags(
       cleanSheetRateAway: 0,
       lastManagerChangeDate: patch.lastManagerChangeDate ?? null,
       keyAbsencesCount: patch.keyAbsencesCount ?? 0,
+      updatedAt: new Date().toISOString(),
     });
   }
 }
@@ -908,7 +1066,8 @@ async function patchTeamProfileFlags(
  */
 export async function checkAutomatedManagerChange(
   teamId: number,
-  teamName = ""
+  teamName = "",
+  options?: { leagueId?: number | string | null }
 ): Promise<{ updated: boolean; startDate: string | null }> {
   if (!Number.isFinite(teamId) || teamId <= 0) {
     return { updated: false, startDate: null };
@@ -920,7 +1079,7 @@ export async function checkAutomatedManagerChange(
       ttlMinutes: CACHE_TTL_MINUTES.ROSTER,
       cacheKey: `coachs_team_${teamId}`,
     });
-    if (envelopeHasErrors(json.errors)) {
+    if (!json || envelopeHasErrors(json.errors)) {
       return { updated: false, startDate: null };
     }
     const start = findActiveCoachStartDate(json.response ?? [], teamId);
@@ -928,9 +1087,12 @@ export async function checkAutomatedManagerChange(
       return { updated: false, startDate: start };
     }
     const iso = new Date(Date.parse(start)).toISOString();
-    await patchTeamProfileFlags(teamId, teamName, {
-      lastManagerChangeDate: iso,
-    });
+    await patchTeamProfileFlags(
+      teamId,
+      teamName,
+      { lastManagerChangeDate: iso },
+      options
+    );
     return { updated: true, startDate: iso };
   } catch (err) {
     console.warn(`[team-profiler] coachs team=${teamId} failed:`, err);
@@ -984,6 +1146,7 @@ export async function fetchKeyAbsencesForFixture(
 export async function syncAutomatedTeamProfileFlags(
   matches: Array<{
     id: string;
+    leagueId?: string | number;
     home: { id?: number; name: string };
     away: { id?: number; name: string };
   }>
@@ -999,23 +1162,29 @@ export async function syncAutomatedTeamProfileFlags(
 
   const { getCachedPayload } = await import("./api-cache");
 
-  const teams = new Map<number, string>();
+  const teams = new Map<number, { name: string; leagueId?: string | number }>();
   for (const m of matches) {
-    if (m.home.id != null && m.home.id > 0) teams.set(m.home.id, m.home.name);
-    if (m.away.id != null && m.away.id > 0) teams.set(m.away.id, m.away.name);
+    if (m.home.id != null && m.home.id > 0) {
+      teams.set(m.home.id, { name: m.home.name, leagueId: m.leagueId });
+    }
+    if (m.away.id != null && m.away.id > 0) {
+      teams.set(m.away.id, { name: m.away.name, leagueId: m.leagueId });
+    }
   }
 
   let liveLeft = Math.max(2, Math.floor(PROFILE_AUTO_LIVE_BATCH / 2));
   let managersChecked = 0;
   let managersUpdated = 0;
 
-  for (const [teamId, teamName] of teams) {
+  for (const [teamId, meta] of teams) {
     const cacheKey = `coachs_team_${teamId}`;
     const cached = await getCachedPayload<unknown>(cacheKey);
     if (cached == null && liveLeft <= 0) continue;
     if (cached == null) liveLeft -= 1;
     managersChecked += 1;
-    const result = await checkAutomatedManagerChange(teamId, teamName);
+    const result = await checkAutomatedManagerChange(teamId, meta.name, {
+      leagueId: meta.leagueId,
+    });
     if (result.updated) managersUpdated += 1;
   }
 

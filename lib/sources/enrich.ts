@@ -61,9 +61,14 @@ async function applyEspnAbsences(
   const ctx = await getEspnTeamContext(team.name);
   if (ctx.keyAbsences.length === 0) return;
 
-  await updateTeamProfileFlags(teamId, team.name, {
-    keyAbsencesCount: Math.min(20, ctx.keyAbsences.length),
-  });
+  await updateTeamProfileFlags(
+    teamId,
+    team.name,
+    {
+      keyAbsencesCount: Math.min(20, ctx.keyAbsences.length),
+    },
+    { leagueId: match.leagueId }
+  );
 }
 
 /**

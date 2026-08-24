@@ -1,5 +1,6 @@
 "use client";
 
+import { AiJudgeBadge } from "@/components/ai-judge-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,7 @@ import { postBetRecord } from "@/lib/bet-record-client";
 import { contextBadgeLabels } from "@/lib/context-engine";
 import { recalculateParlay } from "@/lib/parlay-recalc";
 import type { GeneratedParlay, ParlayLeg } from "@/lib/types";
+import { restrictedCompetitionBadge } from "@/types/leagues";
 import {
   chileDateString,
   cn,
@@ -633,6 +635,7 @@ function LegRow({
   const otherFlags = (leg.contextFlags ?? []).filter(
     (flag) => flag !== "NEARBY_INTERNATIONAL_MATCH_PRESENT"
   );
+  const categoryBadge = restrictedCompetitionBadge(undefined, leg.leagueName);
 
   return (
     <li
@@ -640,17 +643,29 @@ function LegRow({
         "lift flex items-start gap-2 overflow-hidden rounded-2xl bg-white/[0.04] px-3 py-3 ring-1 ring-white/10 transition-all duration-200 ease-out motion-reduce:transition-none",
         exiting
           ? "max-h-0 -translate-x-2 scale-[0.98] py-0 opacity-0 ring-transparent motion-reduce:transition-none"
-          : "max-h-[280px] translate-x-0 scale-100 opacity-100"
+          : "max-h-[32rem] translate-x-0 scale-100 opacity-100"
       )}
     >
       <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/10 text-xs font-bold text-white">
         {index}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-xs text-neutral-500">{leg.leagueName || "Otros"}</p>
+        <p className="text-xs text-neutral-500">
+          {leg.leagueName || "Otros"}
+          {categoryBadge ? (
+            <span className="ml-1.5 text-neutral-400" title={categoryBadge}>
+              · {categoryBadge}
+            </span>
+          ) : null}
+        </p>
         <p className="text-sm font-semibold leading-snug text-white">
           {leg.matchLabel}
         </p>
+        {leg.aiJudge ? (
+          <div className="mt-1">
+            <AiJudgeBadge verdict={leg.aiJudge} />
+          </div>
+        ) : null}
         <p className="text-sm text-neutral-200">
           Apuesta: {formatExplicitBetLine(explicit)}
           {valueBadge ? (

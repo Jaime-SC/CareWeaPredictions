@@ -44,25 +44,87 @@ import {
   formatKickoffDayLabel,
   sortByKickoffDesc,
 } from "./utils";
-import { isAllowedCompetition } from "../config/allowed-leagues";
+import {
+  bothTeamsInRoster,
+  isAllowedCompetition,
+  isConmebolCompetitionId,
+  isEuropeNationalCupId,
+  isSaNationalCupId,
+  isUefaCompetitionId,
+  parseLeagueId,
+} from "../config/allowed-leagues";
+import {
+  peekConmebolEligibleTeamIds,
+  peekEuropeBig5TeamIds,
+  peekEuropeCupOriginRosters,
+  peekSaCupOriginRosters,
+} from "./api-football";
 import { prioritizeValueLegs, valueRankBonus } from "./value-finder";
 import {
   formatExplicitBetLine,
   formatMarketGuideLines,
   getExplicitPickFromLeg,
 } from "./formatters";
-import { buildMonopolyParlay, getWeeklyDateRange } from "./monopoly-engine";
+import {
+  buildMonopolyParlay,
+  collectMonopolyLegs,
+  getWeeklyDateRange,
+  INSUFFICIENT_MATCHES_MESSAGE,
+  MONOPOLY_MIN_LEGS,
+} from "./monopoly-engine";
+import {
+  evaluateFixtureWithAI,
+  isAiJudgeConfigured,
+  keepApprovedOrFailOpen,
+  splitMatchLabel,
+} from "./ai-judge";
+import { recalculateParlay } from "./parlay-recalc";
 
 export { DEFAULT_AUTO_PARLAY_CONFIG } from "./parlay-defaults";
 export { getWeeklyDateRange };
+export { recalculateParlay };
 
 /**
  * Defense-in-depth: ID is source of truth; name cannot rescue a lower division
  * (e.g. Colombia Primera B labeled "Primera B" must not match Chile's alias).
  * Primary filtering happens in api-football; this clamp runs again before parlays.
+ * UEFA / CONMEBOL / national cups: when origin rosters are warm, enforce tier gates.
  */
 export function filterEliteWhitelistMatches(matches: Match[]): Match[] {
-  return matches.filter((m) => isAllowedCompetition(m.leagueId, m.leagueName));
+  const big5 = peekEuropeBig5TeamIds();
+  const europeCups = peekEuropeCupOriginRosters();
+  const saOrigins = peekSaCupOriginRosters();
+  const conmebol = peekConmebolEligibleTeamIds();
+  return matches.filter((m) => {
+    if (!isAllowedCompetition(m.leagueId, m.leagueName)) return false;
+    const id = parseLeagueId(m.leagueId);
+    if (id == null) return true;
+
+    const originOk = (roster: ReadonlySet<number> | null | undefined) => {
+      if (!roster || roster.size === 0) return true;
+      if (bothTeamsInRoster(m.home.id, m.away.id, roster)) return true;
+      console.log(
+        `[ORIGIN DROP] ${m.home.name} vs ${m.away.name}: Teams not from allowed Big 3 / SA 1st-2nd divisions`
+      );
+      return false;
+    };
+
+    if (isUefaCompetitionId(id)) return originOk(big5);
+
+    if (isConmebolCompetitionId(id)) return originOk(conmebol);
+
+    if (isEuropeNationalCupId(id)) {
+      if (!europeCups || europeCups.size === 0) return true;
+      return originOk(europeCups.get(id));
+    }
+
+    if (isSaNationalCupId(id)) {
+      if (!saOrigins || saOrigins.size === 0) return true;
+      return originOk(saOrigins.get(id));
+    }
+
+    return true;
+  });
 }
 
 /** Strategic / safe modes: only bookmaker-friendly high-probability lines */
@@ -358,6 +420,7 @@ export function collectSafePicks(
       maxSafeOdds: config.maxOdds,
     });
 
+    let loggedSanityDrop = false;
     const eligible = markets.filter((m) => {
       if (!isMarketAllowed(m.market, strategyMode, resolved)) return false;
       if (!(m.odds > 1)) return false;
@@ -375,11 +438,24 @@ export function collectSafePicks(
           resolved
         )
       );
-      return (
+      const clearsFloor =
         m.modelProbability >= minProb &&
         m.odds >= leagueMinOdds &&
-        m.odds <= config.maxOdds
-      );
+        m.odds <= config.maxOdds;
+      if (!clearsFloor) return false;
+      if (!m.isSafePick) {
+        const sanity =
+          m.contextFlags?.includes("UNDERDOG_SANITY") ||
+          m.contextFlags?.includes("MODEL_MARKET_ANOMALY");
+        if (sanity && !loggedSanityDrop) {
+          loggedSanityDrop = true;
+          console.log(
+            `[SANITY DROP] ${resolved.home.name} vs ${resolved.away.name}: Market odds conflict / underdog pick`
+          );
+        }
+        return false;
+      }
+      return true;
     });
 
     if (eligible.length === 0) continue;
@@ -742,6 +818,119 @@ export function generateParlay(
   return withFillNotice(best, targetLegCount, bestBackfillMeta);
 }
 
+/** Last pass: Gemini Search audit after Poisson + odds sanity. */
+export async function generateParlayAudited(
+  matches: Match[],
+  config: ParlayConfig
+): Promise<GeneratedParlay> {
+  return applyAiJudgeToParlay(generateParlay(matches, config), matches, config);
+}
+
+const AI_JUDGE_CONCURRENCY = 4;
+
+async function mapBatches<T, R>(
+  items: T[],
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i += AI_JUDGE_CONCURRENCY) {
+    out.push(
+      ...(await Promise.all(items.slice(i, i + AI_JUDGE_CONCURRENCY).map(fn)))
+    );
+  }
+  return out;
+}
+
+async function auditLeg(leg: ParlayLeg) {
+  try {
+    const { home, away } = splitMatchLabel(leg.matchLabel);
+    return {
+      leg,
+      verdict: await evaluateFixtureWithAI(
+        home,
+        away,
+        chileDateString(leg.kickoff)
+      ),
+    };
+  } catch (err) {
+    console.warn(`[AI JUDGE] ${leg.matchLabel}: fail-open`, err);
+    return { leg, verdict: null };
+  }
+}
+
+function replacementPool(
+  matches: Match[],
+  config: ParlayConfig,
+  takenIds: Set<string>
+): ParlayLeg[] {
+  const strategyMode = resolveMode(config);
+  if (isMonopolyStrategy(strategyMode)) {
+    return collectMonopolyLegs(matches, {
+      ignoreRotationFilter: config.ignoreRotationFilter === true,
+    }).legs.filter((l) => !takenIds.has(l.matchId));
+  }
+  if (isFunStrategy(strategyMode)) {
+    return collectPicksWithBackfill(
+      matches,
+      config,
+      Math.max(matches.length, 1)
+    ).pool.filter((l) => !takenIds.has(l.matchId));
+  }
+  return collectSafePicks(matches, config).filter(
+    (l) => !takenIds.has(l.matchId)
+  );
+}
+
+export async function applyAiJudgeToParlay(
+  parlay: GeneratedParlay,
+  matches: Match[],
+  config: ParlayConfig
+): Promise<GeneratedParlay> {
+  if (parlay.legs.length === 0 || !isAiJudgeConfigured()) return parlay;
+
+  const target = parlay.legs.length;
+  const ticketRows = await mapBatches(parlay.legs, auditLeg);
+  const { kept, vetoed } = keepApprovedOrFailOpen(ticketRows);
+  let vetoCount = vetoed.length;
+  const used = new Set(parlay.legs.map((l) => l.matchId));
+
+  if (kept.length < target) {
+    const extras = replacementPool(matches, config, used);
+    for (const extra of extras) {
+      if (kept.length >= target) break;
+      used.add(extra.matchId);
+      const { kept: add, vetoed: drop } = keepApprovedOrFailOpen([
+        await auditLeg(extra),
+      ]);
+      vetoCount += drop.length;
+      kept.push(...add);
+    }
+  }
+
+  const strategyMode = resolveMode(config);
+  if (isMonopolyStrategy(strategyMode) && kept.length < MONOPOLY_MIN_LEGS) {
+    return {
+      ...recalculateParlay([], parlay),
+      status: "INSUFFICIENT_MATCHES",
+      fillNotice: INSUFFICIENT_MATCHES_MESSAGE,
+      ignoreRotationFilter: parlay.ignoreRotationFilter,
+    };
+  }
+
+  const vetoNotice =
+    vetoCount > 0
+      ? `IA Judge vetó ${vetoCount} partido${vetoCount === 1 ? "" : "s"}`
+      : undefined;
+
+  return {
+    ...recalculateParlay(kept, parlay),
+    status: parlay.status,
+    ignoreRotationFilter: parlay.ignoreRotationFilter,
+    fillNotice: [parlay.fillNotice, vetoNotice].filter(Boolean).join(" · ") ||
+      undefined,
+  };
+}
+
 /**
  * Top up or trim so the ticket has exactly `targetLegCount` legs when the
  * pool allows it (fun / accumulator modes only).
@@ -883,7 +1072,6 @@ function finalize(
   };
 }
 
-export { recalculateParlay } from "./parlay-recalc";
 
 function buildGreedy(
   pool: ParlayLeg[],
