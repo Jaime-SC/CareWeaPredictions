@@ -24,7 +24,7 @@ Motor de predicción basado en modelos de **Poisson** y análisis estadístico p
 - 💰 **Bankroll + Kelly** — stake sugerido, débito/reembolso y sync en Neon.
 - 🛰️ **Enrich multi-fuente (opcional)** — ESPN, clima, Odds API y standings sin sustituir API-Football.
 - 🧠 **Brier learning** — calibración continua por error de probabilidad (liga/mercado/equipo).
-- 🤖 **AI Judge (opcional)** — auditoría Gemini con Google Search antes de registrar picks.
+- 🤖 **AI Judge (opcional)** — auditoría Groq (Llama 3.3 70B) antes de registrar picks.
 - 🌍 **Ligas y origen** — whitelist ampliada, labels UEFA/CONMEBOL/Serie A y season mapping.
 
 Catálogo completo: [`docs/FEATURES.md`](./docs/FEATURES.md).
@@ -122,7 +122,8 @@ FOOTBALL_API_KEY=tu_api_key_aqui
 Opcional (enrich / backtest / AI Judge):
 
 ```env
-# GEMINI_API_KEY=
+# GROQ_API_KEY=
+# GROQ_DAILY_LIMIT=14400
 # ODDS_API_KEY=
 # FOOTBALL_DATA_API_KEY=
 ```

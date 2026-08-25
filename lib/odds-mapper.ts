@@ -163,6 +163,84 @@ export function parseFixtureOdds(
   const awayOver15 =
     (awayTotals && findValue(awayTotals.values, "over 1.5")) ?? 0;
 
+  const btts =
+    betById(book, 8) ??
+    betByName(
+      book,
+      "both teams score",
+      "both teams to score",
+      "gg/ng",
+      "btts"
+    );
+  const bttsYes =
+    (btts && findValue(btts.values, "yes", "gg")) ?? 0;
+  const bttsNo =
+    (btts && findValue(btts.values, "no", "ng")) ?? 0;
+
+  // --- Phase 2: corners / cards / HT (name-first, optional) ---
+  const cornersOu =
+    betById(book, 45) ??
+    betByName(book, "corners over/under", "total corners", "corner over under");
+  const corners1h =
+    betById(book, 56) ??
+    betByName(
+      book,
+      "corners over/under first half",
+      "1st half corners",
+      "corners - 1st half"
+    );
+  const cornersHomeBet =
+    betByName(
+      book,
+      "corners - home",
+      "home team corners",
+      "total corners home"
+    ) ?? betById(book, 57);
+  const cornersAwayBet =
+    betByName(
+      book,
+      "corners - away",
+      "away team corners",
+      "total corners away"
+    ) ?? betById(book, 58);
+
+  const cardsOu =
+    betById(book, 80) ??
+    betByName(
+      book,
+      "cards over/under",
+      "total cards",
+      "yellow cards over/under",
+      "booking"
+    );
+  const cardsHomeBet = betByName(
+    book,
+    "cards - home",
+    "home team cards",
+    "yellow cards home"
+  );
+  const cardsAwayBet = betByName(
+    book,
+    "cards - away",
+    "away team cards",
+    "yellow cards away"
+  );
+
+  const htWinner =
+    betByName(book, "first half winner", "1st half winner", "half time result") ??
+    betById(book, 7);
+  const htOu =
+    betById(book, 6) ??
+    betByName(
+      book,
+      "goals over/under first half",
+      "1st half goals",
+      "over/under 1st half"
+    );
+
+  const opt = (n: number | null | undefined) =>
+    n != null && n > 1 ? n : undefined;
+
   return {
     home,
     draw,
@@ -180,6 +258,81 @@ export function parseFixtureOdds(
     awayOver15: awayOver15 || undefined,
     dnbHome,
     dnbAway,
+    bttsYes: bttsYes || undefined,
+    bttsNo: bttsNo || undefined,
+    cornersOver75: opt(cornersOu && findValue(cornersOu.values, "over 7.5")),
+    cornersUnder75: opt(cornersOu && findValue(cornersOu.values, "under 7.5")),
+    cornersOver85: opt(cornersOu && findValue(cornersOu.values, "over 8.5")),
+    cornersUnder85: opt(cornersOu && findValue(cornersOu.values, "under 8.5")),
+    cornersOver95: opt(cornersOu && findValue(cornersOu.values, "over 9.5")),
+    cornersUnder95: opt(cornersOu && findValue(cornersOu.values, "under 9.5")),
+    cornersOver105: opt(cornersOu && findValue(cornersOu.values, "over 10.5")),
+    cornersUnder105: opt(cornersOu && findValue(cornersOu.values, "under 10.5")),
+    corners1hOver35: opt(corners1h && findValue(corners1h.values, "over 3.5")),
+    corners1hUnder35: opt(corners1h && findValue(corners1h.values, "under 3.5")),
+    corners1hOver45: opt(corners1h && findValue(corners1h.values, "over 4.5")),
+    corners1hUnder45: opt(corners1h && findValue(corners1h.values, "under 4.5")),
+    cornersHomeOver35: opt(
+      cornersHomeBet && findValue(cornersHomeBet.values, "over 3.5")
+    ),
+    cornersHomeUnder35: opt(
+      cornersHomeBet && findValue(cornersHomeBet.values, "under 3.5")
+    ),
+    cornersHomeOver45: opt(
+      cornersHomeBet && findValue(cornersHomeBet.values, "over 4.5")
+    ),
+    cornersHomeUnder45: opt(
+      cornersHomeBet && findValue(cornersHomeBet.values, "under 4.5")
+    ),
+    cornersAwayOver35: opt(
+      cornersAwayBet && findValue(cornersAwayBet.values, "over 3.5")
+    ),
+    cornersAwayUnder35: opt(
+      cornersAwayBet && findValue(cornersAwayBet.values, "under 3.5")
+    ),
+    cornersAwayOver45: opt(
+      cornersAwayBet && findValue(cornersAwayBet.values, "over 4.5")
+    ),
+    cornersAwayUnder45: opt(
+      cornersAwayBet && findValue(cornersAwayBet.values, "under 4.5")
+    ),
+    cardsOver35: opt(cardsOu && findValue(cardsOu.values, "over 3.5")),
+    cardsUnder35: opt(cardsOu && findValue(cardsOu.values, "under 3.5")),
+    cardsOver45: opt(cardsOu && findValue(cardsOu.values, "over 4.5")),
+    cardsUnder45: opt(cardsOu && findValue(cardsOu.values, "under 4.5")),
+    cardsOver55: opt(cardsOu && findValue(cardsOu.values, "over 5.5")),
+    cardsUnder55: opt(cardsOu && findValue(cardsOu.values, "under 5.5")),
+    cardsHomeOver15: opt(
+      cardsHomeBet && findValue(cardsHomeBet.values, "over 1.5")
+    ),
+    cardsHomeUnder15: opt(
+      cardsHomeBet && findValue(cardsHomeBet.values, "under 1.5")
+    ),
+    cardsHomeOver25: opt(
+      cardsHomeBet && findValue(cardsHomeBet.values, "over 2.5")
+    ),
+    cardsHomeUnder25: opt(
+      cardsHomeBet && findValue(cardsHomeBet.values, "under 2.5")
+    ),
+    cardsAwayOver15: opt(
+      cardsAwayBet && findValue(cardsAwayBet.values, "over 1.5")
+    ),
+    cardsAwayUnder15: opt(
+      cardsAwayBet && findValue(cardsAwayBet.values, "under 1.5")
+    ),
+    cardsAwayOver25: opt(
+      cardsAwayBet && findValue(cardsAwayBet.values, "over 2.5")
+    ),
+    cardsAwayUnder25: opt(
+      cardsAwayBet && findValue(cardsAwayBet.values, "under 2.5")
+    ),
+    htHome: opt(htWinner && findValue(htWinner.values, "home", "1")),
+    htDraw: opt(htWinner && findValue(htWinner.values, "draw", "x")),
+    htAway: opt(htWinner && findValue(htWinner.values, "away", "2")),
+    htOver05: opt(htOu && findValue(htOu.values, "over 0.5")),
+    htUnder05: opt(htOu && findValue(htOu.values, "under 0.5")),
+    htOver15: opt(htOu && findValue(htOu.values, "over 1.5")),
+    htUnder15: opt(htOu && findValue(htOu.values, "under 1.5")),
   };
 }
 

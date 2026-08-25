@@ -92,14 +92,15 @@ export async function fetchLeagueStandings(
   });
 
   const cached = await getCachedPayload<LeagueStandingsTable>(cacheKey);
-  if (cached) return cached;
+  if (isLeagueStandingsTable(cached)) return cached;
 
   try {
     const json = await apiFootballGet<StandingsEnvelope>(
       `/standings?league=${leagueId}&season=${seasonYear}`,
       {
         ttlMinutes: CACHE_TTL_MINUTES.ESPN, // 12h
-        cacheKey,
+        // Separate key so raw envelope never shadows the parsed table.
+        cacheKey: `${cacheKey}_envelope`,
       }
     );
     if (!json) return null;
@@ -118,15 +119,26 @@ export async function fetchLeagueStandings(
   }
 }
 
+function isLeagueStandingsTable(v: unknown): v is LeagueStandingsTable {
+  if (!v || typeof v !== "object") return false;
+  const t = v as LeagueStandingsTable;
+  return (
+    t.byTeamId != null &&
+    typeof t.byTeamId === "object" &&
+    t.byName != null &&
+    typeof t.byName === "object"
+  );
+}
+
 function rankForTeam(
   table: LeagueStandingsTable,
   teamId: number | undefined,
   teamName: string
 ): number | null {
-  if (teamId != null && teamId > 0 && table.byTeamId[teamId] != null) {
+  if (teamId != null && teamId > 0 && table.byTeamId?.[teamId] != null) {
     return table.byTeamId[teamId];
   }
-  const byName = table.byName[normalizeName(teamName)];
+  const byName = table.byName?.[normalizeName(teamName)];
   return byName ?? null;
 }
 
@@ -181,7 +193,7 @@ export function applyStandingsAwayPenalty(
 }
 
 /** Max live standings fetches per enrich pass. */
-const STANDINGS_LIVE_BUDGET = 3;
+const STANDINGS_LIVE_BUDGET = 20;
 
 /**
  * Attach standings ranks to matches (cache-first, small live budget).
@@ -212,7 +224,7 @@ export async function attachStandingsToMatches(
       season,
     });
     const cached = await getCachedPayload<LeagueStandingsTable>(cacheKey);
-    if (cached) {
+    if (isLeagueStandingsTable(cached)) {
       tables.set(leagueId, cached);
       continue;
     }

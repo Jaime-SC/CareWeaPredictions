@@ -15,7 +15,7 @@ Resumen de lo montado en el producto (motor Poisson + Neon + UI). Detalle de bas
 | Team profiles | Forma, venue splits, lesiones, managers | `lib/team-profiler.ts`, `/teams` |
 | Auto-tuning | Recalibra pesos por liga/mercado | `lib/auto-tuner.ts`, `/api/auto-tune` |
 | Brier learning | Factores de calibración por error de probabilidad | `lib/learning-engine.ts`, settle cron |
-| AI Judge (opcional) | Auditoría cualitativa Gemini + Google Search | `lib/ai-judge.ts`, badge en slip/picks |
+| AI Judge (opcional) | Auditoría cualitativa Groq Llama 3.3 70B | `lib/ai-judge.ts`, badge en slip/picks |
 | Multi-source enrich | ESPN, clima, Odds API (gaps), standings | `lib/sources/*`, `lib/standings.ts` |
 | Readiness / CLV / stakes | Gate pre-apuesta, closing odds, Kelly | `lib/readiness.ts`, `lib/clv-tracker.ts`, `lib/stake-engine.ts` |
 | Monopoly / knockout | Filtros de equipos dominantes y copas | `lib/monopoly-engine.ts`, `lib/knockout-engine.ts` |
@@ -51,6 +51,7 @@ Resumen de lo montado en el producto (motor Poisson + Neon + UI). Detalle de bas
 | `GET /api/cron/settle` | Cron Vercel (cada 2 h) |
 | `GET /api/backtest` | Backtest opcional (Football-Data.org) |
 | `GET /api/quota` | Cuota API-Football (headers) |
+| `GET /api/quota/groq` | Cuota local AI Judge (Groq) |
 
 ## Fuentes de datos
 
@@ -62,12 +63,13 @@ Resumen de lo montado en el producto (motor Poisson + Neon + UI). Detalle de bas
    - The Odds API — relleno de cuotas faltantes (`ODDS_API_KEY`).
    - Football-Data.org — backtest (`FOOTBALL_DATA_API_KEY`).
    - Standings — tabla/contexto de liga (`lib/standings.ts`).
-4. **Gemini AI Judge** (opcional) — última pasada cualitativa con grounding (`GEMINI_API_KEY`).
+4. **Groq AI Judge** (opcional) — última pasada cualitativa con Llama 3.3 70B (`GROQ_API_KEY`).
 
 ## Variables opcionales
 
 ```env
-# GEMINI_API_KEY=          # AI Judge (Gemini 2.5 Flash + Search)
+# GROQ_API_KEY=            # AI Judge (Llama 3.3 70B vía Groq)
+# GROQ_DAILY_LIMIT=14400
 # ODDS_API_KEY=            # The Odds API
 # FOOTBALL_DATA_API_KEY=   # Football-Data.org backtest
 ```

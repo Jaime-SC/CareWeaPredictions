@@ -331,6 +331,7 @@ async function buildAutoParlayResponse(
       clipboard,
     });
   } catch (error) {
+    console.error("[parlay]", error);
     const { body, status } = toErrorResponse(error);
     return NextResponse.json(body, { status });
   }

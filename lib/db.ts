@@ -27,7 +27,7 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 /** Bump when Prisma schema fields change so a stale singleton is dropped. */
-const PRISMA_SCHEMA_ID = "team-profile-primary-league-v4";
+const PRISMA_SCHEMA_ID = "ai-verdict-cache-v1";
 
 if (globalForPrisma.prismaSchemaId !== PRISMA_SCHEMA_ID) {
   globalForPrisma.prisma = undefined;

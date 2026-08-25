@@ -1,4 +1,5 @@
 import type { GeneratedParlay, MarketType, ParlayLeg, StrategyMode } from "./types";
+import { tryGetJugaBetLabel } from "./jugabet-labels";
 import { computePerformanceMetrics } from "./stats";
 import { chileDateString } from "./utils";
 
@@ -160,6 +161,13 @@ function createId(): string {
 
 function inferMarketFromLabel(label: string): MarketType {
   const l = label.toLowerCase();
+  if (
+    (l.includes("ambos") && l.includes("marcan") && /\bno\b/.test(l)) ||
+    l.includes("btts no")
+  ) {
+    return "btts_no";
+  }
+  if (l.includes("ambos") && l.includes("marcan")) return "btts_yes";
   if (l.includes("1x") || (l.includes("doble") && l.includes("1"))) return "1x";
   if (l.includes("x2") || (l.includes("doble") && l.includes("2"))) return "x2";
   if (l.includes("sin empate") && (l.includes("(2)") || l.includes("visita") || l.includes("away"))) {
@@ -178,8 +186,10 @@ function inferMarketFromLabel(label: string): MarketType {
   if (l.includes("0.5")) return "over_0_5";
   if (l.includes("under 4") || l.includes("4.5")) return "under_4_5";
   if (l.includes("under 3") || l.includes("3.5")) return "under_3_5";
-  if (l.includes("local marca") || l.includes("casa marca")) return "home_scores";
-  if (l.includes("visita marca") || l.includes("away")) return "away_scores";
+  if (l.includes("local marca") || l.includes("casa marca") || l.includes("local total")) {
+    return "home_scores";
+  }
+  if (l.includes("visita marca") || l.includes("visitante total")) return "away_scores";
   return "over_1_5";
 }
 
@@ -662,23 +672,25 @@ export function computeBankrollSeries(bets: HistoryBet[]): BankrollPoint[] {
 }
 
 const SPANISH_MARKET_LABELS: Record<string, string> = {
-  home: "Local gana (1)",
-  draw: "Empate (X)",
-  away: "Visitante gana (2)",
-  "1x": "Doble oportunidad 1X",
-  x2: "Doble oportunidad X2",
-  "12": "Doble oportunidad 12",
-  over_0_5: "Más de 0.5 goles",
-  over_1_5: "Más de 1.5 goles",
-  over_2_5: "Más de 2.5 goles",
-  under_3_5: "Menos de 3.5 goles",
-  under_4_5: "Menos de 4.5 goles",
-  home_scores: "Local marca gol",
-  away_scores: "Visitante marca gol",
-  home_over_1_5: "Local más de 1.5 goles",
-  away_over_1_5: "Visitante más de 1.5 goles",
-  dnb_home: "Apuesta sin empate (local)",
-  dnb_away: "Apuesta sin empate (visitante)",
+  home: "Resultado → Local",
+  draw: "Resultado → Empate",
+  away: "Resultado → Visitante",
+  "1x": "Doble oportunidad → Gana o empata Local",
+  x2: "Doble oportunidad → Gana o empata Visitante",
+  "12": "Doble oportunidad → Gana Local o Visitante",
+  over_0_5: "Total de goles → Más de 0.5",
+  over_1_5: "Total de goles → Más de 1.5",
+  over_2_5: "Total de goles → Más de 2.5",
+  under_3_5: "Total de goles → Menos de 3.5",
+  under_4_5: "Total de goles → Menos de 4.5",
+  home_scores: "Local total → Más de 0.5 goles",
+  away_scores: "Visitante total → Más de 0.5 goles",
+  home_over_1_5: "Local total → Más de 1.5 goles",
+  away_over_1_5: "Visitante total → Más de 1.5 goles",
+  dnb_home: "Apuesta sin empate → Local",
+  dnb_away: "Apuesta sin empate → Visitante",
+  btts_yes: "Ambos equipos marcan → Sí",
+  btts_no: "Ambos equipos marcan → No",
 };
 
 /** Translate leftover English bookmaker jargon so the Mercado column stays Spanish. */
@@ -719,6 +731,11 @@ export function marketGroupLabel(market: MarketType | string, label?: string): s
     .replace(/\s+/g, "_");
 
   if (key && SPANISH_MARKET_LABELS[key]) return SPANISH_MARKET_LABELS[key];
+  const juga = tryGetJugaBetLabel(key, {
+    homeTeam: "Local",
+    awayTeam: "Visitante",
+  });
+  if (juga) return juga;
 
   const fromLabel = label?.trim();
   if (fromLabel) return toSpanishMarketLabel(fromLabel);

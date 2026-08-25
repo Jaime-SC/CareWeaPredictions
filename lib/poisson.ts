@@ -21,6 +21,11 @@ import {
   resolveMinProbability,
 } from "./model-weights";
 import {
+  PHASE2_ODDS_KEY,
+  phase2MarketProbs,
+} from "./phase2-markets";
+import { getJugaBetLabel } from "./jugabet-labels";
+import {
   applyTeamProfileCalibration,
   keyAbsenceLambdaFactorForSide,
   peekTeamProfile,
@@ -256,7 +261,7 @@ export function buildScoreMatrix(
   return matrix;
 }
 
-/** Single 9×9 pass → all market base probabilities. */
+/** Single 9×9 pass → goal / 1X2 market base probabilities. */
 function marketProbsFromMatrix(matrix: number[][]): Record<MarketType, number> {
   let home = 0;
   let draw = 0;
@@ -270,6 +275,7 @@ function marketProbsFromMatrix(matrix: number[][]): Record<MarketType, number> {
   let awayScores = 0;
   let homeOver15 = 0;
   let awayOver15 = 0;
+  let bttsYes = 0;
 
   for (let h = 0; h <= MAX_GOALS; h++) {
     for (let a = 0; a <= MAX_GOALS; a++) {
@@ -287,6 +293,7 @@ function marketProbsFromMatrix(matrix: number[][]): Record<MarketType, number> {
       if (a >= 1) awayScores += p;
       if (h > 1.5) homeOver15 += p;
       if (a > 1.5) awayOver15 += p;
+      if (h >= 1 && a >= 1) bttsYes += p;
     }
   }
 
@@ -308,7 +315,9 @@ function marketProbsFromMatrix(matrix: number[][]): Record<MarketType, number> {
     away_over_1_5: awayOver15,
     dnb_home: decisive > 0 ? home / decisive : 0.5,
     dnb_away: decisive > 0 ? away / decisive : 0.5,
-  };
+    btts_yes: bttsYes,
+    btts_no: Math.max(0, 1 - bttsYes),
+  } as Record<MarketType, number>;
 }
 
 export function matchOutcomeProbabilities(matrix: number[][]): {
@@ -388,26 +397,38 @@ export function calculateEdge(
   return modelProbability - impliedProbability(odds);
 }
 
-const MARKET_LABELS: Record<MarketType, string> = {
-  home: "Local gana (1)",
-  draw: "Empate (X)",
-  away: "Visitante gana (2)",
-  "1x": "Doble oportunidad 1X",
-  x2: "Doble oportunidad X2",
-  over_0_5: "Más de 0.5 goles",
-  over_1_5: "Más de 1.5 goles",
-  over_2_5: "Más de 2.5 goles",
-  under_3_5: "Menos de 3.5 goles",
-  under_4_5: "Menos de 4.5 goles",
-  home_scores: "Local marca gol",
-  away_scores: "Visitante marca gol",
-  home_over_1_5: "Local más de 1.5 goles",
-  away_over_1_5: "Visitante más de 1.5 goles",
-  dnb_home: "Apuesta sin empate (1)",
-  dnb_away: "Apuesta sin empate (2)",
+const MARKET_LABELS: Partial<Record<MarketType, string>> = {
+  // Generic (no team names) — prefer getJugaBetLabel / jugaBetMarketLabel with teams.
+  home: "Resultado → Local",
+  draw: "Resultado → Empate",
+  away: "Resultado → Visitante",
+  "1x": "Doble oportunidad → Gana o empata Local",
+  x2: "Doble oportunidad → Gana o empata Visitante",
+  over_0_5: "Total de goles → Más de 0.5",
+  over_1_5: "Total de goles → Más de 1.5",
+  over_2_5: "Total de goles → Más de 2.5",
+  under_3_5: "Total de goles → Menos de 3.5",
+  under_4_5: "Total de goles → Menos de 4.5",
+  home_scores: "Local total → Más de 0.5 goles",
+  away_scores: "Visitante total → Más de 0.5 goles",
+  home_over_1_5: "Local total → Más de 1.5 goles",
+  away_over_1_5: "Visitante total → Más de 1.5 goles",
+  dnb_home: "Apuesta sin empate → Local",
+  dnb_away: "Apuesta sin empate → Visitante",
+  btts_yes: "Ambos equipos marcan → Sí",
+  btts_no: "Ambos equipos marcan → No",
 };
 
-const MARKET_ODDS_KEY: Record<MarketType, keyof MatchOdds> = {
+/** JugaBet-style slip label (team names for team totals). */
+export function jugaBetMarketLabel(
+  market: MarketType,
+  homeTeam: string,
+  awayTeam: string
+): string {
+  return getJugaBetLabel(market, { homeTeam, awayTeam });
+}
+
+const GOAL_ODDS_KEY = {
   home: "home",
   draw: "draw",
   away: "away",
@@ -424,7 +445,14 @@ const MARKET_ODDS_KEY: Record<MarketType, keyof MatchOdds> = {
   away_over_1_5: "awayOver15",
   dnb_home: "dnbHome",
   dnb_away: "dnbAway",
-};
+  btts_yes: "bttsYes",
+  btts_no: "bttsNo",
+} as const satisfies Record<string, keyof MatchOdds>;
+
+const MARKET_ODDS_KEY = {
+  ...GOAL_ODDS_KEY,
+  ...PHASE2_ODDS_KEY,
+} as Record<MarketType, keyof MatchOdds>;
 
 export function oddsForMarket(odds: MatchOdds, market: MarketType): number {
   const value = odds[MARKET_ODDS_KEY[market]] ?? 0;
@@ -453,8 +481,8 @@ export function fairOddsBoardFromProbs(
   probs: Record<MarketType, number>,
   margin = 1
 ): MatchOdds {
-  const f = (p: number) => fairDecimalOdds(p, margin);
-  return {
+  const f = (p: number) => fairDecimalOdds(p ?? 0.5, margin);
+  const board: MatchOdds = {
     home: f(probs.home),
     draw: f(probs.draw),
     away: f(probs.away),
@@ -471,7 +499,18 @@ export function fairOddsBoardFromProbs(
     awayOver15: f(probs.away_over_1_5),
     dnbHome: f(probs.dnb_home),
     dnbAway: f(probs.dnb_away),
+    bttsYes: f(probs.btts_yes),
+    bttsNo: f(probs.btts_no),
   };
+  for (const [market, key] of Object.entries(PHASE2_ODDS_KEY) as Array<
+    [MarketType, keyof MatchOdds]
+  >) {
+    const p = probs[market];
+    if (p != null && p > 0) {
+      (board as unknown as Record<string, number>)[key] = f(p);
+    }
+  }
+  return board;
 }
 
 export function predictMatchMarkets(
@@ -508,7 +547,11 @@ export function predictMatchMarkets(
 
   const xg = estimateExpectedGoals(match);
   const matrix = buildScoreMatrix(xg.home, xg.away);
-  const baseProbs = marketProbsFromMatrix(matrix);
+  const goalProbs = marketProbsFromMatrix(matrix);
+  const baseProbs = {
+    ...goalProbs,
+    ...phase2MarketProbs(match, xg),
+  } as Record<MarketType, number>;
 
   const ctx = applyContextToMarkets(match, baseProbs);
   const knockoutProbs = applyKnockoutMarketAdjustments(match, ctx.probs);
@@ -599,7 +642,10 @@ export function predictMatchMarkets(
 
     return {
       market,
-      label: knockoutMarketLabel(MARKET_LABELS[market], knockoutEval),
+      label: knockoutMarketLabel(
+        jugaBetMarketLabel(market, resolved.home.name, resolved.away.name),
+        knockoutEval
+      ),
       odds,
       modelProbability,
       impliedProbability: implied,

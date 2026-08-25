@@ -447,6 +447,8 @@ function keyIsGoalsMarket(market: MarketType | string): boolean {
     m === "over_2_5" ||
     m === "home_over_1_5" ||
     m === "away_over_1_5" ||
+    m === "btts_yes" ||
+    m === "btts_no" ||
     m.startsWith("over_")
   );
 }

@@ -168,7 +168,7 @@ export function ParlaySlip({
     return () => {
       cancelled = true;
     };
-  }, [historyDate]);
+  }, []);
 
   // Exclude legs mid-exit so odds / payout / joint prob update instantly
   const keptLegs = useMemo(
@@ -666,16 +666,21 @@ function LegRow({
             <AiJudgeBadge verdict={leg.aiJudge} />
           </div>
         ) : null}
-        <p className="text-sm text-neutral-200">
-          Apuesta: {formatExplicitBetLine(explicit)}
-          {valueBadge ? (
-            <span className="ml-1 inline-flex items-center gap-0.5 text-[#ffd60a]">
-              <Flame className="h-3 w-3" aria-hidden />
-              {valueBadge}
-            </span>
-          ) : null}
-        </p>
-        <p className="text-xs leading-snug text-neutral-500" title={explicit.condition}>
+        <div className="mt-2 rounded-2xl border border-[#0a84ff]/25 bg-[#0a84ff]/12 px-3 py-2.5 ring-1 ring-[#0a84ff]/15">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-[#64d2ff]/80">
+            Apuesta
+          </p>
+          <p className="mt-0.5 break-words text-base font-bold leading-snug text-[#64d2ff] sm:text-lg">
+            {formatExplicitBetLine(explicit)}
+            {valueBadge ? (
+              <span className="ml-2 inline-flex items-center gap-0.5 align-middle text-sm font-semibold text-[#ffd60a]">
+                <Flame className="h-3.5 w-3.5" aria-hidden />
+                {valueBadge}
+              </span>
+            ) : null}
+          </p>
+        </div>
+        <p className="mt-1.5 text-xs leading-snug text-neutral-500" title={explicit.condition}>
           Condición: {explicit.condition}
         </p>
         <p className="text-xs leading-snug text-[#64d2ff]">

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ApiQuotaBadge } from "@/components/ApiQuotaBadge";
+import { GroqQuotaBadge } from "@/components/GroqQuotaBadge";
 import { BankrollHeader } from "@/components/bankroll-header";
 import { cn } from "@/lib/utils";
 import {
@@ -53,7 +54,10 @@ export function Navbar() {
 
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <BankrollHeader className="shrink-0" />
-          <ApiQuotaBadge className="hidden md:inline-flex" />
+          <div className="flex min-w-0 flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-2">
+            <ApiQuotaBadge />
+            <GroqQuotaBadge />
+          </div>
           <nav aria-label="Principal" className="hidden md:block">
             <ul className="flex items-center gap-0.5 rounded-full bg-white/[0.04] p-1 ring-1 ring-white/10">
               {links.map(({ href, label, icon: Icon }) => {
@@ -81,9 +85,6 @@ export function Navbar() {
             </ul>
           </nav>
         </div>
-      </div>
-      <div className="flex flex-wrap items-center justify-center gap-2 border-t border-white/5 px-3 py-2 md:hidden">
-        <ApiQuotaBadge className="w-full justify-center" />
       </div>
     </header>
   );

@@ -1,4 +1,14 @@
-import type { MarketType } from "./types";
+import type { MarketType, SettlementFacts } from "./types";
+import {
+  isFixtureFinished,
+  isFixtureLive,
+  isFixtureVoided,
+  isKickoffDueForSettlement,
+} from "./match-status";
+import {
+  needsFixtureStatSettlement,
+  needsHtScoreSettlement,
+} from "./phase2-markets";
 import {
   type BetStatus,
   type HistoryBet,
@@ -7,12 +17,6 @@ import {
   loadBets,
   saveBets,
 } from "./history-tracker";
-import {
-  isFixtureFinished,
-  isFixtureLive,
-  isFixtureVoided,
-  isKickoffDueForSettlement,
-} from "./match-status";
 import { chileDateString, formatKickoffTime } from "./utils";
 
 export type FixtureResult = {
@@ -27,6 +31,13 @@ export type FixtureResult = {
   date?: string;
   /** Live minute from API-Football (null if not in-play) */
   elapsed?: number | null;
+  htHomeGoals?: number | null;
+  htAwayGoals?: number | null;
+  cornersHome?: number | null;
+  cornersAway?: number | null;
+  corners1hTotal?: number | null;
+  yellowHome?: number | null;
+  yellowAway?: number | null;
 };
 
 export type UpdatePendingResult = {
@@ -44,16 +55,155 @@ export {
   isFixtureVoided,
 } from "./match-status";
 
+export type MarketEvalResult = Exclude<LegStatus, "pending"> | "need_stats";
+
+function overLine(total: number, line: number): boolean {
+  return total > line;
+}
+function underLine(total: number, line: number): boolean {
+  return total < line;
+}
+
 /**
- * Evaluate a market against a final score.
- * Returns won | lost | void. Caller must ensure the match is finished.
+ * Evaluate a market against settlement facts.
+ * Returns won | lost | void | need_stats (caller keeps pending / fetches stats).
  */
 export function evaluateMarket(
   market: MarketType,
-  homeGoals: number,
-  awayGoals: number
-): Exclude<LegStatus, "pending"> {
+  factsOrHome: SettlementFacts | number,
+  awayGoalsArg?: number
+): MarketEvalResult {
+  const facts: SettlementFacts =
+    typeof factsOrHome === "number"
+      ? { homeGoals: factsOrHome, awayGoals: awayGoalsArg ?? 0 }
+      : factsOrHome;
+
+  const { homeGoals, awayGoals } = facts;
   const total = homeGoals + awayGoals;
+
+  if (needsHtScoreSettlement(market)) {
+    if (facts.htHomeGoals == null || facts.htAwayGoals == null) {
+      return "need_stats";
+    }
+    const htH = facts.htHomeGoals;
+    const htA = facts.htAwayGoals;
+    const htT = htH + htA;
+    switch (market) {
+      case "ht_home":
+        return htH > htA ? "won" : "lost";
+      case "ht_draw":
+        return htH === htA ? "won" : "lost";
+      case "ht_away":
+        return htA > htH ? "won" : "lost";
+      case "ht_over_0_5":
+        return overLine(htT, 0.5) ? "won" : "lost";
+      case "ht_under_0_5":
+        return underLine(htT, 0.5) ? "won" : "lost";
+      case "ht_over_1_5":
+        return overLine(htT, 1.5) ? "won" : "lost";
+      case "ht_under_1_5":
+        return underLine(htT, 1.5) ? "won" : "lost";
+      default:
+        break;
+    }
+  }
+
+  if (needsFixtureStatSettlement(market)) {
+    if (market.startsWith("corners_1h_")) {
+      if (facts.corners1hTotal == null) return "void";
+      const c = facts.corners1hTotal;
+      switch (market) {
+        case "corners_1h_over_3_5":
+          return overLine(c, 3.5) ? "won" : "lost";
+        case "corners_1h_under_3_5":
+          return underLine(c, 3.5) ? "won" : "lost";
+        case "corners_1h_over_4_5":
+          return overLine(c, 4.5) ? "won" : "lost";
+        case "corners_1h_under_4_5":
+          return underLine(c, 4.5) ? "won" : "lost";
+        default:
+          return "lost";
+      }
+    }
+
+    if (market.startsWith("corners_home_") || market.startsWith("corners_away_")) {
+      if (facts.cornersHome == null || facts.cornersAway == null) {
+        return "need_stats";
+      }
+      const side = market.startsWith("corners_home_")
+        ? facts.cornersHome
+        : facts.cornersAway;
+      if (market.includes("over_3_5")) return overLine(side, 3.5) ? "won" : "lost";
+      if (market.includes("under_3_5")) return underLine(side, 3.5) ? "won" : "lost";
+      if (market.includes("over_4_5")) return overLine(side, 4.5) ? "won" : "lost";
+      if (market.includes("under_4_5")) return underLine(side, 4.5) ? "won" : "lost";
+      return "lost";
+    }
+
+    if (market.startsWith("corners_")) {
+      if (facts.cornersHome == null || facts.cornersAway == null) {
+        return "need_stats";
+      }
+      const c = facts.cornersHome + facts.cornersAway;
+      switch (market) {
+        case "corners_over_7_5":
+          return overLine(c, 7.5) ? "won" : "lost";
+        case "corners_under_7_5":
+          return underLine(c, 7.5) ? "won" : "lost";
+        case "corners_over_8_5":
+          return overLine(c, 8.5) ? "won" : "lost";
+        case "corners_under_8_5":
+          return underLine(c, 8.5) ? "won" : "lost";
+        case "corners_over_9_5":
+          return overLine(c, 9.5) ? "won" : "lost";
+        case "corners_under_9_5":
+          return underLine(c, 9.5) ? "won" : "lost";
+        case "corners_over_10_5":
+          return overLine(c, 10.5) ? "won" : "lost";
+        case "corners_under_10_5":
+          return underLine(c, 10.5) ? "won" : "lost";
+        default:
+          return "lost";
+      }
+    }
+
+    if (market.startsWith("cards_home_") || market.startsWith("cards_away_")) {
+      if (facts.yellowHome == null || facts.yellowAway == null) {
+        return "need_stats";
+      }
+      const side = market.startsWith("cards_home_")
+        ? facts.yellowHome
+        : facts.yellowAway;
+      if (market.includes("over_1_5")) return overLine(side, 1.5) ? "won" : "lost";
+      if (market.includes("under_1_5")) return underLine(side, 1.5) ? "won" : "lost";
+      if (market.includes("over_2_5")) return overLine(side, 2.5) ? "won" : "lost";
+      if (market.includes("under_2_5")) return underLine(side, 2.5) ? "won" : "lost";
+      return "lost";
+    }
+
+    if (market.startsWith("cards_")) {
+      if (facts.yellowHome == null || facts.yellowAway == null) {
+        return "need_stats";
+      }
+      const c = facts.yellowHome + facts.yellowAway;
+      switch (market) {
+        case "cards_over_3_5":
+          return overLine(c, 3.5) ? "won" : "lost";
+        case "cards_under_3_5":
+          return underLine(c, 3.5) ? "won" : "lost";
+        case "cards_over_4_5":
+          return overLine(c, 4.5) ? "won" : "lost";
+        case "cards_under_4_5":
+          return underLine(c, 4.5) ? "won" : "lost";
+        case "cards_over_5_5":
+          return overLine(c, 5.5) ? "won" : "lost";
+        case "cards_under_5_5":
+          return underLine(c, 5.5) ? "won" : "lost";
+        default:
+          return "lost";
+      }
+    }
+  }
 
   switch (market) {
     case "home":
@@ -90,10 +240,30 @@ export function evaluateMarket(
     case "dnb_away":
       if (homeGoals === awayGoals) return "void";
       return awayGoals > homeGoals ? "won" : "lost";
+    case "btts_yes":
+      return homeGoals > 0 && awayGoals > 0 ? "won" : "lost";
+    case "btts_no":
+      return homeGoals === 0 || awayGoals === 0 ? "won" : "lost";
     default:
       return "lost";
   }
 }
+
+export function factsFromFixture(fixture: FixtureResult): SettlementFacts {
+  return {
+    homeGoals: fixture.homeGoals ?? 0,
+    awayGoals: fixture.awayGoals ?? 0,
+    htHomeGoals: fixture.htHomeGoals,
+    htAwayGoals: fixture.htAwayGoals,
+    cornersHome: fixture.cornersHome,
+    cornersAway: fixture.cornersAway,
+    corners1hTotal: fixture.corners1hTotal,
+    yellowHome: fixture.yellowHome,
+    yellowAway: fixture.yellowAway,
+  };
+}
+
+// --- rest of file preserved below via read+append if needed ---
 
 export function deriveTicketStatus(legs: HistoryBetLeg[]): BetStatus {
   if (legs.some((l) => l.status === "lost")) return "lost";
@@ -136,7 +306,7 @@ export function formatLegMatchStatus(leg: HistoryBetLeg): string {
   if (isFixtureLive(short)) {
     const minute =
       leg.elapsed != null ? `${leg.elapsed}'` : short || "LIVE";
-    if (score) return `${score} · En Vivo ${minute}`;
+    if (score) return `${score} -� En Vivo ${minute}`;
     return `En Vivo ${minute}`;
   }
 
@@ -228,11 +398,10 @@ export function applyFixtureToLeg(
     return { ...enriched, status: "pending" };
   }
 
-  const status = evaluateMarket(
-    leg.market,
-    fixture.homeGoals,
-    fixture.awayGoals
-  );
+  const status = evaluateMarket(leg.market, factsFromFixture(fixture));
+  if (status === "need_stats") {
+    return { ...enriched, status: "pending" };
+  }
 
   return {
     ...enriched,
@@ -388,3 +557,4 @@ export async function updatePendingBets(): Promise<UpdatePendingResult> {
     };
   }
 }
+

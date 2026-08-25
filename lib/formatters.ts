@@ -1,4 +1,15 @@
 import type { KnockoutContext, MarketType } from "./types";
+import {
+  looksLikeJugaBetLabel,
+  tryGetJugaBetLabel,
+} from "./jugabet-labels";
+
+export {
+  getJugaBetLabel,
+  tryGetJugaBetLabel,
+  looksLikeJugaBetLabel,
+} from "./jugabet-labels";
+export type { JugaBetLabelParams } from "./jugabet-labels";
 
 /**
  * Bookmaker-facing copy so the user opens the correct tab
@@ -87,6 +98,20 @@ function resolveMarketKey(
     return "over_2_5";
   if (s.includes("under 3.5") || s.includes("menos de 3.5")) return "under_3_5";
   if (s.includes("under 4.5") || s.includes("menos de 4.5")) return "under_4_5";
+  if (
+    (s.includes("ambos") && s.includes("marcan") && /\bno\b/.test(s)) ||
+    s.includes("btts no") ||
+    s.includes("btts_no")
+  ) {
+    return "btts_no";
+  }
+  if (
+    (s.includes("ambos") && s.includes("marcan")) ||
+    s.includes("both teams") ||
+    s.includes("btts")
+  ) {
+    return "btts_yes";
+  }
   if (s.includes("local marca") || s.includes("home scores"))
     return "home_scores";
   if (s.includes("visita marca") || s.includes("visitante marca") || s.includes("away scores"))
@@ -124,12 +149,18 @@ export function getExplicitPickLabel(
   const home = homeTeam.trim() || "Local";
   const away = awayTeam.trim() || "Visitante";
   const key = resolveMarketKey(market, selection);
+  const juga =
+    tryGetJugaBetLabel(key, { homeTeam: home, awayTeam: away }) ??
+    (looksLikeJugaBetLabel(selection ?? "") ? selection!.trim() : null) ??
+    (looksLikeJugaBetLabel(String(market)) ? String(market).trim() : null);
+
+  const labelOr = (fallback: string) => juga ?? fallback;
 
   switch (key) {
     case "1x":
       return pack(
         {
-          explicitLabel: `Gana o Empata ${home}`,
+          explicitLabel: labelOr(`Doble oportunidad → Gana o empata ${home}`),
           bookmakerTab:
             "Buscar en la casa como: pestaña «Doble Oportunidad» → «1X» / «Local o Empate» (Betano, JugaBet, Coolbet).",
           warningNote:
@@ -143,7 +174,7 @@ export function getExplicitPickLabel(
     case "x2":
       return pack(
         {
-          explicitLabel: `Gana o Empata ${away}`,
+          explicitLabel: labelOr(`Doble oportunidad → Gana o empata ${away}`),
           bookmakerTab:
             "Buscar en la casa como: pestaña «Doble Oportunidad» → «X2» / «Visitante o Empate» (Betano, JugaBet, Coolbet).",
           warningNote:
@@ -157,7 +188,9 @@ export function getExplicitPickLabel(
     case "12":
       return pack(
         {
-          explicitLabel: `Gana ${home} o Gana ${away}`,
+          explicitLabel: labelOr(
+            `Doble oportunidad → Gana ${home} o ${away}`
+          ),
           bookmakerTab:
             "Buscar en la casa como: pestaña «Doble Oportunidad» → «12» / «Local o Visitante» (sin empate).",
           warningNote:
@@ -171,7 +204,7 @@ export function getExplicitPickLabel(
     case "dnb_home":
       return pack(
         {
-          explicitLabel: `Gana ${home} (Empate protege)`,
+          explicitLabel: labelOr(`Apuesta sin empate → ${home}`),
           bookmakerTab:
             "Buscar en la casa como: «Empate No Válido» o «Apuesta Sin Empate» / Draw No Bet — Local (Betano, JugaBet, Coolbet).",
           warningNote:
@@ -185,7 +218,7 @@ export function getExplicitPickLabel(
     case "dnb_away":
       return pack(
         {
-          explicitLabel: `Gana ${away} (Empate protege)`,
+          explicitLabel: labelOr(`Apuesta sin empate → ${away}`),
           bookmakerTab:
             "Buscar en la casa como: «Empate No Válido» o «Apuesta Sin Empate» / Draw No Bet — Visitante (Betano, JugaBet, Coolbet).",
           warningNote:
@@ -199,7 +232,7 @@ export function getExplicitPickLabel(
     case "over_0_5":
       return pack(
         {
-          explicitLabel: "Más de 0.5 goles totales",
+          explicitLabel: labelOr("Total de goles → Más de 0.5"),
           bookmakerTab:
             "Buscar en la casa como: «Total de goles» / «Más/Menos» → Over 0.5 (partido completo, 90 min).",
           warningNote:
@@ -211,7 +244,7 @@ export function getExplicitPickLabel(
     case "over_1_5":
       return pack(
         {
-          explicitLabel: "Más de 1.5 goles totales",
+          explicitLabel: labelOr("Total de goles → Más de 1.5"),
           bookmakerTab:
             "Buscar en la casa como: «Total de goles» / «Más/Menos» → Over 1.5 (partido completo, 90 min).",
           warningNote:
@@ -223,7 +256,7 @@ export function getExplicitPickLabel(
     case "over_2_5":
       return pack(
         {
-          explicitLabel: "Más de 2.5 goles totales",
+          explicitLabel: labelOr("Total de goles → Más de 2.5"),
           bookmakerTab:
             "Buscar en la casa como: «Total de goles» / «Más/Menos» → Over 2.5 (partido completo, 90 min).",
           warningNote:
@@ -235,7 +268,7 @@ export function getExplicitPickLabel(
     case "under_3_5":
       return pack(
         {
-          explicitLabel: "Menos de 3.5 goles totales",
+          explicitLabel: labelOr("Total de goles → Menos de 3.5"),
           bookmakerTab:
             "Buscar en la casa como: «Total de goles» / «Más/Menos» → Under 3.5 (partido completo, 90 min).",
           warningNote:
@@ -247,7 +280,7 @@ export function getExplicitPickLabel(
     case "under_4_5":
       return pack(
         {
-          explicitLabel: "Menos de 4.5 goles totales",
+          explicitLabel: labelOr("Total de goles → Menos de 4.5"),
           bookmakerTab:
             "Buscar en la casa como: «Total de goles» / «Más/Menos» → Under 4.5 (partido completo, 90 min).",
           warningNote:
@@ -259,31 +292,31 @@ export function getExplicitPickLabel(
     case "home_scores":
       return pack(
         {
-          explicitLabel: `${home} marca al menos 1 gol`,
+          explicitLabel: labelOr(`${home} total → Más de 0.5 goles`),
           bookmakerTab:
             "Buscar en la casa como: «Local marca» / «Goles del equipo» / «To Score» — Local (no es Ambos marcan).",
           warningNote:
             `NO es «Ambos equipos marcan» (BTTS) ni Over 0.5 del partido. Da igual si ${home} pierde, siempre que anote.`,
         },
         `Ganas si ${home} anota; no importa el resultado final.`,
-        "BTTS-H"
+        "TT O0.5 H"
       );
     case "away_scores":
       return pack(
         {
-          explicitLabel: `${away} marca al menos 1 gol`,
+          explicitLabel: labelOr(`${away} total → Más de 0.5 goles`),
           bookmakerTab:
             "Buscar en la casa como: «Visitante marca» / «Goles del equipo» / «To Score» — Visitante (no es Ambos marcan).",
           warningNote:
             `NO es «Ambos equipos marcan» (BTTS) ni Over 0.5 del partido. Da igual si ${away} pierde, siempre que anote.`,
         },
         `Ganas si ${away} anota; no importa el resultado final.`,
-        "BTTS-A"
+        "TT O0.5 A"
       );
     case "home_over_1_5":
       return pack(
         {
-          explicitLabel: `${home} más de 1.5 goles`,
+          explicitLabel: labelOr(`${home} total → Más de 1.5 goles`),
           bookmakerTab:
             "Buscar en la casa como: «Goles del equipo» / «Team Totals» → Local Over 1.5 (no es el total del partido).",
           warningNote:
@@ -295,7 +328,7 @@ export function getExplicitPickLabel(
     case "away_over_1_5":
       return pack(
         {
-          explicitLabel: `${away} más de 1.5 goles`,
+          explicitLabel: labelOr(`${away} total → Más de 1.5 goles`),
           bookmakerTab:
             "Buscar en la casa como: «Goles del equipo» / «Team Totals» → Visitante Over 1.5 (no es el total del partido).",
           warningNote:
@@ -304,10 +337,34 @@ export function getExplicitPickLabel(
         `Ganas si ${away} marca al menos 2 goles (90 min).`,
         "TT O1.5 A"
       );
+    case "btts_yes":
+      return pack(
+        {
+          explicitLabel: labelOr("Ambos equipos marcan → Sí"),
+          bookmakerTab:
+            "Buscar en la casa como: «Ambos equipos marcan» / BTTS → Sí (partido completo, 90 min).",
+          warningNote:
+            "NO es «Local marca» ni «Visitante marca» por separado. Ambos deben anotar al menos 1 gol.",
+        },
+        `Ganas si ${home} y ${away} anotan al menos un gol cada uno.`,
+        "BTTS Sí"
+      );
+    case "btts_no":
+      return pack(
+        {
+          explicitLabel: labelOr("Ambos equipos marcan → No"),
+          bookmakerTab:
+            "Buscar en la casa como: «Ambos equipos marcan» / BTTS → No (partido completo, 90 min).",
+          warningNote:
+            "Ganas si al menos uno de los dos equipos no anota (incluye 0-0).",
+        },
+        `Ganas si ${home} o ${away} (o ambos) terminan en 0 goles.`,
+        "BTTS No"
+      );
     case "home":
       return pack(
         {
-          explicitLabel: `Gana ${home} (90 min)`,
+          explicitLabel: labelOr(`Resultado → ${home}`),
           bookmakerTab:
             "Buscar en la casa como: pestaña «Resultado 1X2» / «Ganador del partido» → 1 (Local). Tiempo reglamentario.",
           warningNote:
@@ -321,7 +378,7 @@ export function getExplicitPickLabel(
     case "away":
       return pack(
         {
-          explicitLabel: `Gana ${away} (90 min)`,
+          explicitLabel: labelOr(`Resultado → ${away}`),
           bookmakerTab:
             "Buscar en la casa como: pestaña «Resultado 1X2» / «Ganador del partido» → 2 (Visitante). Tiempo reglamentario.",
           warningNote:
@@ -335,7 +392,7 @@ export function getExplicitPickLabel(
     case "draw":
       return pack(
         {
-          explicitLabel: "Empate (90 min)",
+          explicitLabel: labelOr("Resultado → Empate"),
           bookmakerTab:
             "Buscar en la casa como: pestaña «Resultado 1X2» / «Ganador del partido» → X (Empate).",
           warningNote:
@@ -347,6 +404,24 @@ export function getExplicitPickLabel(
         "X"
       );
     default: {
+      if (juga) {
+        const tab = key.startsWith("corners_")
+          ? "Pestaña «Córners» / Corners (partido o 1ª parte)."
+          : key.startsWith("cards_")
+            ? "Pestaña «Tarjetas» / Cards / Bookings."
+            : key.startsWith("ht_")
+              ? "Pestaña «1er tiempo» / Half time / 1ª parte."
+              : "Buscar el nombre exacto del mercado (Betano, JugaBet, Coolbet).";
+        return pack(
+          {
+            explicitLabel: juga,
+            bookmakerTab: `Buscar en la casa como: ${tab}`,
+            warningNote:
+              "Confirma línea exacta (.5) y que no sea un mercado lookalike (equipo vs total / 1ª parte vs FT).",
+          },
+          `Liquidación según el mercado: ${juga}.`
+        );
+      }
       const fallback = selection?.trim() || String(market || "Mercado");
       return pack(
         {

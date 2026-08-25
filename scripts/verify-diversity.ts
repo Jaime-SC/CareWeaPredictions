@@ -89,11 +89,13 @@ console.log(
       uniqueProbs: probSet.size,
       dcCount,
       dcShare: Number((dcCount / Math.max(1, parlay.legs.length)).toFixed(2)),
-      dcWithin40: dcCount <= Math.floor(15 * 0.4),
+      // Phase 1: no forced DC ≤40% quota — natural repetition allowed
+      probabilityFirst: true,
       allAbove80: parlay.legs.every((l) => l.modelProbability >= 0.8),
       markets,
       sample: parlay.legs.slice(0, 5).map((l) => ({
         market: l.market,
+        label: l.marketLabel,
         odds: l.odds,
         prob: Number((l.modelProbability * 100).toFixed(1)),
       })),

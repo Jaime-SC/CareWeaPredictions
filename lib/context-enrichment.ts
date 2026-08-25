@@ -1,6 +1,6 @@
 /**
  * Live context enrichment (injuries / H2H / team venue stats).
- * Quota-aware: prefers SQLite cache, then a tiny live batch under Free plan.
+ * Quota-aware: prefers cache, then a live batch sized for paid API plans.
  */
 import type { Match, TeamInjury, TeamStats } from "./types";
 import {
@@ -13,10 +13,31 @@ import {
 } from "./api-cache";
 import { fixtureIdFromMatchId } from "./odds-mapper";
 import {
+  CORNER_HOME_SHARE,
+  CORNER_PRIOR_TOTAL,
+} from "./phase2-markets";
+import {
   blendSeasonStat,
   getTargetSeason,
   seasonFallbackCandidates,
 } from "./utils/season-mapper";
+
+/** Max live /fixtures/statistics pulls for corner avgs per enrichment pass. */
+const CORNER_STAT_LIVE_CAP = 8;
+const CORNER_LOOKBACK = 5;
+
+type FixtureListRow = {
+  fixture?: { id?: number; status?: { short?: string } };
+  teams?: {
+    home?: { id?: number };
+    away?: { id?: number };
+  };
+};
+
+type FixtureStatRow = {
+  team?: { id?: number };
+  statistics?: Array<{ type?: string; value?: number | string | null }>;
+};
 
 type ApiEnvelope<T> = {
   response?: T;
@@ -60,10 +81,13 @@ type TeamStatsRow = {
       total?: { home?: number; away?: number };
     };
   };
+  cards?: {
+    yellow?: Record<string, { total?: number | string } | number | string | null>;
+  };
 };
 
-/** Max uncached context API calls per enrichment pass (Free plan). */
-const CONTEXT_LIVE_BATCH = 4;
+/** Max uncached context API calls per enrichment pass (paid plan). */
+const CONTEXT_LIVE_BATCH = 24;
 
 type LiveGetter = <T>(
   path: string,
@@ -197,6 +221,25 @@ function venueAvgs(
   };
 }
 
+function yellowCardsTotal(stats: TeamStatsRow | undefined): number {
+  const yellow = stats?.cards?.yellow;
+  if (!yellow || typeof yellow !== "object") return 0;
+  let sum = 0;
+  for (const v of Object.values(yellow)) {
+    if (v == null) continue;
+    if (typeof v === "object" && "total" in v) sum += num(v.total);
+    else sum += num(v as string | number);
+  }
+  return sum;
+}
+
+function yellowCardsAvg(stats: TeamStatsRow | undefined): number {
+  const played = playedTotal(stats);
+  if (played <= 0) return 0;
+  const total = yellowCardsTotal(stats);
+  return total > 0 ? total / played : 0;
+}
+
 function applyTeamStats(
   team: TeamStats,
   stats: TeamStatsRow | undefined,
@@ -214,7 +257,12 @@ function applyTeamStats(
     concededAvg = blendSeasonStat(cur.conceded, prev.conceded, played);
   }
 
-  if (scoredAvg <= 0 && concededAvg <= 0) return team;
+  let yellowAvg = yellowCardsAvg(stats);
+  if (previousStats && needsPreviousSeasonBlend(played) && yellowAvg <= 0) {
+    yellowAvg = yellowCardsAvg(previousStats);
+  }
+
+  if (scoredAvg <= 0 && concededAvg <= 0 && yellowAvg <= 0) return team;
 
   return {
     ...team,
@@ -226,6 +274,14 @@ function applyTeamStats(
       team.goalsConcededAvg > 0.15
         ? team.goalsConcededAvg
         : Number(concededAvg.toFixed(3)),
+    ...(yellowAvg > 0
+      ? {
+          yellowCardsAvg: Number(yellowAvg.toFixed(3)),
+          ...(venue === "home"
+            ? { homeYellowCardsAvg: Number(yellowAvg.toFixed(3)) }
+            : { awayYellowCardsAvg: Number(yellowAvg.toFixed(3)) }),
+        }
+      : {}),
     ...(venue === "home"
       ? {
           homeGoalsScoredAvg: Number(scoredAvg.toFixed(3)),
@@ -267,6 +323,109 @@ async function loadTeamStatsRow(
   }
 }
 
+function cornerKicksFromStats(rows: FixtureStatRow[], teamId: number): number | null {
+  const row = rows.find((r) => r.team?.id === teamId);
+  if (!row?.statistics) return null;
+  const hit = row.statistics.find((s) =>
+    String(s.type ?? "")
+      .toLowerCase()
+      .includes("corner")
+  );
+  if (!hit || hit.value == null) return null;
+  const n = num(hit.value);
+  return n >= 0 ? n : null;
+}
+
+/**
+ * // ponytail: no team-stat corners field; upgrade when API adds it.
+ * Avg corners for from last FT fixtures (+ /fixtures/statistics), budget-capped.
+ */
+async function enrichTeamCornerAvgs(
+  team: TeamStats,
+  teamId: number,
+  venue: "home" | "away",
+  liveGet: LiveGetter | undefined,
+  liveBudget: { left: number },
+  cornerStatBudget: { left: number }
+): Promise<TeamStats> {
+  if (
+    (venue === "home" && team.homeCornersForAvg != null && team.homeCornersForAvg > 0) ||
+    (venue === "away" && team.awayCornersForAvg != null && team.awayCornersForAvg > 0)
+  ) {
+    return team;
+  }
+
+  const listKey = `fixtures_team_${teamId}_last_${CORNER_LOOKBACK}`;
+  let fixtures: FixtureListRow[] = [];
+  try {
+    const cached = await getCachedPayload<ApiEnvelope<FixtureListRow[]>>(listKey);
+    if (cached?.response?.length) {
+      fixtures = cached.response;
+    } else if (liveGet && liveBudget.left > 0) {
+      const json = await liveGet<FixtureListRow[]>(
+        `/fixtures?team=${teamId}&last=${CORNER_LOOKBACK}&status=FT-AET-PEN`,
+        { ttlMinutes: CACHE_TTL_MINUTES.ROSTER, cacheKey: listKey }
+      );
+      liveBudget.left -= 1;
+      if (json && !hasErrors(json.errors)) fixtures = json.response ?? [];
+    }
+  } catch (err) {
+    console.warn(`[context-enrichment] corner fixtures team=${teamId}:`, err);
+  }
+
+  const samples: number[] = [];
+  for (const fx of fixtures) {
+    const fid = fx.fixture?.id;
+    if (!fid) continue;
+    const isHome = fx.teams?.home?.id === teamId;
+    if (venue === "home" && !isHome) continue;
+    if (venue === "away" && isHome) continue;
+
+    const statKey = `fixture_statistics_${fid}`;
+    let rows: FixtureStatRow[] | undefined;
+    try {
+      const cached = await getCachedPayload<ApiEnvelope<FixtureStatRow[]>>(statKey);
+      if (cached?.response?.length) {
+        rows = cached.response;
+      } else if (
+        liveGet &&
+        liveBudget.left > 0 &&
+        cornerStatBudget.left > 0
+      ) {
+        const json = await liveGet<FixtureStatRow[]>(
+          `/fixtures/statistics?fixture=${fid}`,
+          { ttlMinutes: null, cacheKey: statKey }
+        );
+        liveBudget.left -= 1;
+        cornerStatBudget.left -= 1;
+        if (json && !hasErrors(json.errors)) rows = json.response ?? [];
+      }
+    } catch {
+      /* skip */
+    }
+    if (!rows?.length) continue;
+    const c = cornerKicksFromStats(rows, teamId);
+    if (c != null) samples.push(c);
+    if (samples.length >= 3) break;
+  }
+
+  const prior =
+    CORNER_PRIOR_TOTAL *
+    (venue === "home" ? CORNER_HOME_SHARE : 1 - CORNER_HOME_SHARE);
+  const avg =
+    samples.length > 0
+      ? samples.reduce((a, b) => a + b, 0) / samples.length
+      : prior;
+
+  return {
+    ...team,
+    cornersForAvg: Number(avg.toFixed(3)),
+    ...(venue === "home"
+      ? { homeCornersForAvg: Number(avg.toFixed(3)) }
+      : { awayCornersForAvg: Number(avg.toFixed(3)) }),
+  };
+}
+
 async function readCachedH2h(
   homeId: number,
   awayId: number
@@ -289,6 +448,7 @@ export async function enrichMatchContextFeatures(
   if (matches.length === 0) return matches;
 
   let liveBudget = liveGet ? CONTEXT_LIVE_BATCH : 0;
+  const cornerBudget = { left: CORNER_STAT_LIVE_CAP };
   const out: Match[] = [];
 
   for (const match of matches) {
@@ -306,9 +466,9 @@ export async function enrichMatchContextFeatures(
       let h2h = await readCachedH2h(homeId, awayId);
       if (!h2h && liveBudget > 0 && liveGet) {
         try {
-          // Free plan: omit `last` (restricted); parseH2h still slices to 4 locally
+          // Paid plan: `last` is allowed; parseH2h still slices locally
           const json = await liveGet<H2hRow[]>(
-            `/fixtures/headtohead?h2h=${homeId}-${awayId}`,
+            `/fixtures/headtohead?h2h=${homeId}-${awayId}&last=10`,
             {
               ttlMinutes: CACHE_TTL_MINUTES.ODDS,
               cacheKey,
@@ -427,6 +587,34 @@ export async function enrichMatchContextFeatures(
           away: applyTeamStats(next.away, current, "away", previous),
         };
       }
+    }
+
+    // --- Corner averages (fixture statistics, budget-capped) ---
+    if (homeId != null) {
+      next = {
+        ...next,
+        home: await enrichTeamCornerAvgs(
+          next.home,
+          homeId,
+          "home",
+          liveGet,
+          budget,
+          cornerBudget
+        ),
+      };
+    }
+    if (awayId != null) {
+      next = {
+        ...next,
+        away: await enrichTeamCornerAvgs(
+          next.away,
+          awayId,
+          "away",
+          liveGet,
+          budget,
+          cornerBudget
+        ),
+      };
     }
 
     liveBudget = budget.left;

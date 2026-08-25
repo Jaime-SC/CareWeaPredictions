@@ -1,5 +1,6 @@
 "use client";
 
+import { AiJudgeBadge } from "@/components/ai-judge-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,6 +78,7 @@ function safePickToLeg(p: SafePickItem): ParlayLeg {
     referee: p.referee,
     venue: p.venue,
     knockoutContext: p.knockoutContext,
+    aiJudge: p.aiJudge,
   };
 }
 
@@ -444,6 +446,9 @@ export function SafePicksList({
                             <p className="text-lg font-bold tracking-tight text-white">
                               {pick.matchLabel}
                             </p>
+                            {pick.aiJudge ? (
+                              <AiJudgeBadge verdict={pick.aiJudge} />
+                            ) : null}
                             <div className="rounded-2xl border border-[#0a84ff]/20 bg-[#0a84ff]/10 px-3 py-2.5">
                               <p className="text-sm font-semibold text-[#64d2ff]">
                                 {formatExplicitBetLine(explicit)}

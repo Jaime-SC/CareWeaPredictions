@@ -20,6 +20,10 @@ export type LeagueId =
   | "club-friendlies"
   | "other-domestic";
 
+/**
+ * Goal / 1X2 + Phase 2 (corners, yellow cards, 1st-half).
+ * Path: probs → oddsForMarket → evaluateMarket → JugaBet label.
+ */
 export type MarketType =
   | "home"
   | "draw"
@@ -36,7 +40,56 @@ export type MarketType =
   | "home_over_1_5"
   | "away_over_1_5"
   | "dnb_home"
-  | "dnb_away";
+  | "dnb_away"
+  | "btts_yes"
+  | "btts_no"
+  // Corners FT
+  | "corners_over_7_5"
+  | "corners_under_7_5"
+  | "corners_over_8_5"
+  | "corners_under_8_5"
+  | "corners_over_9_5"
+  | "corners_under_9_5"
+  | "corners_over_10_5"
+  | "corners_under_10_5"
+  // Corners 1H
+  | "corners_1h_over_3_5"
+  | "corners_1h_under_3_5"
+  | "corners_1h_over_4_5"
+  | "corners_1h_under_4_5"
+  // Corners by team
+  | "corners_home_over_3_5"
+  | "corners_home_under_3_5"
+  | "corners_home_over_4_5"
+  | "corners_home_under_4_5"
+  | "corners_away_over_3_5"
+  | "corners_away_under_3_5"
+  | "corners_away_over_4_5"
+  | "corners_away_under_4_5"
+  // Yellow cards FT
+  | "cards_over_3_5"
+  | "cards_under_3_5"
+  | "cards_over_4_5"
+  | "cards_under_4_5"
+  | "cards_over_5_5"
+  | "cards_under_5_5"
+  // Yellow cards by team
+  | "cards_home_over_1_5"
+  | "cards_home_under_1_5"
+  | "cards_home_over_2_5"
+  | "cards_home_under_2_5"
+  | "cards_away_over_1_5"
+  | "cards_away_under_1_5"
+  | "cards_away_over_2_5"
+  | "cards_away_under_2_5"
+  // Half-time goals
+  | "ht_over_0_5"
+  | "ht_under_0_5"
+  | "ht_over_1_5"
+  | "ht_under_1_5"
+  | "ht_home"
+  | "ht_draw"
+  | "ht_away";
 
 export type StrategyMode = "daily-safe" | "daily-fun" | "monopoly-asymmetry";
 
@@ -83,6 +136,17 @@ export interface TeamStats {
   lastMatchAt?: string | null;
   /** Known absences (cache / optional feed). Empty when unknown. */
   injuries?: TeamInjury[];
+  /** Avg corners for (FT); from recent fixture stats or prior. */
+  cornersForAvg?: number;
+  /** Avg corners against (FT). */
+  cornersAgainstAvg?: number;
+  /** Venue-specific corner for averages. */
+  homeCornersForAvg?: number;
+  awayCornersForAvg?: number;
+  /** Avg yellow cards received per match. */
+  yellowCardsAvg?: number;
+  homeYellowCardsAvg?: number;
+  awayYellowCardsAvg?: number;
 }
 
 export interface MatchOdds {
@@ -104,7 +168,67 @@ export interface MatchOdds {
   awayOver15?: number;
   dnbHome: number;
   dnbAway: number;
+  /** Both teams to score — Yes (optional book line). */
+  bttsYes?: number;
+  /** Both teams to score — No (optional book line). */
+  bttsNo?: number;
+  /** Phase 2 book lines (optional — omit / ≤1 excludes from pool). */
+  cornersOver75?: number;
+  cornersUnder75?: number;
+  cornersOver85?: number;
+  cornersUnder85?: number;
+  cornersOver95?: number;
+  cornersUnder95?: number;
+  cornersOver105?: number;
+  cornersUnder105?: number;
+  corners1hOver35?: number;
+  corners1hUnder35?: number;
+  corners1hOver45?: number;
+  corners1hUnder45?: number;
+  cornersHomeOver35?: number;
+  cornersHomeUnder35?: number;
+  cornersHomeOver45?: number;
+  cornersHomeUnder45?: number;
+  cornersAwayOver35?: number;
+  cornersAwayUnder35?: number;
+  cornersAwayOver45?: number;
+  cornersAwayUnder45?: number;
+  cardsOver35?: number;
+  cardsUnder35?: number;
+  cardsOver45?: number;
+  cardsUnder45?: number;
+  cardsOver55?: number;
+  cardsUnder55?: number;
+  cardsHomeOver15?: number;
+  cardsHomeUnder15?: number;
+  cardsHomeOver25?: number;
+  cardsHomeUnder25?: number;
+  cardsAwayOver15?: number;
+  cardsAwayUnder15?: number;
+  cardsAwayOver25?: number;
+  cardsAwayUnder25?: number;
+  htOver05?: number;
+  htUnder05?: number;
+  htOver15?: number;
+  htUnder15?: number;
+  htHome?: number;
+  htDraw?: number;
+  htAway?: number;
 }
+
+/** Facts needed to settle Phase 1 + Phase 2 markets. */
+export type SettlementFacts = {
+  homeGoals: number;
+  awayGoals: number;
+  htHomeGoals?: number | null;
+  htAwayGoals?: number | null;
+  cornersHome?: number | null;
+  cornersAway?: number | null;
+  /** 1H corner total when available; null → void 1H corner markets. */
+  corners1hTotal?: number | null;
+  yellowHome?: number | null;
+  yellowAway?: number | null;
+};
 
 /** Compact fixture card used by monopoly anti-rotation (±4 days). */
 export interface NearbyTeamFixture {
@@ -212,7 +336,7 @@ export interface MarketPrediction {
   knockoutContext?: KnockoutContext;
 }
 
-/** Gemini Search-grounded qualitative audit of a fixture. */
+/** Groq Llama qualitative audit of a fixture. */
 export interface AIVerdict {
   approved: boolean;
   vetoReason: string | null;
@@ -229,7 +353,7 @@ export interface MatchPrediction {
   contextFlags?: string[];
   contextNotes?: string[];
   knockoutContext?: KnockoutContext;
-  /** Present when Gemini Search audited this fixture. */
+  /** Present when Groq AI Judge audited this fixture. */
   aiJudge?: AIVerdict;
 }
 
@@ -254,7 +378,7 @@ export interface ParlayLeg {
   /** Set when monopoly anti-rotation was bypassed and a continental fixture is nearby. */
   warning?: "NEARBY_INTERNATIONAL_MATCH_PRESENT";
   knockoutContext?: KnockoutContext;
-  /** Gemini Search audit — only attached when the judge actually ran. */
+  /** Groq AI Judge audit — only attached when the judge actually ran. */
   aiJudge?: AIVerdict;
 }
 
@@ -280,6 +404,8 @@ export interface SafePickItem {
   impliedProbability?: number;
   isSafePick?: boolean;
   label?: string;
+  /** Groq AI Judge audit — only attached when the judge actually ran. */
+  aiJudge?: AIVerdict;
   /** Stake already saved in historial (CLP). */
   stakeCLP?: number;
   registered?: boolean;

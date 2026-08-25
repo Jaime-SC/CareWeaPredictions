@@ -26,6 +26,7 @@ import {
   loadStoredDashboard,
   saveStoredDashboard,
 } from "@/lib/dashboard-storage";
+import { mergePersistedAiJudge } from "@/lib/ai-judge-persist";
 import type { MatchPrediction } from "@/lib/types";
 import {
   formatKickoff,
@@ -59,7 +60,7 @@ export default function DashboardPage() {
       nextEmpty: string | null,
       cached: boolean
     ) => {
-      setPredictions(nextPredictions);
+      setPredictions(mergePersistedAiJudge(nextPredictions));
       setEmptyMessage(nextEmpty);
       setError(null);
       setFromCache(cached);
@@ -114,7 +115,7 @@ export default function DashboardPage() {
           if (armRateLimitFromResponse(res.status, errMsg)) {
             setError(
               errMsg ??
-                `Plan Free (10/min). Espera ${Math.ceil(API_RATE_LIMIT_COOLDOWN_MS / 1000)}s y vuelve a intentar.`
+                `Límite de tasa API. Espera ${Math.ceil(API_RATE_LIMIT_COOLDOWN_MS / 1000)}s y vuelve a intentar.`
             );
             return;
           }

@@ -59,8 +59,8 @@ export type MatchInjuryCheck = {
 };
 
 const TOP_SCORER_TAKE = 5;
-/** Cap live /injuries calls per pool sync (Free plan). */
-const DEFAULT_MAX_LIVE = 6;
+/** Cap live /injuries calls per pool sync (paid plan). */
+const DEFAULT_MAX_LIVE = 20;
 
 function envelopeHasErrors(errors: ApiEnvelope<unknown>["errors"]): boolean {
   if (!errors) return false;

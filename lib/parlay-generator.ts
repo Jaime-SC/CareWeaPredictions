@@ -1,4 +1,5 @@
 import type {
+  AIVerdict,
   GeneratedParlay,
   MarketPrediction,
   MarketType,
@@ -59,7 +60,7 @@ import {
   peekEuropeCupOriginRosters,
   peekSaCupOriginRosters,
 } from "./api-football";
-import { prioritizeValueLegs, valueRankBonus } from "./value-finder";
+import { prioritizeValueLegs } from "./value-finder";
 import {
   formatExplicitBetLine,
   formatMarketGuideLines,
@@ -73,12 +74,13 @@ import {
   MONOPOLY_MIN_LEGS,
 } from "./monopoly-engine";
 import {
-  evaluateFixtureWithAI,
-  isAiJudgeConfigured,
+  AI_JUDGE_BATCH_SIZE,
+  evaluateBatchWithAI,
   keepApprovedOrFailOpen,
-  splitMatchLabel,
+  legToJudgeInput,
 } from "./ai-judge";
 import { recalculateParlay } from "./parlay-recalc";
+import { ALL_PARLAY_MARKETS } from "./phase2-markets";
 
 export { DEFAULT_AUTO_PARLAY_CONFIG } from "./parlay-defaults";
 export { getWeeklyDateRange };
@@ -127,29 +129,9 @@ export function filterEliteWhitelistMatches(matches: Match[]): Match[] {
   });
 }
 
-/** Strategic / safe modes: only bookmaker-friendly high-probability lines */
-const SAFE_MARKETS = new Set<MarketType>([
-  "1x",
-  "x2",
-  "over_1_5",
-  "dnb_home",
-  "dnb_away",
-]);
-
-/** Fun / longshot: bookmaker-realistic lines (no pure 1X2 heavy odds) */
-const FUN_MARKETS = new Set<MarketType>([
-  "1x",
-  "x2",
-  "over_1_5",
-  "under_3_5",
-  "under_4_5",
-  "home_scores",
-  "away_scores",
-  "dnb_home",
-  "dnb_away",
-]);
-
-const MAX_MARKET_SHARE = 0.4;
+/** Probability-first pool: goals + corners/cards/HT compete on modelProbability. */
+const SAFE_MARKETS = ALL_PARLAY_MARKETS;
+const FUN_MARKETS = ALL_PARLAY_MARKETS;
 
 /** Hard floor: every accumulator leg must be ≥ 80% model probability. */
 export const MIN_LEG_PROBABILITY = 0.8;
@@ -191,41 +173,6 @@ function getBackfillMinProbability(strategyMode?: StrategyMode): number {
 function funOddsFit(odds: number): number {
   if (!(odds > 1)) return -10;
   return -Math.abs(Math.log(odds) - Math.log(FUN_TARGET_LEG_ODDS)) * 4;
-}
-
-type MarketFamily =
-  | "double_chance"
-  | "over_1_5"
-  | "over_0_5"
-  | "under"
-  | "team_score"
-  | "dnb"
-  | "other";
-
-function marketFamily(market: MarketType): MarketFamily {
-  switch (market) {
-    case "1x":
-    case "x2":
-      return "double_chance";
-    case "over_1_5":
-      return "over_1_5";
-    case "over_0_5":
-      return "over_0_5";
-    case "under_3_5":
-    case "under_4_5":
-      return "under";
-    case "home_scores":
-    case "away_scores":
-      return "team_score";
-    case "home_over_1_5":
-    case "away_over_1_5":
-      return "over_1_5";
-    case "dnb_home":
-    case "dnb_away":
-      return "dnb";
-    default:
-      return "other";
-  }
 }
 
 function resolveMode(config: ParlayConfig): StrategyMode {
@@ -336,34 +283,9 @@ function derbyMarketRankBonus(match: Match, market: MarketType): number {
   return 0;
 }
 
-/** Prefer O/U / DNB / team-score by match xG profile (breaks 1X monoculture). */
-function profileMarketBonus(
-  match: Match,
-  market: MarketType,
-  expectedGoals: { home: number; away: number }
-): number {
-  const total = expectedGoals.home + expectedGoals.away;
-  const homeEdge = expectedGoals.home - expectedGoals.away;
-
-  if (market === "over_1_5" && total >= 2.4) return 0.28;
-  if (market === "under_3_5" && total <= 2.3) return 0.22;
-  if (market === "under_4_5" && total <= 2.8) return 0.12;
-  if (market === "home_scores" && expectedGoals.home >= 1.05) return 0.16;
-  if (market === "away_scores" && expectedGoals.away >= 1.0) return 0.16;
-  if (market === "dnb_home" && homeEdge >= 0.45) return 0.2;
-  if (market === "dnb_away" && homeEdge <= -0.35) return 0.2;
-  // Soft penalty on double chance so diversity can win when other markets qualify
-  if (market === "1x" || market === "x2") return -0.08;
-  return 0;
-}
-
-function maxDoubleChanceLegs(targetLegCount: number): number {
-  return Math.max(1, Math.floor(targetLegCount * MAX_MARKET_SHARE));
-}
-
 /**
- * Collect eligible legs according to strategy mode.
- * Fun modes: one pick per match with hard double-chance ≤40% diversity.
+ * Collect eligible legs: one pick per match = highest modelProbability
+ * (tie-break: edge, then lower odds). No market-family quotas.
  */
 export function collectSafePicks(
   matches: Match[],
@@ -371,7 +293,7 @@ export function collectSafePicks(
     ParlayConfig,
     "minOdds" | "maxOdds" | "minProbability" | "strategyMode" | "targetLegCount"
   >,
-  mode: RankMode = "edge"
+  mode: RankMode = "probability"
 ): ParlayLeg[] {
   const strategyMode = resolveMode(config as ParlayConfig);
   const preset = getStrategyPreset(strategyMode);
@@ -381,14 +303,7 @@ export function collectSafePicks(
       preset.minProbability ??
       getStrictMinProbability()
   );
-  const targetLegCount =
-    typeof config.targetLegCount === "number" && config.targetLegCount > 0
-      ? config.targetLegCount
-      : isFunStrategy(strategyMode)
-        ? DEFAULT_TARGET_LEG_COUNT
-        : matches.length;
   const weights = loadModelWeights();
-  const maxDc = maxDoubleChanceLegs(targetLegCount);
 
   type Cand = {
     match: Match;
@@ -396,12 +311,11 @@ export function collectSafePicks(
     rank: number;
   };
 
-  const perMatch: Cand[][] = [];
+  const perMatch: Cand[] = [];
 
   for (const match of matches) {
     if (!hasBookmakerOdds(match.odds)) continue;
     const resolved = match;
-    // Knockout detection before Poisson so λ / 1X / overs use 1st vs 2nd-leg rules.
     void evaluateKnockoutContext(resolved);
 
     const leagueCfg = getLeagueWeight(
@@ -414,7 +328,7 @@ export function collectSafePicks(
       leagueCfg.minOdds || config.minOdds
     );
 
-    const { markets, expectedGoals } = predictMatchMarkets(resolved, {
+    const { markets } = predictMatchMarkets(resolved, {
       minSafeProbability: resolveContextMinProbability(baseMinProb, resolved),
       minSafeOdds: leagueMinOdds,
       maxSafeOdds: config.maxOdds,
@@ -424,7 +338,6 @@ export function collectSafePicks(
     const eligible = markets.filter((m) => {
       if (!isMarketAllowed(m.market, strategyMode, resolved)) return false;
       if (!(m.odds > 1)) return false;
-      // Hard floor 80% — friendlies raise to 85% via context guardrail
       const minProb = Math.max(
         MIN_LEG_PROBABILITY,
         resolveContextMinProbability(
@@ -460,65 +373,30 @@ export function collectSafePicks(
 
     if (eligible.length === 0) continue;
 
-    const cands: Cand[] = eligible.map((pick) => {
-      const wa = getMarketWeight(pick.market, weights).weight;
-      const bonus =
-        derbyMarketRankBonus(resolved, pick.market) +
-        profileMarketBonus(resolved, pick.market, expectedGoals);
-      const oddsFit = isFunStrategy(strategyMode)
-        ? funOddsFit(pick.odds)
-        : 0;
-      const valueBonus = valueRankBonus(pick.modelProbability, pick.odds);
-      const base =
-        mode === "probability"
-          ? pick.modelProbability * 10 + pick.edge
-          : mode === "odds"
-            ? pick.odds * 3 + pick.modelProbability
-            : mode === "balanced"
-              ? scoreMarket(pick) + (isFunStrategy(strategyMode) ? oddsFit : 0)
-              : pick.edge * 8 + pick.modelProbability;
-      return {
-        match: resolved,
-        pick,
-        rank: base + wa * 0.4 + bonus + oddsFit + valueBonus,
-      };
+    eligible.sort((a, b) => {
+      if (b.modelProbability !== a.modelProbability) {
+        return b.modelProbability - a.modelProbability;
+      }
+      if (b.edge !== a.edge) return b.edge - a.edge;
+      if (a.odds !== b.odds) return a.odds - b.odds;
+      return (
+        derbyMarketRankBonus(resolved, b.market) -
+        derbyMarketRankBonus(resolved, a.market)
+      );
     });
 
-    cands.sort((a, b) => b.rank - a.rank);
-    perMatch.push(cands);
+    const pick = eligible[0];
+    perMatch.push({
+      match: resolved,
+      pick,
+      rank: pick.modelProbability * 10 + pick.edge,
+    });
   }
 
-  // Assign highest-ranked match first; within each match skip markets that
-  // would breach the double-chance quota (or soft family caps).
-  perMatch.sort((a, b) => b[0].rank - a[0].rank);
-
-  const legs: ParlayLeg[] = [];
-  const familyCounts: Partial<Record<MarketFamily, number>> = {};
-
-  for (const cands of perMatch) {
-    for (const cand of cands) {
-      const fam = marketFamily(cand.pick.market);
-      const used = familyCounts[fam] ?? 0;
-      const famCap =
-        fam === "double_chance"
-          ? maxDc
-          : isFunStrategy(strategyMode)
-            ? Math.max(2, Math.floor(targetLegCount * MAX_MARKET_SHARE))
-            : Number.POSITIVE_INFINITY;
-      if (used >= famCap) continue;
-
-      legs.push(toLeg(cand.match, cand.pick));
-      familyCounts[fam] = used + 1;
-      break;
-    }
-  }
-
-  return legs.sort((a, b) => {
-    const wa = getMarketWeight(a.market, weights).weight;
-    const wb = getMarketWeight(b.market, weights).weight;
-    if (Math.abs(wb - wa) > 0.01) return wb - wa;
-    return compareLegs(a, b, mode);
-  });
+  perMatch.sort((a, b) => b.rank - a.rank);
+  return perMatch
+    .map((c) => toLeg(c.match, c.pick))
+    .sort((a, b) => compareLegs(a, b, mode));
 }
 
 /**
@@ -649,28 +527,13 @@ function compareLegs(a: ParlayLeg, b: ParlayLeg, mode: RankMode): number {
 }
 
 function respectsDiversity(
-  selected: ParlayLeg[],
-  candidate: ParlayLeg,
-  enforce: boolean,
-  minLegs: number
+  _selected: ParlayLeg[],
+  _candidate: ParlayLeg,
+  _enforce: boolean,
+  _minLegs: number
 ): boolean {
-  if (!enforce) return true;
-
-  const family = marketFamily(candidate.market);
-  const count =
-    selected.filter((s) => marketFamily(s.market) === family).length + 1;
-
-  // Hard rule from the first leg: double chance ≤ 40% of target ticket size
-  if (family === "double_chance") {
-    return count <= maxDoubleChanceLegs(minLegs);
-  }
-
-  // While filling toward minLegs, allow other families freely
-  if (selected.length < minLegs) return true;
-
-  const nextTotal = selected.length + 1;
-  const maxAllowed = Math.max(1, Math.floor(nextTotal * MAX_MARKET_SHARE));
-  return count <= Math.max(maxAllowed, 1);
+  // Phase 1: no market-family quotas — probability-first only.
+  return true;
 }
 
 /**
@@ -826,35 +689,17 @@ export async function generateParlayAudited(
   return applyAiJudgeToParlay(generateParlay(matches, config), matches, config);
 }
 
-const AI_JUDGE_CONCURRENCY = 4;
-
-async function mapBatches<T, R>(
-  items: T[],
-  fn: (item: T) => Promise<R>
-): Promise<R[]> {
-  const out: R[] = [];
-  for (let i = 0; i < items.length; i += AI_JUDGE_CONCURRENCY) {
-    out.push(
-      ...(await Promise.all(items.slice(i, i + AI_JUDGE_CONCURRENCY).map(fn)))
-    );
-  }
-  return out;
-}
-
-async function auditLeg(leg: ParlayLeg) {
+async function auditLegsBatch(legs: ParlayLeg[]) {
+  if (legs.length === 0) return [] as Array<{ leg: ParlayLeg; verdict: AIVerdict | null }>;
   try {
-    const { home, away } = splitMatchLabel(leg.matchLabel);
-    return {
+    const verdicts = await evaluateBatchWithAI(legs.map(legToJudgeInput));
+    return legs.map((leg) => ({
       leg,
-      verdict: await evaluateFixtureWithAI(
-        home,
-        away,
-        chileDateString(leg.kickoff)
-      ),
-    };
+      verdict: verdicts.get(leg.matchId) ?? null,
+    }));
   } catch (err) {
-    console.warn(`[AI JUDGE] ${leg.matchLabel}: fail-open`, err);
-    return { leg, verdict: null };
+    console.warn("[AI JUDGE] parlay batch fail-open", err);
+    return legs.map((leg) => ({ leg, verdict: null }));
   }
 }
 
@@ -886,24 +731,27 @@ export async function applyAiJudgeToParlay(
   matches: Match[],
   config: ParlayConfig
 ): Promise<GeneratedParlay> {
-  if (parlay.legs.length === 0 || !isAiJudgeConfigured()) return parlay;
+  if (parlay.legs.length === 0) return parlay;
 
   const target = parlay.legs.length;
-  const ticketRows = await mapBatches(parlay.legs, auditLeg);
+  const ticketRows = await auditLegsBatch(parlay.legs);
   const { kept, vetoed } = keepApprovedOrFailOpen(ticketRows);
   let vetoCount = vetoed.length;
   const used = new Set(parlay.legs.map((l) => l.matchId));
 
   if (kept.length < target) {
     const extras = replacementPool(matches, config, used);
-    for (const extra of extras) {
-      if (kept.length >= target) break;
-      used.add(extra.matchId);
-      const { kept: add, vetoed: drop } = keepApprovedOrFailOpen([
-        await auditLeg(extra),
-      ]);
+    for (let i = 0; i < extras.length && kept.length < target; i += AI_JUDGE_BATCH_SIZE) {
+      const chunk = extras.slice(i, i + AI_JUDGE_BATCH_SIZE);
+      for (const extra of chunk) used.add(extra.matchId);
+      const { kept: add, vetoed: drop } = keepApprovedOrFailOpen(
+        await auditLegsBatch(chunk)
+      );
       vetoCount += drop.length;
-      kept.push(...add);
+      for (const leg of add) {
+        if (kept.length >= target) break;
+        kept.push(leg);
+      }
     }
   }
 

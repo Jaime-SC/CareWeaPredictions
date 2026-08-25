@@ -26,13 +26,13 @@ export const CACHE_TTL_MINUTES = {
   FOOTBALL_DATA: 1440,
 } as const;
 
-/** Free-plan style daily budget shown in the UI. */
+/** Paid-plan style daily budget shown in the UI (override via env). */
 export const API_DAILY_QUOTA_LIMIT = Number(
-  env.API_FOOTBALL_DAILY_LIMIT ?? 100
+  env.API_FOOTBALL_DAILY_LIMIT ?? 7500
 );
 
-/** API-Football free plans reject Page > 3. */
-export const FREE_PLAN_MAX_PAGE = 3;
+/** Soft ceiling for API-Football pagination (paid plans allow >3). */
+export const MAX_API_PAGE = 20;
 
 export type FetchWithCacheOptions<T> = {
   apiKey?: string;
@@ -311,12 +311,15 @@ export async function fetchWithCache<T>(
   if (
     pageNum != null &&
     Number.isFinite(pageNum) &&
-    pageNum > FREE_PLAN_MAX_PAGE
+    pageNum > MAX_API_PAGE
   ) {
     console.warn(
-      `[api-cache] blocked page=${pageNum} (free-plan cap ${FREE_PLAN_MAX_PAGE}) key=${cacheKey}`
+      `[api-cache] blocked page=${pageNum} (max ${MAX_API_PAGE}) key=${cacheKey}`
     );
-    return { response: [], paging: { current: pageNum, total: FREE_PLAN_MAX_PAGE } } as T;
+    return {
+      response: [],
+      paging: { current: pageNum, total: MAX_API_PAGE },
+    } as T;
   }
 
   if (!options.forceRefresh) {
@@ -417,6 +420,95 @@ export async function fetchWithCache<T>(
 
 /** Bump to force another one-shot wipe of bulk date caches. */
 export const STALE_CACHE_PURGE_MARKER = "cache_purge_odds_fixture_v1";
+
+/** One-shot wipe of Free-plan rejection envelopes left in CachedApiResponse. */
+export const PLAN_LIMIT_CACHE_PURGE_MARKER = "cache_purge_plan_limit_v2";
+
+const PLAN_LIMIT_PAYLOAD_RE =
+  /free plans do not|does not have access|your subscription|api plan limit|not available under your|subscription does not/i;
+
+function payloadLooksLikePlanLimit(payload: string): boolean {
+  if (PLAN_LIMIT_PAYLOAD_RE.test(payload)) return true;
+  try {
+    const parsed = JSON.parse(payload) as {
+      errors?: Record<string, string> | string[];
+    };
+    if (!parsed?.errors) return false;
+    if (Array.isArray(parsed.errors)) {
+      return parsed.errors.some((e) => PLAN_LIMIT_PAYLOAD_RE.test(String(e)));
+    }
+    return Object.values(parsed.errors).some((e) =>
+      PLAN_LIMIT_PAYLOAD_RE.test(String(e))
+    );
+  } catch {
+    return false;
+  }
+}
+
+export async function purgePlanLimitNegativeCache(): Promise<{
+  deleted: number;
+  skipped: boolean;
+}> {
+  try {
+    const marker = await prisma.cachedApiResponse.findUnique({
+      where: { id: PLAN_LIMIT_CACHE_PURGE_MARKER },
+    });
+    if (marker) {
+      return { deleted: 0, skipped: true };
+    }
+
+    const candidates = await prisma.cachedApiResponse.findMany({
+      where: {
+        OR: [
+          { id: { startsWith: "teams_league_" } },
+          { id: { startsWith: "standings_league_" } },
+          { id: { startsWith: "teams_" } },
+          { id: { startsWith: "standings_" } },
+          { id: { startsWith: "fixtures_headtohead_" } },
+          { payload: { contains: "free plans do not" } },
+          { payload: { contains: "does not have access" } },
+          { payload: { contains: "Your subscription" } },
+          { payload: { contains: "Free plans" } },
+        ],
+      },
+      select: { id: true, payload: true },
+    });
+
+    const toDelete = candidates
+      .filter((row) => payloadLooksLikePlanLimit(row.payload))
+      .map((row) => row.id);
+
+    let deleted = 0;
+    if (toDelete.length > 0) {
+      const result = await prisma.cachedApiResponse.deleteMany({
+        where: { id: { in: toDelete } },
+      });
+      deleted = result.count;
+    }
+
+    await prisma.cachedApiResponse.create({
+      data: {
+        id: PLAN_LIMIT_CACHE_PURGE_MARKER,
+        endpoint: "cache/purge",
+        payload: JSON.stringify({
+          purgedAt: new Date().toISOString(),
+          deleted,
+          scanned: candidates.length,
+        }),
+        expiresAt: PERMANENT_EXPIRES_AT,
+      },
+    });
+
+    if (deleted > 0) {
+      console.log(`[api-cache] purged ${deleted} plan-limit negative cache rows`);
+    }
+
+    return { deleted, skipped: false };
+  } catch (err) {
+    console.warn("[api-cache] purgePlanLimitNegativeCache failed:", err);
+    return { deleted: 0, skipped: true };
+  }
+}
 
 export async function purgeStaleOddsAndFixtureCache(): Promise<{
   deleted: number;

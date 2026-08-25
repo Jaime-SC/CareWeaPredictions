@@ -41,6 +41,7 @@ import {
   ticketToParlay,
   ticketsToSafePicks,
 } from "@/lib/builder-restore";
+import { mergePersistedAiJudge } from "@/lib/ai-judge-persist";
 import type { GeneratedParlay, SafePickItem, StrategyMode } from "@/lib/types";
 import { chileDateString, getWeeklyDateRange } from "@/lib/utils";
 import { CalendarDays, Loader2, Sparkles } from "lucide-react";
@@ -118,7 +119,7 @@ export default function BuilderPage() {
           selectSafeTickets(tickets, selectedDate)
         );
         if (picks.length === 0) return;
-        setSafePicks(picks);
+        setSafePicks(mergePersistedAiJudge(picks));
         setGenerated(true);
         setFromCache(true);
       })();
@@ -170,7 +171,7 @@ export default function BuilderPage() {
           if (armRateLimitFromResponse(res.status, errMsg)) {
             setError(
               errMsg ??
-                `Plan Free (10/min). Espera ${Math.ceil(API_RATE_LIMIT_COOLDOWN_MS / 1000)}s y vuelve a intentar.`
+                `Límite de tasa API. Espera ${Math.ceil(API_RATE_LIMIT_COOLDOWN_MS / 1000)}s y vuelve a intentar.`
             );
           } else if (code === "EMPTY") {
             setEmptyMessage(errMsg ?? EMPTY_MATCHES_MESSAGE);
@@ -180,7 +181,9 @@ export default function BuilderPage() {
           return;
         }
 
-        const picks = (data.safePicks ?? []) as SafePickItem[];
+        const picks = mergePersistedAiJudge(
+          (data.safePicks ?? []) as SafePickItem[]
+        );
         setSafePicks(picks);
         setGenerated(true);
         if (!data.cached) {
@@ -231,7 +234,7 @@ export default function BuilderPage() {
           if (armRateLimitFromResponse(res.status, errMsg)) {
             setError(
               errMsg ??
-                `Plan Free (10/min). Espera ${Math.ceil(API_RATE_LIMIT_COOLDOWN_MS / 1000)}s y vuelve a intentar.`
+                `Límite de tasa API. Espera ${Math.ceil(API_RATE_LIMIT_COOLDOWN_MS / 1000)}s y vuelve a intentar.`
             );
           } else if (code === "EMPTY") {
             setEmptyMessage(errMsg ?? EMPTY_MATCHES_MESSAGE);
@@ -245,7 +248,10 @@ export default function BuilderPage() {
           emptyParlayFor("daily-fun")) as GeneratedParlay;
         const nextClipboard =
           typeof data.clipboard === "string" ? data.clipboard : "";
-        setParlay(next);
+        setParlay({
+          ...next,
+          legs: mergePersistedAiJudge(next.legs ?? []),
+        });
         setClipboard(nextClipboard);
         setGenerated(true);
         armRateCooldown(API_RATE_LIMIT_COOLDOWN_MS);
@@ -295,7 +301,7 @@ export default function BuilderPage() {
           if (armRateLimitFromResponse(res.status, errMsg)) {
             setError(
               errMsg ??
-                `Plan Free (10/min). Espera ${Math.ceil(API_RATE_LIMIT_COOLDOWN_MS / 1000)}s y vuelve a intentar.`
+                `Límite de tasa API. Espera ${Math.ceil(API_RATE_LIMIT_COOLDOWN_MS / 1000)}s y vuelve a intentar.`
             );
           } else if (code === "EMPTY") {
             setEmptyMessage(errMsg ?? INSUFFICIENT_MATCHES_MESSAGE);
@@ -309,7 +315,10 @@ export default function BuilderPage() {
           emptyParlayFor("monopoly-asymmetry")) as GeneratedParlay;
         const nextClipboard =
           typeof data.clipboard === "string" ? data.clipboard : "";
-        setParlay(next);
+        setParlay({
+          ...next,
+          legs: mergePersistedAiJudge(next.legs ?? []),
+        });
         setClipboard(nextClipboard);
         setGenerated(true);
         armRateCooldown(API_RATE_LIMIT_COOLDOWN_MS);
@@ -454,7 +463,7 @@ export default function BuilderPage() {
                   className="max-w-md text-center text-sm leading-relaxed text-neutral-400"
                 >
                   {isCoolingDown
-                    ? "Plan Free: máximo 10 peticiones/minuto. El contador indica cuándo puedes volver a generar."
+                    ? "Límite de tasa API: el contador indica cuándo puedes volver a generar."
                     : isSafe
                       ? "Lista de apuestas individuales: doble oportunidad, DNB y Over 1.5 con probabilidad modelo ≥ 85%."
                       : isMonopoly

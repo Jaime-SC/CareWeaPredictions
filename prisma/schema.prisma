@@ -109,6 +109,22 @@ model ApiQuotaDaily {
   updatedAt  DateTime @updatedAt
 }
 
+/// Gemini AI Judge qualitative verdict (12h TTL upcoming / permanent FT)
+model AiVerdictCache {
+  /// Match / fixture id (e.g. live-1234567)
+  fixtureId       String   @id
+  approved        Boolean
+  vetoReason      String?
+  confidenceScore Float
+  summary         String
+  /// Far-future = permanent (finished fixtures)
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([expiresAt])
+}
+
 /// Single-tenant bankroll (id = "default")
 model BankrollSettings {
   id                String   @id

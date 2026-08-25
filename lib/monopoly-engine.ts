@@ -10,7 +10,7 @@ import {
   estimateExpectedGoals,
   hasBookmakerOdds,
   impliedProbability,
-  MARKET_LABELS,
+  jugaBetMarketLabel,
   matchOutcomeProbabilities,
   buildScoreMatrix,
   teamOverProbability,
@@ -348,7 +348,10 @@ function toPrediction(
   const sanity = failsMarketSanity(match, market, modelProbability, odds);
   return {
     market,
-    label: knockoutMarketLabel(MARKET_LABELS[market], knockoutEval),
+    label: knockoutMarketLabel(
+      jugaBetMarketLabel(market, match.home.name, match.away.name),
+      knockoutEval
+    ),
     odds,
     modelProbability,
     impliedProbability: implied,

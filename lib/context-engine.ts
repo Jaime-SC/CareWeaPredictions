@@ -79,6 +79,8 @@ const ALL_MARKETS: MarketType[] = [
   "away_over_1_5",
   "dnb_home",
   "dnb_away",
+  "btts_yes",
+  "btts_no",
 ];
 
 const FLAG_NOTES: Record<string, string> = {
@@ -260,7 +262,12 @@ export function isFatigued(
 }
 
 export function derbyPreferredMarkets(): Set<MarketType> {
-  return new Set<MarketType>(["over_1_5", "home_scores", "away_scores"]);
+  return new Set<MarketType>([
+    "over_1_5",
+    "home_scores",
+    "away_scores",
+    "btts_yes",
+  ]);
 }
 
 export function isMarketBlockedByDerby(

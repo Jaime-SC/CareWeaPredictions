@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { API_RATE_LIMIT_MESSAGE } from "@/lib/api-messages";
 
 /** Matches server Free-plan cooldown after HTTP 429 (10 req/min). */
-export const API_RATE_LIMIT_COOLDOWN_MS = 60_000;
+export const API_RATE_LIMIT_COOLDOWN_MS = 15_000;
 
 const STORAGE_KEY = "parleylab_api_rate_cooldown_v1";
 const EVENT_NAME = "parleylab:api-rate-cooldown";
@@ -108,6 +108,7 @@ export function isApiRateLimitFailure(
   return (
     error === API_RATE_LIMIT_MESSAGE ||
     msg.includes("peticiones por minuto") ||
+    msg.includes("límite de tasa") ||
     msg.includes("10/min") ||
     msg.includes("too many requests") ||
     msg.includes("rate limit")

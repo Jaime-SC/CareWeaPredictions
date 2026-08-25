@@ -23,7 +23,7 @@ export const API_AUTH_MESSAGE =
   "API-Football rechazó la API Key. Confirma que FOOTBALL_API_KEY sea la misma del dashboard.";
 
 export const API_RATE_LIMIT_MESSAGE =
-  "API-Football bloqueó la consulta por exceso de peticiones por minuto (plan Free: 10/min). Espera ~1 minuto y vuelve a intentar. No es el cupo diario.";
+  "API-Football bloqueó la consulta por exceso de peticiones por minuto. Espera unos segundos y vuelve a intentar. No es el cupo diario.";
 
 export const API_IDS_UNSUPPORTED_MESSAGE =
-  "Tu plan Free no permite /fixtures?ids=. La app liquida por fecha (/fixtures?date=), que sí está incluido.";
+  "API-Football rechazó /fixtures?ids= para esta clave. La app liquida por fecha (/fixtures?date=).";

@@ -15,6 +15,7 @@ import {
 } from "@/lib/parlay-defaults";
 import { enrichMatchesFromLocalData } from "@/lib/fixture-context";
 import { enrichMatchesFromExternalSources } from "@/lib/sources/enrich";
+import { auditPredictionsWithAI, hydrateAiJudgeFromCache, hydrateSafePicksAiJudge } from "@/lib/ai-judge";
 import { buildMatchPredictions } from "@/lib/parlay-generator";
 import {
   syncAutomatedTeamProfileFlags,
@@ -89,8 +90,19 @@ export async function GET(request: NextRequest) {
   if (!forceRefresh) {
     const hit = await getCachedPayload<PredictSuccessBody>(cacheKey);
     if (hit?.success && Array.isArray(hit.predictions)) {
+      const predictions = await hydrateAiJudgeFromCache(hit.predictions);
+      const safePicks = await hydrateSafePicksAiJudge(
+        (hit.safePicks ?? []).map((sp) => {
+          const pred = predictions.find((p) => p.matchId === sp.matchId);
+          return pred?.aiJudge?.summary
+            ? { ...sp, aiJudge: pred.aiJudge }
+            : sp;
+        })
+      );
       return NextResponse.json({
         ...hit,
+        predictions,
+        safePicks,
         cached: true,
       });
     }
@@ -121,6 +133,8 @@ export async function GET(request: NextRequest) {
       predictions = predictions.filter((p) => p.bestSafePick !== null);
     }
 
+    predictions = await auditPredictionsWithAI(predictions);
+
     const safePicks = predictions
       .flatMap((p) =>
         p.markets
@@ -149,6 +163,7 @@ export async function GET(request: NextRequest) {
             referee: p.match.referee ?? null,
             venue: p.match.venue ?? null,
             knockoutContext: m.knockoutContext ?? p.knockoutContext,
+            aiJudge: p.aiJudge,
           }))
       )
       .sort((a, b) => b.modelProbability - a.modelProbability);
@@ -203,10 +218,12 @@ export async function POST(request: NextRequest) {
       ? matches.filter((m) => matchIds.includes(m.id))
       : matches;
 
-    const predictions = buildMatchPredictions(filtered, {
-      minSafeProbability: minProb,
-      safeMarketsOnly: true,
-    });
+    const predictions = await auditPredictionsWithAI(
+      buildMatchPredictions(filtered, {
+        minSafeProbability: minProb,
+        safeMarketsOnly: true,
+      })
+    );
 
     return NextResponse.json({
       success: true,

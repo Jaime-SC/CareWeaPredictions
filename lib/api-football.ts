@@ -15,11 +15,12 @@ import {
   CACHE_TTL_MINUTES,
   fetchWithCache,
   ttlMinutesForFixtureDate,
-  FREE_PLAN_MAX_PAGE,
+  MAX_API_PAGE,
   getApiQuota,
   getCachedPayload,
   buildCacheKey,
   purgeStaleOddsAndFixtureCache,
+  purgePlanLimitNegativeCache,
   type ApiQuotaSnapshot,
 } from "./api-cache";
 import { env } from "./env";
@@ -86,8 +87,13 @@ export {
   parseApiFootballQuotaHeaders,
   CACHE_TTL_MINUTES,
   API_DAILY_QUOTA_LIMIT,
-  FREE_PLAN_MAX_PAGE,
+  MAX_API_PAGE,
 } from "./api-cache";
+
+/** Paid plan: space live upstream calls (~200ms ≈ ≤300 req/min headroom). */
+export const LIVE_REQUEST_INTERVAL_MS = 200;
+/** Single 429 retry pause. */
+export const RATE_LIMIT_RETRY_MS = 2_000;
 
 export {
   ALLOWED_LEAGUE_IDS,
@@ -224,7 +230,10 @@ let staleCachePurged: Promise<void> | null = null;
 
 function ensureStaleCachePurged(): Promise<void> {
   if (!staleCachePurged) {
-    staleCachePurged = purgeStaleOddsAndFixtureCache().then(() => undefined);
+    staleCachePurged = Promise.all([
+      purgeStaleOddsAndFixtureCache(),
+      purgePlanLimitNegativeCache(),
+    ]).then(() => undefined);
   }
   return staleCachePurged;
 }
@@ -299,7 +308,7 @@ function messageFromApiErrors(
     detail.includes("subscription") ||
     detail.includes("not available")
   ) {
-    return `Tu plan Free no permite esta consulta: ${formatApiErrors(errors)}`;
+    return `Tu plan de API-Football no permite esta consulta: ${formatApiErrors(errors)}`;
   }
   const formatted = formatApiErrors(errors);
   return formatted || API_CONNECTION_ERROR_MESSAGE;
@@ -321,12 +330,6 @@ function isPlanOrDateRestriction(
   );
 }
 
-/** Free plan: 10 HTTP requests / minute. Space live calls by ≥6.5s. */
-const FREE_PLAN_LIVE_INTERVAL_MS = 6_500;
-const ODDS_UNCACHED_BATCH_CAP = 8;
-/** Single 429 retry pause (10–15s window). */
-const RATE_LIMIT_RETRY_MS = 12_000;
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -335,8 +338,7 @@ let liveGate: Promise<void> = Promise.resolve();
 let lastLiveRequestAt = 0;
 
 /**
- * Serializes uncached upstream HTTP so we stay under 10 req/min
- * (one in-flight live call, ≥6.5s between starts).
+ * Serializes uncached upstream HTTP with a short paid-plan gap between starts.
  */
 async function runLiveRequest<T>(fn: () => Promise<T>): Promise<T> {
   let release!: () => void;
@@ -348,7 +350,7 @@ async function runLiveRequest<T>(fn: () => Promise<T>): Promise<T> {
   try {
     const wait = Math.max(
       0,
-      FREE_PLAN_LIVE_INTERVAL_MS - (Date.now() - lastLiveRequestAt)
+      LIVE_REQUEST_INTERVAL_MS - (Date.now() - lastLiveRequestAt)
     );
     if (wait > 0) {
       await delay(wait);
@@ -408,21 +410,13 @@ function toFootballApiError(err: unknown): FootballApiError {
 }
 
 /**
- * Free-plan H2H: `last` is restricted — strip before cache key / upstream.
+ * Pass-through: paid plans allow H2H `last` and other query params.
+ * Exported for verify scripts.
  */
-function sanitizeApiParams(
-  endpoint: string,
+export function sanitizeApiParams(
+  _endpoint: string,
   params: Record<string, string>
 ): Record<string, string> {
-  if (
-    endpoint.includes("headtohead") ||
-    endpoint.includes("/fixtures/headtohead")
-  ) {
-    if (!("last" in params)) return params;
-    const next = { ...params };
-    delete next.last;
-    return next;
-  }
   return params;
 }
 
@@ -488,7 +482,7 @@ async function apiGet<T>(
   } catch (err) {
     if (httpStatusOf(err) === 429) {
       console.warn(
-        "[RATE LIMIT 429] Exceeded 10 req/min limit. Retrying after delay..."
+        "[RATE LIMIT 429] Upstream rate limit. Retrying after delay..."
       );
       await delay(RATE_LIMIT_RETRY_MS);
       try {
@@ -1128,7 +1122,7 @@ function ttlMinutesForOdds(kickoffIso: string): number | null {
   return CACHE_TTL_MINUTES.ODDS;
 }
 
-/** UEFA / Libertadores / Primera first so the 8-call batch is well spent. */
+/** UEFA / Libertadores / Primera first when many fixtures need odds. */
 function oddsFetchPriority(match: Match): number {
   const slug = match.league;
   const name = match.leagueName.toLowerCase();
@@ -1190,7 +1184,7 @@ async function fetchOddsForFixtureLive(
   let best: MatchOdds | null = null;
   let totalPages = 1;
 
-  for (let page = 1; page <= FREE_PLAN_MAX_PAGE && page <= totalPages; page++) {
+  for (let page = 1; page <= MAX_API_PAGE && page <= totalPages; page++) {
     const qs =
       page === 1
         ? `/odds?fixture=${fixtureId}`
@@ -1205,7 +1199,7 @@ async function fetchOddsForFixtureLive(
     // Body-level rate limit (HTTP 200) — same single retry as HTTP 429 in apiGet
     if (hasApiErrors(json.errors) && isRateLimitEnvelope(json.errors)) {
       console.warn(
-        "[RATE LIMIT 429] Exceeded 10 req/min limit. Retrying after delay..."
+        "[RATE LIMIT 429] Upstream rate limit. Retrying after delay..."
       );
       await delay(RATE_LIMIT_RETRY_MS);
       json = await apiGet<ApiOddsFixture[]>(qs, apiKey, {
@@ -1226,7 +1220,7 @@ async function fetchOddsForFixtureLive(
 
     const envelope = json as OddsPageEnvelope;
     totalPages = Math.min(
-      FREE_PLAN_MAX_PAGE,
+      MAX_API_PAGE,
       Math.max(1, envelope.paging?.total ?? 1)
     );
     const parsed = oddsFromEnvelope(envelope);
@@ -1312,15 +1306,7 @@ async function fetchOddsForEliteFixtures(
     uncached.push(job);
   }
 
-  const batch = uncached.slice(0, ODDS_UNCACHED_BATCH_CAP);
-  const skipped = uncached.length - batch.length;
-  if (skipped > 0) {
-    console.warn(
-      `[api-football] odds live batch cap=${ODDS_UNCACHED_BATCH_CAP}; skipping ${skipped} uncached fixtures this cycle`
-    );
-  }
-
-  for (const job of batch) {
+  for (const job of uncached) {
     try {
       const odds = await fetchOddsForFixture(job.id, apiKey, job.ttl);
       if (odds) map.set(job.id, odds);
@@ -1507,7 +1493,7 @@ async function fetchFromApiFootball(
     await snapshotClosingOdds(oddsByFixture);
   }
 
-  // Injuries / H2H / venue splits (cache-first; tiny live budget under Free plan)
+  // Injuries / H2H / venue splits (cache-first; paid live budget)
   results = await enrichMatchContextFeatures(results, (path, opts) =>
     apiGet(path, apiKey, opts)
   );
@@ -1561,6 +1547,7 @@ type ApiFixtureResult = {
   goals: { home: number | null; away: number | null };
   score?: {
     fulltime?: { home: number | null; away: number | null };
+    halftime?: { home: number | null; away: number | null };
   };
 };
 
@@ -1575,6 +1562,8 @@ export type FixtureScoreResult = {
   awayName: string;
   date: string;
   elapsed: number | null;
+  htHomeGoals?: number | null;
+  htAwayGoals?: number | null;
 };
 
 function toFixtureScoreResult(item: ApiFixtureResult): FixtureScoreResult {
@@ -1590,6 +1579,8 @@ function toFixtureScoreResult(item: ApiFixtureResult): FixtureScoreResult {
     awayName: item.teams.away.name,
     date: item.fixture.date,
     elapsed: item.fixture.status?.elapsed ?? null,
+    htHomeGoals: item.score?.halftime?.home ?? null,
+    htAwayGoals: item.score?.halftime?.away ?? null,
   };
 }
 
@@ -1728,6 +1719,79 @@ export async function fetchFixturesByIds(
   }
 
   return Array.from(byId.values());
+}
+
+export type FixtureMatchStats = {
+  fixtureId: number;
+  cornersHome: number | null;
+  cornersAway: number | null;
+  yellowHome: number | null;
+  yellowAway: number | null;
+};
+
+type ApiFixtureStatTeam = {
+  team?: { id?: number };
+  statistics?: Array<{ type?: string; value?: number | string | null }>;
+};
+
+function statValue(
+  rows: ApiFixtureStatTeam[],
+  teamId: number | undefined,
+  needle: string
+): number | null {
+  if (teamId == null) return null;
+  const row = rows.find((r) => r.team?.id === teamId);
+  const hit = row?.statistics?.find((s) =>
+    String(s.type ?? "")
+      .toLowerCase()
+      .includes(needle)
+  );
+  if (!hit || hit.value == null) return null;
+  const n = Number(String(hit.value).replace("%", ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** FT corners + yellow cards for settlement (cached permanently after FT). */
+export async function fetchFixtureMatchStats(
+  fixtureId: number,
+  homeTeamId?: number,
+  awayTeamId?: number
+): Promise<FixtureMatchStats> {
+  const empty: FixtureMatchStats = {
+    fixtureId,
+    cornersHome: null,
+    cornersAway: null,
+    yellowHome: null,
+    yellowAway: null,
+  };
+  if (!(fixtureId > 0)) return empty;
+  const apiKey = resolveApiKey();
+  const cacheKey = `fixture_statistics_${fixtureId}`;
+  try {
+    const json = await apiGet<ApiFixtureStatTeam[]>(
+      `/fixtures/statistics?fixture=${fixtureId}`,
+      apiKey,
+      { ttlMinutes: null, cacheKey }
+    );
+    if (!json || hasApiErrors(json.errors)) return empty;
+    const rows = json.response ?? [];
+    let homeId = homeTeamId;
+    let awayId = awayTeamId;
+    if (homeId == null || awayId == null) {
+      homeId = rows[0]?.team?.id;
+      awayId = rows[1]?.team?.id;
+    }
+    return {
+      fixtureId,
+      cornersHome: statValue(rows, homeId, "corner"),
+      cornersAway: statValue(rows, awayId, "corner"),
+      yellowHome: statValue(rows, homeId, "yellow"),
+      yellowAway: statValue(rows, awayId, "yellow"),
+    };
+  } catch (err) {
+    console.warn(`[api-football] fixture stats ${fixtureId}:`, err);
+    return empty;
+  }
 }
 
 export function toErrorResponse(error: unknown): {

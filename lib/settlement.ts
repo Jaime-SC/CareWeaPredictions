@@ -4,10 +4,11 @@
  * POSTP / CANC / ABD / SUSP / INT → CANCELLED (void, odds 1.00).
  */
 import { prisma } from "./db";
-import { fetchFixturesByIds } from "./api-football";
+import { fetchFixtureMatchStats, fetchFixturesByIds } from "./api-football";
 import {
   deriveTicketStatus,
   evaluateMarket,
+  factsFromFixture,
   type FixtureResult,
 } from "./result-checker";
 import {
@@ -20,6 +21,10 @@ import {
   isKickoffDueForSettlement,
 } from "./match-status";
 import type { MarketType } from "./types";
+import {
+  needsFixtureStatSettlement,
+  needsHtScoreSettlement,
+} from "./phase2-markets";
 import type { BetStatus, HistoryBetLeg, LegStatus } from "./history-tracker";
 import { UNIT_STAKE, chileDateString, toIsoDateTime } from "./utils";
 import { computePerformanceMetrics } from "./stats";
@@ -300,6 +305,9 @@ export async function settlePendingTickets(): Promise<SettlementResult> {
         finished = apiFx.finished || isFixtureFinished(statusShort);
         voided = Boolean(apiFx.voided) || isFixtureVoided(statusShort);
         live = isFixtureLive(statusShort);
+        // Attach HT / stats fields onto the shared FixtureResult shape
+        apiFx.htHomeGoals = apiFx.htHomeGoals ?? null;
+        apiFx.htAwayGoals = apiFx.htAwayGoals ?? null;
       } else {
         const cached = parseCachedScore(pred.fixture.finalScore);
         if (cached && isFixtureFinished(pred.fixture.status)) {
@@ -369,12 +377,79 @@ export async function settlePendingTickets(): Promise<SettlementResult> {
       } else if (live) {
         reason = `Partido en curso (${statusShort || "LIVE"}); no se liquida todavía.`;
       } else if (finished && homeGoals != null && awayGoals != null && pred.market) {
-        nextLeg = evaluateMarket(
-          pred.market as MarketType,
-          homeGoals,
-          awayGoals
-        );
-        reason = `Finalizado ${statusShort || "FT"} ${score ?? ""} → ${toDbOutcome(nextLeg)}.`;
+        const market = pred.market as MarketType;
+        let fxFacts: import("./types").SettlementFacts = apiFx
+          ? factsFromFixture({
+              ...apiFx,
+              homeGoals,
+              awayGoals,
+            })
+          : {
+              homeGoals,
+              awayGoals,
+              htHomeGoals: null,
+              htAwayGoals: null,
+            };
+
+        if (apiFx) {
+          fxFacts = {
+            ...fxFacts,
+            htHomeGoals: apiFx.htHomeGoals ?? fxFacts.htHomeGoals,
+            htAwayGoals: apiFx.htAwayGoals ?? fxFacts.htAwayGoals,
+          };
+        }
+
+        if (
+          needsFixtureStatSettlement(market) &&
+          (fxFacts.cornersHome == null ||
+            fxFacts.yellowHome == null ||
+            market.startsWith("corners_1h_"))
+        ) {
+          const stats = await fetchFixtureMatchStats(pred.fixture.apiFixtureId);
+          fxFacts = {
+            ...fxFacts,
+            cornersHome: stats.cornersHome ?? fxFacts.cornersHome,
+            cornersAway: stats.cornersAway ?? fxFacts.cornersAway,
+            yellowHome: stats.yellowHome ?? fxFacts.yellowHome,
+            yellowAway: stats.yellowAway ?? fxFacts.yellowAway,
+            corners1hTotal: fxFacts.corners1hTotal ?? null,
+          };
+        }
+
+        if (
+          needsHtScoreSettlement(market) &&
+          (fxFacts.htHomeGoals == null || fxFacts.htAwayGoals == null) &&
+          apiFx
+        ) {
+          fxFacts = {
+            ...fxFacts,
+            htHomeGoals: apiFx.htHomeGoals ?? null,
+            htAwayGoals: apiFx.htAwayGoals ?? null,
+          };
+        }
+
+        const evalResult = evaluateMarket(market, fxFacts);
+        if (evalResult === "need_stats") {
+          if (
+            isFixtureStaleUnresolved(pred.fixture.matchDate, nowMs) ||
+            isCivilDateStale(ticket.date, nowMs)
+          ) {
+            nextLeg = "void";
+            reason = `Sin stats (córners/tarjetas/HT) tras ${STALE_UNRESOLVED_DAYS} días → CANCELLED.`;
+          } else {
+            reason = `Finalizado ${statusShort || "FT"} ${score ?? ""} — esperando stats Phase-2.`;
+            diagnostics.push({
+              ...baseDiag,
+              action: "unresolved",
+              reason,
+            });
+            legStatuses.push({ status: "pending", odds: pred.odds });
+            continue;
+          }
+        } else {
+          nextLeg = evalResult;
+          reason = `Finalizado ${statusShort || "FT"} ${score ?? ""} → ${toDbOutcome(nextLeg)}.`;
+        }
       } else if (finished && (homeGoals == null || awayGoals == null)) {
         nextLeg = "void";
         reason = `Finalizado ${statusShort || "FT"} sin marcador usable → CANCELLED.`;

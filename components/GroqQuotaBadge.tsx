@@ -1,14 +1,10 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import {
-  formatDurationShort,
-  msUntilUtcMidnight,
-  useApiRateLimitCooldown,
-} from "@/lib/api-rate-limit-cooldown";
+import { formatDurationShort, msUntilUtcMidnight } from "@/lib/api-rate-limit-cooldown";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const STORAGE_KEY = "parleylab_api_quota_v2";
+const STORAGE_KEY = "parleylab_groq_quota_v1";
 /** Poll / stale window — no focus revalidate. */
 const STALE_MS = 60_000;
 
@@ -17,7 +13,7 @@ type QuotaState = {
   used: number;
   limit: number;
   remaining: number;
-  fromHeaders?: boolean;
+  configured: boolean;
 };
 
 let moduleCache: { at: number; data: QuotaState } | null = null;
@@ -32,8 +28,7 @@ function readLocal(): QuotaState | null {
     if (
       typeof parsed?.date !== "string" ||
       typeof parsed?.used !== "number" ||
-      typeof parsed?.limit !== "number" ||
-      !parsed.fromHeaders
+      typeof parsed?.limit !== "number"
     ) {
       return null;
     }
@@ -46,7 +41,7 @@ function readLocal(): QuotaState | null {
       used: parsed.used,
       limit: parsed.limit,
       remaining,
-      fromHeaders: true,
+      configured: parsed.configured !== false,
     };
   } catch {
     return null;
@@ -57,32 +52,25 @@ function writeLocal(state: QuotaState) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
-    /* ignore quota mirror failures */
+    /* ignore */
   }
 }
 
-async function fetchApiQuota(opts?: {
-  sync?: boolean;
+async function fetchGroqQuota(opts?: {
   force?: boolean;
 }): Promise<QuotaState | null> {
   const now = Date.now();
-  if (
-    !opts?.force &&
-    !opts?.sync &&
-    moduleCache &&
-    now - moduleCache.at < STALE_MS
-  ) {
+  if (!opts?.force && moduleCache && now - moduleCache.at < STALE_MS) {
     return moduleCache.data;
   }
   if (inflight) return inflight;
 
   inflight = (async () => {
     try {
-      const qs = opts?.sync ? "?sync=1" : "";
-      const res = await fetch(`/api/quota${qs}`, { cache: "no-store" });
+      const res = await fetch("/api/quota/groq", { cache: "no-store" });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.success) return moduleCache?.data ?? null;
-      const limit = Number(data.limit) || 100;
+      const limit = Number(data.limit) || 14_400;
       const remaining =
         typeof data.remaining === "number"
           ? data.remaining
@@ -92,9 +80,8 @@ async function fetchApiQuota(opts?: {
         used: Number(data.used) || 0,
         limit,
         remaining,
-        fromHeaders: Boolean(data.fromHeaders),
+        configured: data.configured !== false,
       };
-      if (!next.fromHeaders) return moduleCache?.data ?? null;
       moduleCache = { at: Date.now(), data: next };
       writeLocal(next);
       return next;
@@ -108,15 +95,16 @@ async function fetchApiQuota(opts?: {
   return inflight;
 }
 
-function toneForRemaining(remaining: number) {
-  if (remaining <= 10) {
+function toneForRatio(remaining: number, limit: number) {
+  const ratio = limit > 0 ? remaining / limit : 0;
+  if (remaining <= 0 || ratio <= 0.05) {
     return {
       className: "bg-[#ff453a]/12 text-[#ff453a] ring-[#ff453a]/25",
       dotClass: "bg-[#ff453a]",
       label: "Crítica",
     };
   }
-  if (remaining <= 20) {
+  if (ratio <= 0.15) {
     return {
       className: "bg-[#ffd60a]/12 text-[#ffd60a] ring-[#ffd60a]/25",
       dotClass: "bg-[#ffd60a]",
@@ -124,21 +112,20 @@ function toneForRemaining(remaining: number) {
     };
   }
   return {
-    className: "bg-[#30d158]/12 text-[#30d158] ring-[#30d158]/25",
-    dotClass: "bg-[#30d158]",
+    className: "bg-[#64d2ff]/12 text-[#64d2ff] ring-[#0a84ff]/25",
+    dotClass: "bg-[#64d2ff]",
     label: "OK",
   };
 }
 
-export function ApiQuotaBadge({ className }: { className?: string }) {
+export function GroqQuotaBadge({ className }: { className?: string }) {
   const [quota, setQuota] = useState<QuotaState | null>(null);
   const [mounted, setMounted] = useState(false);
   const [dailyResetMs, setDailyResetMs] = useState(0);
-  const cooldown = useApiRateLimitCooldown();
   const started = useRef(false);
 
-  const refresh = useCallback(async (opts?: { sync?: boolean; force?: boolean }) => {
-    const next = await fetchApiQuota(opts);
+  const refresh = useCallback(async (opts?: { force?: boolean }) => {
+    const next = await fetchGroqQuota(opts);
     if (next) setQuota(next);
   }, []);
 
@@ -147,10 +134,10 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
     started.current = true;
     setMounted(true);
     const cached = readLocal();
-    if (cached?.fromHeaders) setQuota(cached);
-    if (moduleCache?.data.fromHeaders) setQuota(moduleCache.data);
+    if (cached) setQuota(cached);
+    if (moduleCache) setQuota(moduleCache.data);
 
-    void refresh({ sync: true, force: true });
+    void refresh({ force: true });
     const id = window.setInterval(() => void refresh(), STALE_MS);
     return () => window.clearInterval(id);
   }, [refresh]);
@@ -168,31 +155,24 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
   }, [mounted, quota?.remaining, quota?.date]);
 
   if (!mounted) return null;
+  if (!quota) return null;
 
-  if (cooldown.isCoolingDown) {
+  if (!quota.configured) {
     return (
       <span
         role="status"
-        aria-live="polite"
-        aria-label={`Límite por minuto del plan Free. Podrás generar de nuevo en ${cooldown.label}.`}
+        aria-label="Groq AI Judge no configurado (falta GROQ_API_KEY)."
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-full bg-[#ffd60a]/12 px-2.5 py-1 text-xs font-medium tabular-nums text-[#ffd60a] ring-1 ring-[#ffd60a]/25",
+          "inline-flex items-center gap-1.5 rounded-full bg-white/8 px-2.5 py-1 text-xs font-medium text-neutral-400 ring-1 ring-white/10",
           className
         )}
       >
-        <span
-          aria-hidden
-          className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#ffd60a]"
-        />
-        <span className="hidden sm:inline">
-          Límite de tasa · listo en {cooldown.label}
-        </span>
-        <span className="sm:hidden">Listo en {cooldown.label}</span>
+        <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-neutral-500" />
+        <span className="hidden sm:inline">Groq: off</span>
+        <span className="sm:hidden">Groq off</span>
       </span>
     );
   }
-
-  if (!quota) return null;
 
   if (quota.remaining <= 0) {
     const resetLabel = formatDurationShort(dailyResetMs);
@@ -200,7 +180,7 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
       <span
         role="status"
         aria-live="polite"
-        aria-label={`Cuota diaria agotada. Se reinicia en ${resetLabel} (medianoche UTC).`}
+        aria-label={`Cuota diaria Groq agotada. Se reinicia en ${resetLabel}.`}
         className={cn(
           "inline-flex items-center gap-1.5 rounded-full bg-[#ff453a]/12 px-2.5 py-1 text-xs font-medium tabular-nums text-[#ff453a] ring-1 ring-[#ff453a]/25",
           className
@@ -211,21 +191,22 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
           className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#ff453a]"
         />
         <span className="hidden sm:inline">
-          Cupo diario 0 · reset en {resetLabel}
+          Groq 0 · reset {resetLabel}
         </span>
-        <span className="sm:hidden">Reset en {resetLabel}</span>
+        <span className="sm:hidden">Groq 0</span>
       </span>
     );
   }
 
-  const { className: tone, dotClass, label } = toneForRemaining(
-    quota.remaining
+  const { className: tone, dotClass, label } = toneForRatio(
+    quota.remaining,
+    quota.limit
   );
 
   return (
     <span
       role="status"
-      aria-label={`Cuota oficial API-Football del ${quota.date}: ${quota.used} de ${quota.limit} usadas, ${quota.remaining} restantes. Estado ${label}.`}
+      aria-label={`Cuota Groq del ${quota.date}: ${quota.used} de ${quota.limit} usadas, ${quota.remaining} restantes. Estado ${label}.`}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium tabular-nums ring-1",
         tone,
@@ -237,10 +218,10 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
         className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dotClass)}
       />
       <span className="hidden sm:inline">
-        API Quota: {quota.used} / {quota.limit} · {quota.remaining} restantes
+        Groq: {quota.used} / {quota.limit} · {quota.remaining} restantes
       </span>
       <span className="sm:hidden">
-        API {quota.used}/{quota.limit} · {quota.remaining} restantes
+        Groq {quota.used}/{quota.limit}
       </span>
     </span>
   );
