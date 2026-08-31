@@ -27,6 +27,12 @@ const COUNTRY_BY_LEAGUE_ID: Readonly<Record<number, string>> = {
   135: "Italia",
   136: "Italia",
   137: "Italia",
+  61: "Francia",
+  62: "Francia",
+  66: "Francia",
+  78: "Alemania",
+  79: "Alemania",
+  81: "Alemania",
   71: "Brasil",
   72: "Brasil",
   73: "Brasil",
@@ -37,9 +43,7 @@ const COUNTRY_BY_LEAGUE_ID: Readonly<Record<number, string>> = {
   266: "Chile",
   267: "Chile",
   262: "México",
-  263: "México",
   253: "EE.UU. / Canadá",
-  254: "EE.UU.",
 };
 
 export function getLeagueDisplayName(

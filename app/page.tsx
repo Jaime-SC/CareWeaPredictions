@@ -38,8 +38,8 @@ export default function HomePage() {
           Laboratorio de acumuladores de fútbol
         </p>
         <p className="mt-3 max-w-xl text-sm leading-relaxed text-neutral-400 sm:mt-4 sm:text-lg">
-          Scrapea partidos, estima xG con Poisson, filtra cuotas seguras
-          (1.15–1.35) y arma parlays de alto multiplicador con métricas en
+          Scrapea partidos, estima xG con Poisson, filtra cuotas 1.40–1.85
+          con EV ≥ 3% y arma parlays de alto multiplicador con métricas en
           unidades.
         </p>
 
@@ -72,12 +72,12 @@ export default function HomePage() {
           <Feature
             icon={<Shield className="h-5 w-5 text-[#30d158]" />}
             title="Safe picks"
-            text="Solo mercados con probabilidad modelo ≥ 80% y cuotas de baja varianza."
+            text="Solo mercados con probabilidad modelo ≥ 80%, cuotas 1.40–1.85 y EV ≥ 3%."
           />
           <Feature
             icon={<Zap className="h-5 w-5 text-[#ffd60a]" />}
             title="Auto-parlay"
-            text="Genera acumuladores de 15 legs (~20x–35x) con piso 80% por selección y foco en multiplicador / win rate."
+            text="Genera acumuladores de 15 legs (~150x–500x) con piso 80% por selección, cuotas 1.40–1.85 y EV ≥ 3%."
           />
         </ul>
       </section>

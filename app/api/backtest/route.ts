@@ -12,9 +12,10 @@ export const revalidate = 0;
 /**
  * Paper-trade backtest from Football-Data.org closing odds + season Poisson.
  *
- * GET ?competition=PL&season=2024&threshold=2&market=ALL
+ * GET ?competition=PL&season=2024&threshold=3&minOdds=1.4&maxOdds=1.85&market=ALL
  * market: ALL | 1X2 | OVER_UNDER_2_5 | DNB
- * threshold: ValueMarginPercent minimum (default 2.0)
+ * threshold: ValueMarginPercent minimum (default 3.0)
+ * minOdds / maxOdds: book line band (default 1.40–1.85)
  */
 export async function GET(request: NextRequest) {
   try {
@@ -27,11 +28,21 @@ export async function GET(request: NextRequest) {
       ? Math.floor(seasonRaw)
       : new Date().getFullYear() - 1;
 
-    const thresholdRaw = Number(searchParams.get("threshold") ?? 2);
+    const thresholdRaw = Number(searchParams.get("threshold") ?? 3);
     const threshold =
       Number.isFinite(thresholdRaw) && thresholdRaw >= 0
         ? thresholdRaw
-        : 2;
+        : 3;
+
+    const minOddsRaw = Number(searchParams.get("minOdds") ?? 1.4);
+    const minOdds =
+      Number.isFinite(minOddsRaw) && minOddsRaw > 1 ? minOddsRaw : 1.4;
+
+    const maxOddsRaw = Number(searchParams.get("maxOdds") ?? 1.85);
+    const maxOdds =
+      Number.isFinite(maxOddsRaw) && maxOddsRaw > minOdds
+        ? maxOddsRaw
+        : 1.85;
 
     const market = parseBacktestMarket(searchParams.get("market"));
 
@@ -42,6 +53,8 @@ export async function GET(request: NextRequest) {
         competition,
         season,
         threshold,
+        minOdds,
+        maxOdds,
         market,
         nMatches: 0,
         nBets: 0,
@@ -55,7 +68,12 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const summary = runPaperBacktest(matches, { threshold, market });
+    const summary = runPaperBacktest(matches, {
+      threshold,
+      minOdds,
+      maxOdds,
+      market,
+    });
 
     return NextResponse.json({
       success: true,

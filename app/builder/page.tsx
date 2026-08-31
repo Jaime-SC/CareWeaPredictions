@@ -41,6 +41,7 @@ import {
   ticketToParlay,
   ticketsToSafePicks,
 } from "@/lib/builder-restore";
+import { passesAiJudgeGate } from "@/lib/ai-judge-gate";
 import { mergePersistedAiJudge } from "@/lib/ai-judge-persist";
 import type { GeneratedParlay, SafePickItem, StrategyMode } from "@/lib/types";
 import { chileDateString, getWeeklyDateRange } from "@/lib/utils";
@@ -118,8 +119,11 @@ export default function BuilderPage() {
         const picks = ticketsToSafePicks(
           selectSafeTickets(tickets, selectedDate)
         );
-        if (picks.length === 0) return;
-        setSafePicks(mergePersistedAiJudge(picks));
+        const restored = mergePersistedAiJudge(picks).filter((p) =>
+          passesAiJudgeGate(p.aiJudge)
+        );
+        if (restored.length === 0) return;
+        setSafePicks(restored);
         setGenerated(true);
         setFromCache(true);
       })();
@@ -183,7 +187,7 @@ export default function BuilderPage() {
 
         const picks = mergePersistedAiJudge(
           (data.safePicks ?? []) as SafePickItem[]
-        );
+        ).filter((p) => passesAiJudgeGate(p.aiJudge));
         setSafePicks(picks);
         setGenerated(true);
         if (!data.cached) {
@@ -465,10 +469,10 @@ export default function BuilderPage() {
                   {isCoolingDown
                     ? "Límite de tasa API: el contador indica cuándo puedes volver a generar."
                     : isSafe
-                      ? "Lista de apuestas individuales: doble oportunidad, DNB y Over 1.5 con probabilidad modelo ≥ 85%."
+                      ? "Lista de apuestas individuales: cuotas 1.40–1.85, EV ≥ 3% y probabilidad modelo ≥ 85%."
                       : isMonopoly
                         ? "Escaneo lunes a domingo: monopolios domésticos ≥82% que pasen anti-rotación. Sin tope de legs."
-                        : "Piso 80% por leg · cuotas 1.18–1.28 · objetivo ~20x–35x · métricas en unidades (1U)."}
+                        : "Piso 80% por leg · cuotas 1.40–1.85 · EV ≥ 3% · objetivo ~150x–500x · métricas en unidades (1U)."}
                 </p>
               </div>
             )}

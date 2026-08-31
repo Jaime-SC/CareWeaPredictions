@@ -1,4 +1,10 @@
-import { BUILDER_MODES } from "../config/builder-modes";
+import {
+  BUILDER_MODES,
+  PRESET_MAX_ODDS,
+  PRESET_MIN_ODDS,
+  PRESET_MIN_VALUE_MARGIN_PCT,
+  PRESET_ODDS_RANGE_LABEL,
+} from "../config/builder-modes";
 import type { ParlayConfig, RiskTier, StrategyMode } from "./types";
 
 export interface StrategyPreset extends ParlayConfig {
@@ -21,8 +27,7 @@ export const STRATEGY_PRESETS: Record<StrategyMode, StrategyPreset> = {
   "daily-safe": {
     strategyMode: "daily-safe",
     title: "Selección de Picks Seguros (Individuales)",
-    subtitle:
-      "Apuestas sueltas · modelo ≥ 85% · sin acumulador · referencia 1U",
+    subtitle: `Apuestas sueltas · modelo ≥ 85% · cuotas ${PRESET_ODDS_RANGE_LABEL} · EV ≥ ${PRESET_MIN_VALUE_MARGIN_PCT}% · 1U`,
     badgeLabel: "Individuales",
     daysAhead: 0,
     riskTier: "safe",
@@ -31,27 +36,26 @@ export const STRATEGY_PRESETS: Record<StrategyMode, StrategyPreset> = {
     targetMultiplier: 1,
     minLegs: 1,
     maxLegs: 1,
-    minOdds: 1.15,
-    maxOdds: 1.4,
+    minOdds: PRESET_MIN_ODDS,
+    maxOdds: PRESET_MAX_ODDS,
     minProbability: 0.85,
   },
   "daily-fun": {
     strategyMode: "daily-fun",
     title: "Modo Seguro / Alta Probabilidad (Piso 80% por leg)",
-    subtitle:
-      "Piso 80% por leg · 15 legs · cuotas 1.18–1.28 · objetivo ~20x–35x · 1U",
+    subtitle: `Piso 80% por leg · 15 legs · cuotas ${PRESET_ODDS_RANGE_LABEL} · EV ≥ ${PRESET_MIN_VALUE_MARGIN_PCT}% · objetivo ~150x–500x · 1U`,
     badgeLabel: "Modo Seguro / Alta Probabilidad (Piso 80% por leg)",
     daysAhead: 0,
     riskTier: "fun",
     /** Unit stake reference (1U) — no monetary display */
     stake: 1,
-    /** 1.22^15 ≈ 21x · 1.25^15 ≈ 28x · 1.28^15 ≈ 38x */
-    targetMultiplier: 25,
+    /** ~1.62^15 ≈ 130x (mid-band 1.40–1.85) */
+    targetMultiplier: 150,
     minLegs: 15,
     maxLegs: 15,
     targetLegCount: 15,
-    minOdds: 1.18,
-    maxOdds: 1.28,
+    minOdds: PRESET_MIN_ODDS,
+    maxOdds: PRESET_MAX_ODDS,
     /** Hard floor for every accumulator leg */
     minProbability: 0.8,
   },

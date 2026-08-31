@@ -267,20 +267,24 @@ export function applyKnockoutLambdaAdjustments(
 /** LEG_1 home/1X boost; LEG_2 comeback Over 1.5 / Over 2.5 boost. */
 export function applyKnockoutMarketAdjustments(
   match: Match,
-  probs: Record<MarketType, number>
-): Record<MarketType, number> {
+  probs: Partial<Record<MarketType, number>>
+): Partial<Record<MarketType, number>> {
   const ctx = evaluateKnockoutContext(match);
   if (!ctx.isKnockout) return probs;
 
   const next = { ...probs };
   if (ctx.homeProbBoost !== 1) {
     for (const market of HOME_WIN_MARKETS) {
-      next[market] = clampProb(next[market] * ctx.homeProbBoost);
+      const current = next[market];
+      if (current == null) continue;
+      next[market] = clampProb(current * ctx.homeProbBoost);
     }
   }
   if (ctx.overProbBoost !== 1) {
     for (const market of COMEBACK_OVER_MARKETS) {
-      next[market] = clampProb(next[market] * ctx.overProbBoost);
+      const current = next[market];
+      if (current == null) continue;
+      next[market] = clampProb(current * ctx.overProbBoost);
     }
   }
   return next;

@@ -8,7 +8,7 @@ import {
   resolveContextMinProbability,
 } from "../lib/context-engine";
 import { predictMatchMarkets } from "../lib/poisson";
-import type { Match } from "../lib/types";
+import type { Match, MarketType } from "../lib/types";
 
 const odds = {
   home: 2.1,
@@ -130,7 +130,7 @@ const { contextFlags, perMarket } = applyContextToMarkets(base, {
   away_over_1_5: 0.48,
   dnb_home: 0.62,
   dnb_away: 0.38,
-});
+} as Record<MarketType, number>);
 
 const { markets, contextNotes } = predictMatchMarkets(base);
 const underDerby = predictMatchMarkets({

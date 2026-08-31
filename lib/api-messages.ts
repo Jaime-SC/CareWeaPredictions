@@ -13,6 +13,9 @@ export const EUROPE_CUP_NO_TOP2_MATCHUPS_MESSAGE =
 export const CONMEBOL_NO_ELIGIBLE_MATCHUPS_MESSAGE =
   "No hay enfrentamientos entre clubes de Primera División de Chile, Argentina o Brasil para esta fecha de CONMEBOL.";
 
+export const CONCACAF_NO_ELIGIBLE_MATCHUPS_MESSAGE =
+  "No hay enfrentamientos entre clubes de MLS o Liga MX para esta fecha de CONCACAF.";
+
 export const API_CONNECTION_ERROR_MESSAGE =
   "Error al conectar con API-Football. Verifica tu API Key o el límite de peticiones diarias.";
 

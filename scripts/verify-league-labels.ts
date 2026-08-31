@@ -9,7 +9,7 @@ import {
   restrictedCompetitionBadge,
 } from "../config/allowed-leagues";
 
-function assert(cond: unknown, msg: string): asserts cond {
+function assert(cond: unknown, msg = "assertion failed"): void {
   if (!cond) throw new Error(msg);
 }
 
@@ -39,7 +39,9 @@ assert(resolveLeagueRegion(13) === "conmebol");
 assert(resolveLeagueRegion(39) === "europe-top3-and-2nd");
 assert(resolveLeagueRegion(40) === "europe-top3-and-2nd");
 assert(resolveLeagueRegion(45) === "europe-top3-and-2nd");
-assert(resolveLeagueRegion(61) === undefined, "Ligue 1 purged");
+assert(resolveLeagueRegion(61) === "europe-top3-and-2nd", "Ligue 1");
+assert(resolveLeagueRegion(78) === "europe-top3-and-2nd", "Bundesliga");
+assert(resolveLeagueRegion(66) === "europe-top3-and-2nd", "Coupe de France");
 
 assert(
   restrictedCompetitionBadge(2, "UEFA Champions League") ===

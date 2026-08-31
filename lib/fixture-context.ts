@@ -212,7 +212,10 @@ function avg(values: number[], fallback: number): number {
   return values.reduce((s, v) => s + v, 0) / values.length;
 }
 
-function buildTeamIndex(fixtures: LocalFixtureRow[]): Map<string, TeamHistory> {
+function buildTeamIndex(
+  fixtures: LocalFixtureRow[],
+  asOf?: Date
+): Map<string, TeamHistory> {
   const index = new Map<string, TeamHistory>();
 
   const touch = (name: string): TeamHistory => {
@@ -225,8 +228,9 @@ function buildTeamIndex(fixtures: LocalFixtureRow[]): Map<string, TeamHistory> {
     return hist;
   };
 
-  // Fixtures are newest-first
+  // Fixtures are newest-first; only matches strictly before asOf contribute.
   for (const fx of fixtures) {
+    if (asOf && fx.matchDate.getTime() >= asOf.getTime()) continue;
     const home = touch(fx.homeTeam);
     const away = touch(fx.awayTeam);
     const iso = fx.matchDate.toISOString();
@@ -560,9 +564,11 @@ export async function enrichMatchesFromLocalData(
   const fixtures = dedupeFixtures([...dbRows, ...cacheRows]);
   if (fixtures.length === 0 && injuryIndex.byTeam.size === 0) return matches;
 
-  const index = buildTeamIndex(fixtures);
-
   return matches.map((match) => {
+    const asOf = new Date(match.kickoff);
+    const index = Number.isFinite(asOf.getTime())
+      ? buildTeamIndex(fixtures, asOf)
+      : buildTeamIndex(fixtures);
     const h2h = h2hForMatch(
       fixtures,
       match.home.name,
@@ -596,4 +602,22 @@ export async function enrichMatchesFromLocalData(
           : null),
     };
   });
+}
+
+/** ponytail: test-only export for leakage scripts — remove if fixture-context gets a dedicated test harness. */
+export type LocalFixtureRowForTest = LocalFixtureRow;
+export function buildTeamIndexAtCutoff(
+  fixtures: LocalFixtureRow[],
+  asOf: Date
+): Map<string, TeamHistory> {
+  return buildTeamIndex(fixtures, asOf);
+}
+
+export function teamFormAtCutoff(
+  fixtures: LocalFixtureRow[],
+  teamName: string,
+  asOf: Date
+): FormResult[] {
+  const hist = findHistory(buildTeamIndex(fixtures, asOf), teamName);
+  return hist?.form ?? [];
 }

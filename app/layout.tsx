@@ -6,7 +6,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "CareWeaPredictions — Football Accumulator Lab",
   description:
-    "Poisson & Dixon-Coles football analytics. Safe picks (1.15–1.35) and automated high-odds parlays.",
+    "Poisson & Dixon-Coles football analytics. Safe picks (1.40–1.85, EV ≥ 3%) and automated high-odds parlays.",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",

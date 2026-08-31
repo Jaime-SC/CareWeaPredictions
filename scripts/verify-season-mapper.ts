@@ -10,7 +10,7 @@ import {
 } from "../lib/utils/season-mapper";
 import { needsPreviousSeasonBlend } from "../lib/context-engine";
 
-function assert(cond: unknown, msg: string): asserts cond {
+function assert(cond: unknown, msg = "assertion failed"): void {
   if (!cond) throw new Error(msg);
 }
 

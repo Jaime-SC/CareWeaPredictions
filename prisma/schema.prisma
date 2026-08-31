@@ -109,7 +109,7 @@ model ApiQuotaDaily {
   updatedAt  DateTime @updatedAt
 }
 
-/// Gemini AI Judge qualitative verdict (12h TTL upcoming / permanent FT)
+/// Groq AI Judge qualitative verdict (12h TTL upcoming / permanent FT)
 model AiVerdictCache {
   /// Match / fixture id (e.g. live-1234567)
   fixtureId       String   @id
@@ -175,4 +175,11 @@ model TeamProfile {
 
   @@index([teamName])
   @@index([primaryLeagueId])
+}
+
+/// Auto-tuned model weights (Neon primary store; config/model-weights.json is seed fallback)
+model ModelWeightsConfig {
+  id        String   @id @default("default")
+  weights   Json
+  updatedAt DateTime @updatedAt
 }

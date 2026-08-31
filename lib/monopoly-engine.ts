@@ -325,13 +325,13 @@ function monopolyPoissonBoard(match: Match): {
     dnb_away: decisive > 0 ? outcomes.away / decisive : 0.5,
   });
   return {
-    home: knockout.home,
-    away: knockout.away,
-    draw: knockout.draw,
-    x2: knockout.x2,
-    dnbAway: knockout.dnb_away,
-    homeOver15: knockout.home_over_1_5,
-    awayOver15: knockout.away_over_1_5,
+    home: knockout.home ?? outcomes.home,
+    away: knockout.away ?? outcomes.away,
+    draw: knockout.draw ?? outcomes.draw,
+    x2: knockout.x2 ?? outcomes.away + outcomes.draw,
+    dnbAway: knockout.dnb_away ?? (decisive > 0 ? outcomes.away / decisive : 0.5),
+    homeOver15: knockout.home_over_1_5 ?? teamOverProbability(matrix, "home", 1.5),
+    awayOver15: knockout.away_over_1_5 ?? teamOverProbability(matrix, "away", 1.5),
   };
 }
 

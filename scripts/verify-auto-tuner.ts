@@ -118,27 +118,31 @@ const leagueMul = tuned.leagueMultipliers["135"];
 assert(leagueMul != null, "tuning multiplier synced");
 assert(leagueMul >= 0.95 && leagueMul <= 1.05, "poisson multiplier ±5%");
 
-saveModelWeights(lowResult.weights);
-invalidateModelWeightsCache();
-const loaded = loadModelWeights();
-assert(loaded.leagues["135"]?.sampleSize === 8, "persisted by league id");
+async function persistSmoke(): Promise<void> {
+  await saveModelWeights(lowResult.weights);
+  invalidateModelWeightsCache();
+  const loaded = loadModelWeights();
+  assert(loaded.leagues["135"]?.sampleSize === 8, "persisted by league id");
 
-saveModelWeights(structuredClone(DEFAULT_MODEL_WEIGHTS));
-resetTuningConfig();
-invalidateModelWeightsCache();
-invalidateTuningConfigCache();
+  await saveModelWeights(structuredClone(DEFAULT_MODEL_WEIGHTS));
+  resetTuningConfig();
+  invalidateModelWeightsCache();
+  invalidateTuningConfigCache();
 
-console.log(
-  JSON.stringify(
-    {
-      ok: true,
-      serieA,
-      premier,
-      dnbAway: dnb,
-      leagueMul,
-      persisted: loaded.calibratedAt != null,
-    },
-    null,
-    2
-  )
-);
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        serieA,
+        premier,
+        dnbAway: dnb,
+        leagueMul,
+        persisted: loaded.calibratedAt != null,
+      },
+      null,
+      2
+    )
+  );
+}
+
+await persistSmoke();

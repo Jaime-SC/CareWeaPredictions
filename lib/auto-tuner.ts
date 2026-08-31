@@ -761,7 +761,7 @@ export async function recalibrateModel(options?: {
 
   // ponytail: dual weights+tuning JSON stores, merge when one config file is enough
   const result = calibrateModelParameters(merged, loadModelWeights());
-  saveModelWeights(result.weights);
+  await saveModelWeights(result.weights);
   const config = saveTuningConfig(deriveTuningConfig(result.weights));
 
   return {
@@ -790,12 +790,12 @@ export async function maybeRecalibrateAfterSettlement(
 }
 
 /** Restore factory-neutral model-weights + Poisson multipliers. */
-export function resetCalibration(): {
+export async function resetCalibration(): Promise<{
   weights: ModelWeights;
   config: TuningConfig;
-} {
+}> {
   return {
-    weights: resetModelWeights(),
+    weights: await resetModelWeights(),
     config: resetTuningConfig(),
   };
 }

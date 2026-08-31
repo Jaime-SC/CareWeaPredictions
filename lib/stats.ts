@@ -24,6 +24,10 @@ export interface PerformanceMetrics {
   totalStaked: number;
   /** Σ(payout − stake) for WON − Σ(stake) for LOST */
   netProfit: number;
+  /** Σ(payout − stake) for WON only */
+  totalWonProfit: number;
+  /** Σ(stake) for LOST only */
+  totalLost: number;
   /** netProfit / totalStaked * 100 (settled only) */
   roi: number;
   /** won / (won + lost) */
@@ -59,6 +63,8 @@ export function computePerformanceMetrics(
   let voided = 0;
   let totalStaked = 0;
   let netProfit = 0;
+  let totalWonProfit = 0;
+  let totalLost = 0;
 
   for (const ticket of tickets) {
     const status = normalizeTicketStatus(ticket.status);
@@ -76,10 +82,13 @@ export function computePerformanceMetrics(
     totalStaked += stake;
     if (status === "won") {
       won += 1;
-      netProfit += ticket.payout - stake;
+      const profit = ticket.payout - stake;
+      netProfit += profit;
+      totalWonProfit += profit;
     } else {
       lost += 1;
       netProfit -= stake;
+      totalLost += stake;
     }
   }
 
@@ -93,6 +102,8 @@ export function computePerformanceMetrics(
     totalTickets: tickets.length,
     totalStaked,
     netProfit,
+    totalWonProfit,
+    totalLost,
     roi: totalStaked > 0 ? (netProfit / totalStaked) * 100 : 0,
     winRate: settled > 0 ? won / settled : 0,
   };

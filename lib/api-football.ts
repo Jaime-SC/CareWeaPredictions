@@ -6,6 +6,7 @@ import {
   API_KEY_MISSING_MESSAGE,
   API_RATE_LIMIT_MESSAGE,
   CONMEBOL_NO_ELIGIBLE_MATCHUPS_MESSAGE,
+  CONCACAF_NO_ELIGIBLE_MATCHUPS_MESSAGE,
   EMPTY_MATCHES_MESSAGE,
   EUROPE_CUP_NO_TOP2_MATCHUPS_MESSAGE,
   SA_CUP_NO_TOP2_MATCHUPS_MESSAGE,
@@ -41,6 +42,8 @@ import {
   CLUB_FRIENDLY_LEAGUE_IDS,
   CONMEBOL_COMPETITION_IDS,
   CONMEBOL_ELIGIBLE_ORIGIN_LEAGUE_IDS,
+  CONCACAF_ELIGIBLE_ORIGIN_LEAGUE_IDS,
+  CONCACAF_REGIONAL_COMPETITION_IDS,
   ELITE_DOMESTIC_LEAGUE_IDS,
   EUROPE_BIG5_LEAGUE_IDS,
   EUROPE_NATIONAL_CUP_IDS,
@@ -52,6 +55,7 @@ import {
   isAllowedCompetition,
   isClubFriendlyLeagueId,
   isConmebolCompetitionId,
+  isConcacafRegionalCompetitionId,
   isEuropeNationalCupId,
   isSaNationalCupId,
   isUefaCompetitionId,
@@ -73,6 +77,7 @@ import {
 export {
   API_CONNECTION_ERROR_MESSAGE,
   CONMEBOL_NO_ELIGIBLE_MATCHUPS_MESSAGE,
+  CONCACAF_NO_ELIGIBLE_MATCHUPS_MESSAGE,
   EMPTY_MATCHES_MESSAGE,
   EUROPE_CUP_NO_TOP2_MATCHUPS_MESSAGE,
   SA_CUP_NO_TOP2_MATCHUPS_MESSAGE,
@@ -104,6 +109,7 @@ export {
   isAllowedLeagueId,
   isClubFriendlyLeagueId,
   isConmebolCompetitionId,
+  isConcacafRegionalCompetitionId,
   isEuropeNationalCupId,
   isSaNationalCupId,
   isUefaCompetitionId,
@@ -154,13 +160,17 @@ const LEAGUE_ID_TO_SLUG: Record<number, LeagueId> = {
   135: "serie-a",
   136: "serie-a",
   137: "serie-a",
+  61: "ligue-1",
+  62: "ligue-1",
+  66: "ligue-1",
+  78: "bundesliga",
+  79: "bundesliga",
+  81: "bundesliga",
   140: "laliga",
   141: "laliga",
   143: "laliga",
   253: "mls",
-  254: "mls",
   262: "liga-mx",
-  263: "liga-mx",
   265: "primera-chile",
   266: "primera-chile",
   267: "primera-chile",
@@ -226,6 +236,7 @@ let saCupOriginRostersCache: Map<number, Set<number>> | null = null;
 let europeCupOriginRostersCache: Map<number, Set<number>> | null = null;
 /** Chile / Argentina / Brazil 1ª — CONMEBOL origin gate */
 let conmebolEligibleTeamIdsCache: Set<number> | null = null;
+let concacafEligibleTeamIdsCache: Set<number> | null = null;
 let staleCachePurged: Promise<void> | null = null;
 
 function ensureStaleCachePurged(): Promise<void> {
@@ -601,10 +612,12 @@ async function getEuropeCupOriginRosters(
 ): Promise<Map<number, Set<number>>> {
   if (europeCupOriginRostersCache) return europeCupOriginRostersCache;
 
-  const [eng, esp, ita] = await Promise.all([
+  const [eng, esp, ita, fra, ger] = await Promise.all([
     loadTeamIdsForLeagues(apiKey, EUROPE_NATIONAL_CUP_ORIGINS[45]),
     loadTeamIdsForLeagues(apiKey, EUROPE_NATIONAL_CUP_ORIGINS[143]),
     loadTeamIdsForLeagues(apiKey, EUROPE_NATIONAL_CUP_ORIGINS[137]),
+    loadTeamIdsForLeagues(apiKey, EUROPE_NATIONAL_CUP_ORIGINS[66]),
+    loadTeamIdsForLeagues(apiKey, EUROPE_NATIONAL_CUP_ORIGINS[81]),
   ]);
 
   const byCup = new Map<number, Set<number>>([
@@ -612,6 +625,8 @@ async function getEuropeCupOriginRosters(
     [48, eng],
     [143, esp],
     [137, ita],
+    [66, fra],
+    [81, ger],
   ]);
   europeCupOriginRostersCache = byCup;
   return byCup;
@@ -626,6 +641,17 @@ async function getConmebolEligibleTeamIds(
     CONMEBOL_ELIGIBLE_ORIGIN_LEAGUE_IDS
   );
   return conmebolEligibleTeamIdsCache;
+}
+
+async function getConcacafEligibleTeamIds(
+  apiKey: string
+): Promise<Set<number>> {
+  if (concacafEligibleTeamIdsCache) return concacafEligibleTeamIdsCache;
+  concacafEligibleTeamIdsCache = await loadTeamIdsForLeagues(
+    apiKey,
+    CONCACAF_ELIGIBLE_ORIGIN_LEAGUE_IDS
+  );
+  return concacafEligibleTeamIdsCache;
 }
 
 /** Sync peek for defense-in-depth filters after a live fetch warmed the cache. */
@@ -651,12 +677,17 @@ export function peekConmebolEligibleTeamIds(): ReadonlySet<number> | null {
   return conmebolEligibleTeamIdsCache;
 }
 
+export function peekConcacafEligibleTeamIds(): ReadonlySet<number> | null {
+  return concacafEligibleTeamIdsCache;
+}
+
 type OriginRosters = {
   eliteTeamIds: Set<number>;
   europeBig5TeamIds: Set<number>;
   saCupOrigins: Map<number, Set<number>>;
   europeCupOrigins: Map<number, Set<number>>;
   conmebolEligibleTeamIds: Set<number>;
+  concacafEligibleTeamIds: Set<number>;
 };
 
 function shouldKeepFixture(item: ApiFixture, rosters: OriginRosters): boolean {
@@ -689,6 +720,15 @@ function shouldKeepFixture(item: ApiFixture, rosters: OriginRosters): boolean {
       home.id,
       away.id,
       rosters.conmebolEligibleTeamIds
+    );
+  }
+
+  // CONCACAF regional: both clubs from MLS or Liga MX
+  if (isConcacafRegionalCompetitionId(leagueId)) {
+    return bothTeamsInRoster(
+      home.id,
+      away.id,
+      rosters.concacafEligibleTeamIds
     );
   }
 
@@ -1083,7 +1123,9 @@ export async function fetchUpcomingMatches(
           ? SA_CUP_NO_TOP2_MATCHUPS_MESSAGE
           : result.conmebolOriginFilteredEmpty
             ? CONMEBOL_NO_ELIGIBLE_MATCHUPS_MESSAGE
-            : EMPTY_MATCHES_MESSAGE;
+            : result.concacafOriginFilteredEmpty
+              ? CONCACAF_NO_ELIGIBLE_MATCHUPS_MESSAGE
+              : EMPTY_MATCHES_MESSAGE;
     throw new FootballApiError(emptyMsg, "EMPTY", 404);
   }
 
@@ -1353,6 +1395,7 @@ async function fetchFromApiFootball(
   europeCupOriginFilteredEmpty: boolean;
   saCupOriginFilteredEmpty: boolean;
   conmebolOriginFilteredEmpty: boolean;
+  concacafOriginFilteredEmpty: boolean;
 }> {
   await ensureStaleCachePurged();
   const apiKey = resolveApiKey();
@@ -1381,6 +1424,7 @@ async function fetchFromApiFootball(
       europeCupOriginFilteredEmpty: false,
       saCupOriginFilteredEmpty: false,
       conmebolOriginFilteredEmpty: false,
+      concacafOriginFilteredEmpty: false,
     };
   }
 
@@ -1399,12 +1443,16 @@ async function fetchFromApiFootball(
   const needsConmebolRoster = raw.some((f) =>
     CONMEBOL_COMPETITION_IDS.has(f.league.id)
   );
+  const needsConcacafRoster = raw.some((f) =>
+    CONCACAF_REGIONAL_COMPETITION_IDS.has(f.league.id)
+  );
   const [
     eliteTeamIds,
     europeBig5TeamIds,
     europeCupOrigins,
     saCupOrigins,
     conmebolEligibleTeamIds,
+    concacafEligibleTeamIds,
   ] = await Promise.all([
     needsEliteRoster
       ? getEliteTeamIds(apiKey)
@@ -1421,6 +1469,9 @@ async function fetchFromApiFootball(
     needsConmebolRoster
       ? getConmebolEligibleTeamIds(apiKey)
       : Promise.resolve(new Set<number>()),
+    needsConcacafRoster
+      ? getConcacafEligibleTeamIds(apiKey)
+      : Promise.resolve(new Set<number>()),
   ]);
 
   const rosters: OriginRosters = {
@@ -1429,6 +1480,7 @@ async function fetchFromApiFootball(
     europeCupOrigins,
     saCupOrigins,
     conmebolEligibleTeamIds,
+    concacafEligibleTeamIds,
   };
 
   const dayRaw = targetChileDate
@@ -1445,6 +1497,9 @@ async function fetchFromApiFootball(
   );
   const hadConmebolFixtures = dayRaw.some((f) =>
     CONMEBOL_COMPETITION_IDS.has(f.league.id)
+  );
+  const hadConcacafFixtures = dayRaw.some((f) =>
+    CONCACAF_REGIONAL_COMPETITION_IDS.has(f.league.id)
   );
 
   let results = dayRaw
@@ -1472,6 +1527,10 @@ async function fetchFromApiFootball(
     const id = parseLeagueId(m.leagueId);
     return id != null && isConmebolCompetitionId(id);
   });
+  const keptConcacaf = results.some((m) => {
+    const id = parseLeagueId(m.leagueId);
+    return id != null && isConcacafRegionalCompetitionId(id);
+  });
   const uefaOriginFilteredEmpty =
     hadUefaFixtures && !keptUefa && results.length === 0;
   const europeCupOriginFilteredEmpty =
@@ -1480,6 +1539,8 @@ async function fetchFromApiFootball(
     hadSaCupFixtures && !keptSaCup && results.length === 0;
   const conmebolOriginFilteredEmpty =
     hadConmebolFixtures && !keptConmebol && results.length === 0;
+  const concacafOriginFilteredEmpty =
+    hadConcacafFixtures && !keptConcacaf && results.length === 0;
 
   if (europeCupOriginFilteredEmpty) {
     console.log(
@@ -1524,6 +1585,7 @@ async function fetchFromApiFootball(
     europeCupOriginFilteredEmpty,
     saCupOriginFilteredEmpty,
     conmebolOriginFilteredEmpty,
+    concacafOriginFilteredEmpty,
   };
 }
 

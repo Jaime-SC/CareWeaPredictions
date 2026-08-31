@@ -134,14 +134,14 @@ const checks = {
     Math.abs(lambda.home - 1.6 * LEG_1_LAMBDA_SCALE) < 1e-9 &&
     Math.abs(lambda.away - 1.0 * LEG_1_LAMBDA_SCALE) < 1e-9,
   xgDampen: xgLeg1.home + xgLeg1.away < xgLeague.home + xgLeague.away,
-  homeBoost: Math.abs(boosted.home - emptyProbs.home * LEG_1_HOME_PROB_BOOST) < 1e-9,
-  dcBoost: Math.abs(boosted["1x"] - emptyProbs["1x"] * LEG_1_HOME_PROB_BOOST) < 1e-9,
+  homeBoost: Math.abs((boosted.home ?? 0) - emptyProbs.home * LEG_1_HOME_PROB_BOOST) < 1e-9,
+  dcBoost: Math.abs((boosted["1x"] ?? 0) - emptyProbs["1x"] * LEG_1_HOME_PROB_BOOST) < 1e-9,
   noOverBoostOnLeg1: boosted.over_1_5 === emptyProbs.over_1_5,
   comebackFlag: ctx2.comebackRequired === true && favoriteNeedsComeback(leg2Comeback),
   overBoost:
-    Math.abs(overs.over_1_5 - emptyProbs.over_1_5 * LEG_2_COMEBACK_OVER_BOOST) <
+    Math.abs((overs.over_1_5 ?? 0) - emptyProbs.over_1_5 * LEG_2_COMEBACK_OVER_BOOST) <
       1e-9 &&
-    Math.abs(overs.over_2_5 - emptyProbs.over_2_5 * LEG_2_COMEBACK_OVER_BOOST) <
+    Math.abs((overs.over_2_5 ?? 0) - emptyProbs.over_2_5 * LEG_2_COMEBACK_OVER_BOOST) <
       1e-9,
   metadataOnMarkets:
     homeMarket?.knockoutContext?.isKnockout === true &&

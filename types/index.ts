@@ -7,6 +7,8 @@ export type LeagueId =
   | "copa-libertadores"
   | "copa-sudamericana"
   | "serie-a"
+  | "bundesliga"
+  | "ligue-1"
   | "brasileirao"
   | "liga-profesional"
   | "liga-pro-ecuador"

@@ -470,7 +470,7 @@ export function ParlaySlip({
             Edge medio {formatPercent(activeParlay.averageEdge)}
             {activeParlay.riskTier === "fun"
               ? activeParlay.hitTarget
-                ? " · Objetivo ~20x–35x alcanzado"
+                ? " · Objetivo ~150x–500x alcanzado"
                 : " · Cerca del objetivo"
               : ""}
             {isEdited

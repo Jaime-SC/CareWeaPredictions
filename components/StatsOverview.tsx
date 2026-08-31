@@ -2,8 +2,8 @@
 
 import type { ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import type { HistorySummary } from "@/lib/history-tracker";
-import { formatPercent } from "@/lib/utils";
+import { formatSignedCLP, type HistorySummary } from "@/lib/history-tracker";
+import { formatCLP, formatPercent } from "@/lib/utils";
 import {
   Activity,
   Percent,
@@ -62,6 +62,19 @@ export function StatsOverview({ summary }: StatsOverviewProps) {
             ? "Solo boletos liquidados"
             : "Sin boletos liquidados aún"
         }
+        details={
+          settled > 0 ? (
+            <p className="text-xs tabular-nums leading-snug">
+              <span className="font-medium text-[#30d158]">
+                {summary.won} ganadas
+              </span>
+              <span className="text-neutral-600"> · </span>
+              <span className="font-medium text-[#ff453a]">
+                {summary.lost} perdidas
+              </span>
+            </p>
+          ) : undefined
+        }
       />
       <Metric
         icon={<TrendingUp className="h-4 w-4 text-[#30d158]" />}
@@ -69,6 +82,27 @@ export function StatsOverview({ summary }: StatsOverviewProps) {
         value={`${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}
         hint="Ganancia neta / stake liquidado · pendientes excluidos"
         valueClass={roiPositive ? "text-[#30d158]" : "text-[#ff453a]"}
+        details={
+          settled > 0 ? (
+            <div className="space-y-1 text-xs tabular-nums leading-snug">
+              <p className="text-neutral-400">
+                Inversión{" "}
+                <span className="font-medium text-white">
+                  {formatCLP(summary.totalStaked)}
+                </span>
+              </p>
+              <p>
+                <span className="font-medium text-[#30d158]">
+                  {formatSignedCLP(summary.totalWonProfit)} ganancia
+                </span>
+                <span className="text-neutral-600"> · </span>
+                <span className="font-medium text-[#ff453a]">
+                  {formatSignedCLP(-summary.totalLost)} pérdida
+                </span>
+              </p>
+            </div>
+          ) : undefined
+        }
       />
     </div>
   );
@@ -140,12 +174,14 @@ function Metric({
   value,
   hint,
   valueClass,
+  details,
 }: {
   icon: ReactNode;
   label: string;
   value: string;
   hint: string;
   valueClass?: string;
+  details?: ReactNode;
 }) {
   return (
     <Card className="lift">
@@ -163,7 +199,8 @@ function Metric({
           >
             {value}
           </p>
-          <p className="text-xs text-neutral-500">{hint}</p>
+          {details ? <div className="mt-1.5">{details}</div> : null}
+          <p className="mt-1 text-xs text-neutral-500">{hint}</p>
         </div>
       </CardContent>
     </Card>

@@ -10,13 +10,20 @@ import {
   upsertCachedPayload,
 } from "@/lib/api-cache";
 import {
+  getStrategyPreset,
   isFunStrategy,
   resolveStrategyMode,
 } from "@/lib/parlay-defaults";
 import { enrichMatchesFromLocalData } from "@/lib/fixture-context";
 import { enrichMatchesFromExternalSources } from "@/lib/sources/enrich";
-import { auditPredictionsWithAI, hydrateAiJudgeFromCache, hydrateSafePicksAiJudge } from "@/lib/ai-judge";
+import {
+  auditPredictionsWithAI,
+  hydrateAiJudgeFromCache,
+  hydrateSafePicksAiJudge,
+  passesAiJudgeGate,
+} from "@/lib/ai-judge";
 import { buildMatchPredictions } from "@/lib/parlay-generator";
+import { hydrateModelWeightsFromDb } from "@/lib/model-weights";
 import {
   syncAutomatedTeamProfileFlags,
   warmTeamProfileCache,
@@ -61,6 +68,7 @@ type PredictSuccessBody = {
  */
 export async function GET(request: NextRequest) {
   try {
+  await hydrateModelWeightsFromDb();
   const { searchParams } = new URL(request.url);
   const matchId = searchParams.get("matchId");
   const safeOnly = searchParams.get("safeOnly") === "true";
@@ -91,18 +99,21 @@ export async function GET(request: NextRequest) {
     const hit = await getCachedPayload<PredictSuccessBody>(cacheKey);
     if (hit?.success && Array.isArray(hit.predictions)) {
       const predictions = await hydrateAiJudgeFromCache(hit.predictions);
-      const safePicks = await hydrateSafePicksAiJudge(
-        (hit.safePicks ?? []).map((sp) => {
-          const pred = predictions.find((p) => p.matchId === sp.matchId);
-          return pred?.aiJudge?.summary
-            ? { ...sp, aiJudge: pred.aiJudge }
-            : sp;
-        })
-      );
+      const safePicks = (
+        await hydrateSafePicksAiJudge(
+          (hit.safePicks ?? []).map((sp) => {
+            const pred = predictions.find((p) => p.matchId === sp.matchId);
+            return pred?.aiJudge?.summary
+              ? { ...sp, aiJudge: pred.aiJudge }
+              : sp;
+          })
+        )
+      ).filter((sp) => passesAiJudgeGate(sp.aiJudge));
       return NextResponse.json({
         ...hit,
         predictions,
         safePicks,
+        safePickCount: safePicks.length,
         cached: true,
       });
     }
@@ -118,10 +129,11 @@ export async function GET(request: NextRequest) {
       await enrichMatchesFromLocalData(rawMatches)
     );
 
+    const preset = getStrategyPreset(strategyMode);
     let predictions = buildMatchPredictions(matches, {
       minSafeProbability: minProb,
-      minSafeOdds: 1.15,
-      maxSafeOdds: 1.4,
+      minSafeOdds: preset.minOdds,
+      maxSafeOdds: preset.maxOdds,
       safeMarketsOnly: true,
     });
 
@@ -136,6 +148,7 @@ export async function GET(request: NextRequest) {
     predictions = await auditPredictionsWithAI(predictions);
 
     const safePicks = predictions
+      .filter((p) => passesAiJudgeGate(p.aiJudge))
       .flatMap((p) =>
         p.markets
           .filter(
@@ -197,6 +210,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    await hydrateModelWeightsFromDb();
     const body = await request.json().catch(() => ({}));
     const matchIds: string[] | undefined = body.matchIds;
     const date =

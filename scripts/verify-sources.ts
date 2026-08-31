@@ -8,6 +8,10 @@ import {
   valueMarginPercent,
 } from "../lib/value-finder";
 import {
+  MIN_SELECTION_ODDS,
+  MIN_VALUE_MARGIN,
+} from "../lib/poisson";
+import {
   resolveVenueCoords,
   weatherLambdaFactor,
   WEATHER_ADVERSE_LAMBDA,
@@ -46,6 +50,18 @@ assert(Math.abs(valueMarginPercent(0.5, 2.2) - 10) < 1e-9, "Value% = 10");
 assert(isValueBet(0.5, 2.2) === true, "isValueBet at 10%");
 assert(isValueBet(0.5, 2.05) === false, "isValueBet below 5%");
 assert(isValueBet(0.5, 2.1) === true, "2.1/2 → 5% exactly");
+
+// Selection floor + EV gate (poisson isSafePick)
+assert(MIN_SELECTION_ODDS === 1.4, "MIN_SELECTION_ODDS = 1.40");
+assert(MIN_VALUE_MARGIN === 0.03, "MIN_VALUE_MARGIN = 3%");
+assert(
+  isValueBet(0.72, 1.45, MIN_VALUE_MARGIN * 100) === true,
+  "1.45 vs fair ~1.39 passes 3% EV"
+);
+assert(
+  isValueBet(0.72, 1.42, MIN_VALUE_MARGIN * 100) === false,
+  "1.42 vs fair ~1.39 fails 3% EV"
+);
 
 // Underdog sanity
 const underdogMatch = {

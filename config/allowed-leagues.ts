@@ -48,7 +48,7 @@ export const EUROPE_BIG5_LEAGUE_IDS: readonly number[] = [
   135, // Serie A
 ] as const;
 
-/** England / Spain / Italy 1ª + 2ª for elite roster caches. */
+/** England / Spain / Italy / France / Germany 1ª + 2ª for elite roster caches. */
 export const EUROPE_ELIGIBLE_DOMESTIC_LEAGUE_IDS: readonly number[] = [
   39, // Premier League
   40, // Championship
@@ -56,6 +56,10 @@ export const EUROPE_ELIGIBLE_DOMESTIC_LEAGUE_IDS: readonly number[] = [
   141, // LaLiga 2 / Hypermotion
   135, // Serie A
   136, // Serie B
+  61, // Ligue 1
+  62, // Ligue 2
+  78, // Bundesliga
+  79, // 2. Bundesliga
 ] as const;
 
 /** UEFA club competitions that require both sides from EUROPE_BIG5_LEAGUE_IDS. */
@@ -78,7 +82,7 @@ export const SA_NATIONAL_CUP_IDS: ReadonlySet<number> = new Set(
   Object.keys(SA_NATIONAL_CUP_ORIGINS).map(Number)
 );
 
-/** ENG / ESP / ITA national cups — both clubs from that country's 1ª or 2ª. */
+/** ENG / ESP / ITA / FRA / GER national cups — both clubs from that country's 1ª or 2ª. */
 export const EUROPE_NATIONAL_CUP_ORIGINS: Readonly<
   Record<number, readonly number[]>
 > = {
@@ -86,6 +90,8 @@ export const EUROPE_NATIONAL_CUP_ORIGINS: Readonly<
   48: [39, 40], // EFL Cup ← Premier / Championship
   143: [140, 141], // Copa del Rey ← LaLiga / LaLiga 2
   137: [135, 136], // Coppa Italia ← Serie A / Serie B
+  66: [61, 62], // Coupe de France ← Ligue 1 / Ligue 2
+  81: [78, 79], // DFB Pokal ← Bundesliga / 2. Bundesliga
 };
 
 export const EUROPE_NATIONAL_CUP_IDS: ReadonlySet<number> = new Set(
@@ -104,6 +110,19 @@ export const CONMEBOL_ELIGIBLE_ORIGIN_LEAGUE_IDS: readonly number[] = [
   265, // Primera División Chile
   128, // Liga Profesional Argentina
   71, // Brasileirão Serie A
+] as const;
+
+/**
+ * CONCACAF regional cups: both sides from MLS or Liga MX.
+ */
+export const CONCACAF_REGIONAL_COMPETITION_IDS: ReadonlySet<number> = new Set([
+  16, // CONCACAF Champions Cup
+  779, // Leagues Cup
+]);
+
+export const CONCACAF_ELIGIBLE_ORIGIN_LEAGUE_IDS: readonly number[] = [
+  253, // Major League Soccer
+  262, // Liga MX
 ] as const;
 
 /** Domestic top-flight + SA 2nds used for origin/roster caches. */
@@ -140,6 +159,14 @@ export const ALLOWED_LEAGUES: readonly AllowedLeagueEntry[] = [
   { id: 135, name: "Serie A (Italia)", region: "europe-top3-and-2nd" },
   { id: 136, name: "Serie B (Italia)", region: "europe-top3-and-2nd" },
   { id: 137, name: "Coppa Italia", region: "europe-top3-and-2nd" },
+  // France
+  { id: 61, name: "Ligue 1", region: "europe-top3-and-2nd" },
+  { id: 62, name: "Ligue 2", region: "europe-top3-and-2nd" },
+  { id: 66, name: "Coupe de France", region: "europe-top3-and-2nd" },
+  // Germany
+  { id: 78, name: "Bundesliga", region: "europe-top3-and-2nd" },
+  { id: 79, name: "2. Bundesliga", region: "europe-top3-and-2nd" },
+  { id: 81, name: "DFB Pokal", region: "europe-top3-and-2nd" },
 
   // UEFA
   { id: 2, name: "UEFA Champions League", region: "uefa" },
@@ -165,11 +192,9 @@ export const ALLOWED_LEAGUES: readonly AllowedLeagueEntry[] = [
 
   // Mexico
   { id: 262, name: "Liga MX", region: "concacaf" },
-  { id: 263, name: "Copa MX", region: "concacaf" },
   // United States / Canada
   { id: 253, name: "Major League Soccer", region: "concacaf" },
-  { id: 254, name: "US Open Cup", region: "concacaf" },
-  // CONCACAF regional
+  // CONCACAF regional — both clubs from MLS or Liga MX
   { id: 16, name: "CONCACAF Champions Cup", region: "concacaf" },
   { id: 779, name: "Leagues Cup", region: "concacaf" },
 ] as const;
@@ -178,7 +203,7 @@ export const ALLOWED_LEAGUES: readonly AllowedLeagueEntry[] = [
  * Known lower-tier / lookalike IDs for countries already in the whitelist.
  * Denied even if someone later adds them to ALLOWED_LEAGUES by mistake.
  * Allowed 2nds intentionally NOT here: ENG Championship (40), ESP LaLiga 2 (141),
- * ITA Serie B (136), BR Serie B (72), AR Primera Nacional (129), CL Primera B (267).
+ * ITA Serie B (136), FRA Ligue 2 (62), GER 2. Bundesliga (79), BR Serie B (72), AR Primera Nacional (129), CL Primera B (267).
  */
 export const DENIED_LEAGUE_IDS: ReadonlySet<number> = new Set([
   // England lower than Championship
@@ -189,18 +214,12 @@ export const DENIED_LEAGUE_IDS: ReadonlySet<number> = new Set([
   47, // FA Trophy
   // Spain lower than LaLiga 2
   142, // Primera División RFEF
-  // Germany (removed from whitelist)
-  78, // Bundesliga
-  79, // 2. Bundesliga
+  // Germany lower than 2. Bundesliga
   80, // 3. Liga
-  81, // DFB Pokal
   // Italy lower than Serie B
   138, // Serie C
-  // France (removed from whitelist)
-  61, // Ligue 1
-  62, // Ligue 2
+  // France lower than Ligue 2
   63, // National
-  66, // Coupe de France
   // Brazil lower than Serie B
   75, // Serie C
   76, // Serie D
@@ -218,8 +237,10 @@ export const DENIED_LEAGUE_IDS: ReadonlySet<number> = new Set([
   // Chile lower than Primera B
   268, // Segunda División
   // Mexico
+  263, // Copa MX
   264, // Liga de Expansión MX
   // USA
+  254, // US Open Cup
   255, // USL Championship
   257, // USL League One
   // Club friendlies (removed from whitelist)
@@ -262,6 +283,12 @@ const ALLOW_NAME_RULES: readonly NameRule[] = [
   { all: ["serie b", "italia"] },
   { all: ["serie b", "italy"] },
   { all: ["coppa italia"] },
+  { all: ["ligue 1"], none: ["2", "women", "femenin", "senegal", "algeria", "u23"] },
+  { all: ["ligue 2"], none: ["women", "femenin", "senegal", "algeria"] },
+  { all: ["coupe de france"] },
+  { all: ["bundesliga"], none: ["2", "3", "austria", "women", "femenin", "u23"] },
+  { all: ["2 bundesliga"] },
+  { all: ["dfb pokal"] },
   { all: ["champions league"], none: ["youth", "u19", "women", "femenin"] },
   { all: ["europa league"], none: ["conference"] },
   { all: ["conference league"] },
@@ -280,10 +307,7 @@ const ALLOW_NAME_RULES: readonly NameRule[] = [
   { all: ["primera b", "chile"] },
   { all: ["chile primera b"] },
   { all: ["liga mx"], none: ["expansion", "femenil", "women"] },
-  { all: ["copa mx"] },
   { all: ["major league soccer"] },
-  { all: ["us open cup"] },
-  { all: ["u s open cup"] },
   { all: ["concacaf champions"] },
   { all: ["leagues cup"] },
 ];
@@ -306,18 +330,13 @@ const DENIED_NAME_NEEDLES: readonly string[] = [
   "club friendly",
   "serie c",
   "serie d",
-  "ligue 1",
-  "ligue 2",
-  "coupe de france",
-  "2 bundesliga",
-  "bundesliga 2",
-  "bundesliga",
-  "dfb pokal",
   "3 liga",
   "primera b metro",
   "primera b nacional",
   "liga de expansion",
+  "copa mx",
   "usl championship",
+  "us open cup",
   "usl league",
   "mls next",
   "premier league 2",
@@ -419,6 +438,10 @@ export function isEuropeNationalCupId(leagueId: number): boolean {
 
 export function isConmebolCompetitionId(leagueId: number): boolean {
   return CONMEBOL_COMPETITION_IDS.has(leagueId);
+}
+
+export function isConcacafRegionalCompetitionId(leagueId: number): boolean {
+  return CONCACAF_REGIONAL_COMPETITION_IDS.has(leagueId);
 }
 
 export function saCupOriginLeagueIds(

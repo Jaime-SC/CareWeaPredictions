@@ -292,7 +292,12 @@ export function BetHistory({
       totalJugado,
       roi: perf.roi,
       winRate: perf.winRate,
+      won: perf.won,
+      lost: perf.lost,
       settled: perf.settled,
+      totalStaked: perf.totalStaked,
+      totalWonProfit: perf.totalWonProfit,
+      totalLost: perf.totalLost,
       count: filteredBets.length,
     };
   }, [filteredBets]);
@@ -398,12 +403,46 @@ export function BetHistory({
                   : "text-[#ff453a]"
             }
             hint="Net profit / stake liquidado"
+            details={
+              kpis.settled > 0 ? (
+                <div className="space-y-1 text-xs tabular-nums leading-snug">
+                  <p className="text-neutral-400">
+                    Inversión{" "}
+                    <span className="font-medium text-white">
+                      {formatCLP(kpis.totalStaked)}
+                    </span>
+                  </p>
+                  <p>
+                    <span className="font-medium text-[#30d158]">
+                      {formatSignedCLP(kpis.totalWonProfit)} ganancia
+                    </span>
+                    <span className="text-neutral-600"> · </span>
+                    <span className="font-medium text-[#ff453a]">
+                      {formatSignedCLP(-kpis.totalLost)} pérdida
+                    </span>
+                  </p>
+                </div>
+              ) : undefined
+            }
           />
           <KpiBadge
             icon={<Percent className="h-3.5 w-3.5 text-[#30d158]" aria-hidden />}
             label="Win Rate %"
             value={kpis.settled > 0 ? formatPercent(kpis.winRate) : "—"}
             hint="Ganadas / (ganadas + perdidas)"
+            details={
+              kpis.settled > 0 ? (
+                <p className="text-xs tabular-nums leading-snug">
+                  <span className="font-medium text-[#30d158]">
+                    {kpis.won} ganadas
+                  </span>
+                  <span className="text-neutral-600"> · </span>
+                  <span className="font-medium text-[#ff453a]">
+                    {kpis.lost} perdidas
+                  </span>
+                </p>
+              ) : undefined
+            }
           />
         </div>
 
@@ -648,12 +687,14 @@ function KpiBadge({
   value,
   hint,
   valueClass,
+  details,
 }: {
   icon: ReactNode;
   label: string;
   value: string;
   hint: string;
   valueClass?: string;
+  details?: ReactNode;
 }) {
   return (
     <div className="rounded-2xl bg-white/[0.04] px-4 py-3 ring-1 ring-white/8">
@@ -669,7 +710,8 @@ function KpiBadge({
       >
         {value}
       </p>
-      <p className="text-xs leading-snug text-neutral-500">{hint}</p>
+      {details ? <div className="mt-1.5">{details}</div> : null}
+      <p className="mt-1 text-xs leading-snug text-neutral-500">{hint}</p>
     </div>
   );
 }

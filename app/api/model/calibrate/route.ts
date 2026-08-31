@@ -3,15 +3,16 @@ import {
   normalizeTrainingRows,
   recalibrateModel,
 } from "@/lib/auto-tuner";
-import { loadModelWeights } from "@/lib/model-weights";
+import { loadModelWeights, hydrateModelWeightsFromDb } from "@/lib/model-weights";
 import { errorMessage, jsonError } from "@/lib/api-response";
+import { requireMutationAuth } from "@/lib/auth";
 
 /**
  * GET /api/model/calibrate — current calibrated weights snapshot.
  */
 export async function GET() {
   try {
-    const weights = loadModelWeights();
+    const weights = await hydrateModelWeightsFromDb();
     return NextResponse.json({
       success: true,
       autoCalibration: true,
@@ -35,7 +36,11 @@ export async function GET() {
  * Force-recalibrate from SQLite (+ optional exported featureVectors in body).
  */
 export async function POST(request: NextRequest) {
+  const denied = requireMutationAuth(request);
+  if (denied) return denied;
+
   try {
+    await hydrateModelWeightsFromDb();
     const body = await request.json().catch(() => ({}));
     const extraRows = normalizeTrainingRows(
       body?.featureVectors ?? body?.rows ?? body?.trainingExport ?? []

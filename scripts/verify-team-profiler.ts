@@ -210,7 +210,7 @@ const expectedOver = clampHistoricalBoost(
   base.over_1_5 * TEAM_PROFILE_RULES.RELATIVE_BOOST
 );
 assert(
-  Math.abs(overBoost.probs.over_1_5 - expectedOver) < 1e-9,
+  Math.abs((overBoost.probs.over_1_5 ?? 0) - expectedOver) < 1e-9,
   "over15 bounded boost"
 );
 assert(overBoost.flags.includes("TEAM_PROFILE_OVER15"), "over15 flag");
@@ -225,7 +225,7 @@ const expected1x = clampHistoricalBoost(
   base["1x"],
   base["1x"] * TEAM_PROFILE_RULES.RELATIVE_BOOST
 );
-assert(Math.abs(csBoost.probs["1x"] - expected1x) < 1e-9, "1x home CS boost");
+assert(Math.abs((csBoost.probs["1x"] ?? 0) - expected1x) < 1e-9, "1x home CS boost");
 assert(csBoost.flags.includes("TEAM_PROFILE_HOME_CS"), "home CS flag");
 
 const awayBoost = applyTeamProfileCalibration(base, null, awayWall);
@@ -233,7 +233,7 @@ const expectedX2 = clampHistoricalBoost(
   base.x2,
   base.x2 * TEAM_PROFILE_RULES.RELATIVE_BOOST
 );
-assert(Math.abs(awayBoost.probs.x2 - expectedX2) < 1e-9, "x2 away CS boost");
+assert(Math.abs((awayBoost.probs.x2 ?? 0) - expectedX2) < 1e-9, "x2 away CS boost");
 assert(awayBoost.flags.includes("TEAM_PROFILE_AWAY_CS"), "away CS flag");
 
 const managerBlock = applyTeamProfileCalibration(base, recentDt, null, now);

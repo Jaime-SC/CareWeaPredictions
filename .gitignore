@@ -63,3 +63,6 @@ next-env.d.ts
 # local agent helpers (Next regenerates AGENTS.md; Claude uses CLAUDE.md)
 AGENTS.md
 CLAUDE.md
+
+# internal audit / planning artifacts (not for public repo)
+CAREWEAPREDICTIONS_*.md

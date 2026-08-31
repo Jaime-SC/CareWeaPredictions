@@ -21,7 +21,10 @@ import {
 import {
   predictMatchMarkets,
   hasBookmakerOdds,
+  MIN_SELECTION_ODDS,
+  MIN_VALUE_MARGIN,
 } from "./poisson";
+import { isValueBet } from "./value-finder";
 import {
   derbyPreferredMarkets,
   isHighRiskDerby,
@@ -49,6 +52,7 @@ import {
   bothTeamsInRoster,
   isAllowedCompetition,
   isConmebolCompetitionId,
+  isConcacafRegionalCompetitionId,
   isEuropeNationalCupId,
   isSaNationalCupId,
   isUefaCompetitionId,
@@ -56,6 +60,7 @@ import {
 } from "../config/allowed-leagues";
 import {
   peekConmebolEligibleTeamIds,
+  peekConcacafEligibleTeamIds,
   peekEuropeBig5TeamIds,
   peekEuropeCupOriginRosters,
   peekSaCupOriginRosters,
@@ -97,6 +102,7 @@ export function filterEliteWhitelistMatches(matches: Match[]): Match[] {
   const europeCups = peekEuropeCupOriginRosters();
   const saOrigins = peekSaCupOriginRosters();
   const conmebol = peekConmebolEligibleTeamIds();
+  const concacaf = peekConcacafEligibleTeamIds();
   return matches.filter((m) => {
     if (!isAllowedCompetition(m.leagueId, m.leagueName)) return false;
     const id = parseLeagueId(m.leagueId);
@@ -114,6 +120,8 @@ export function filterEliteWhitelistMatches(matches: Match[]): Match[] {
     if (isUefaCompetitionId(id)) return originOk(big5);
 
     if (isConmebolCompetitionId(id)) return originOk(conmebol);
+
+    if (isConcacafRegionalCompetitionId(id)) return originOk(concacaf);
 
     if (isEuropeNationalCupId(id)) {
       if (!europeCups || europeCups.size === 0) return true;
@@ -136,6 +144,8 @@ const FUN_MARKETS = ALL_PARLAY_MARKETS;
 /** Hard floor: every accumulator leg must be ≥ 80% model probability. */
 export const MIN_LEG_PROBABILITY = 0.8;
 
+export { MIN_SELECTION_ODDS };
+
 /** Fallback strict gate when weights file is missing. */
 export const STRICT_MIN_PROBABILITY = MIN_LEG_PROBABILITY;
 
@@ -145,8 +155,8 @@ const FUN_BACKFILL_MIN_PROBABILITY = MIN_LEG_PROBABILITY;
 /** Floor used when backfilling safe / calibrated tickets. */
 const BACKFILL_MIN_PROBABILITY = MIN_LEG_PROBABILITY;
 
-/** Ideal per-leg odds so ~1.22^15 ≈ 21x (band 1.18–1.28 → ~20x–35x). */
-const FUN_TARGET_LEG_ODDS = 1.22;
+/** Ideal per-leg odds so ~1.62^15 ≈ 130x (band 1.40–1.85 → ~150x–500x). */
+const FUN_TARGET_LEG_ODDS = 1.625;
 
 /** Default exact leg count for fun / accumulator tickets. */
 export const DEFAULT_TARGET_LEG_COUNT = 15;
@@ -324,6 +334,7 @@ export function collectSafePicks(
       resolved.leagueId
     );
     const leagueMinOdds = Math.max(
+      MIN_SELECTION_ODDS,
       config.minOdds,
       leagueCfg.minOdds || config.minOdds
     );
@@ -337,7 +348,12 @@ export function collectSafePicks(
     let loggedSanityDrop = false;
     const eligible = markets.filter((m) => {
       if (!isMarketAllowed(m.market, strategyMode, resolved)) return false;
-      if (!(m.odds > 1)) return false;
+      if (m.odds < MIN_SELECTION_ODDS) return false;
+      if (
+        !isValueBet(m.modelProbability, m.odds, MIN_VALUE_MARGIN * 100)
+      ) {
+        return false;
+      }
       const minProb = Math.max(
         MIN_LEG_PROBABILITY,
         resolveContextMinProbability(
@@ -681,7 +697,7 @@ export function generateParlay(
   return withFillNotice(best, targetLegCount, bestBackfillMeta);
 }
 
-/** Last pass: Gemini Search audit after Poisson + odds sanity. */
+/** Last pass: Groq Llama 3.3 70B audit after Poisson + odds sanity. */
 export async function generateParlayAudited(
   matches: Match[],
   config: ParlayConfig
@@ -845,7 +861,7 @@ function withFillNotice(
 }
 
 /**
- * Notice when a locked single day cannot supply 15 legs / ~20x–35x.
+ * Notice when a locked single day cannot supply 15 legs / ~150x–500x.
  */
 export function singleDayShortfallNotice(
   legCount: number,
@@ -855,7 +871,7 @@ export function singleDayShortfallNotice(
 ): string | undefined {
   if (!singleDayLocked) return undefined;
   if (legCount >= targetLegCount) return undefined;
-  return `Se incluyeron los ${legCount} partidos disponibles para hoy (${matchPoolSize} fixtures con cuotas). Para alcanzar ${targetLegCount} legs con piso 80% / cuota ~20x–35x, selecciona una fecha con más jornada elite o activa el rango de varios días.`;
+  return `Se incluyeron los ${legCount} partidos disponibles para hoy (${matchPoolSize} fixtures con cuotas). Para alcanzar ${targetLegCount} legs con piso 80% / cuotas 1.40–1.85 / EV ≥ 3%, selecciona una fecha con más jornada elite o activa el rango de varios días.`;
 }
 
 function emptyParlay(
@@ -965,7 +981,7 @@ function buildClosestToTarget(
 ): GeneratedParlay {
   const strategyMode = resolveMode(config);
   const enforceDiversity = isFunStrategy(strategyMode);
-  // Fun: prefer odds near ~1.22 to land total ~20x–35x
+  // Fun: prefer odds near ~1.62 to land total ~150x–500x
   const ordered = isFunStrategy(strategyMode)
     ? [...pool].sort(
         (a, b) =>
@@ -1031,8 +1047,8 @@ export function buildMatchPredictions(
             options?.minSafeProbability ?? 0.85,
             match
           ),
-          minSafeOdds: options?.minSafeOdds ?? 1.15,
-          maxSafeOdds: options?.maxSafeOdds ?? 1.4,
+          minSafeOdds: options?.minSafeOdds ?? MIN_SELECTION_ODDS,
+          maxSafeOdds: options?.maxSafeOdds ?? 1.85,
         });
 
       const markets = options?.safeMarketsOnly

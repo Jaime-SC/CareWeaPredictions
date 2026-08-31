@@ -28,19 +28,21 @@ assert(Math.abs(total - 1) < 1e-9, "score matrix normalized");
 
 const match: Match = {
   id: "poisson-1",
-  league: "epl",
+  league: "premier-league",
   leagueName: "Premier League",
   kickoff: "2026-08-20T19:00:00.000Z",
   home: {
-    id: "h",
+    id: 1,
     name: "Home",
+    shortName: "HOM",
     form: ["W", "W", "D"],
     goalsScoredAvg: 1.6,
     goalsConcededAvg: 0.9,
   },
   away: {
-    id: "a",
+    id: 2,
     name: "Away",
+    shortName: "AWY",
     form: ["L", "D", "W"],
     goalsScoredAvg: 1.1,
     goalsConcededAvg: 1.3,

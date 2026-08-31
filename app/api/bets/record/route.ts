@@ -5,6 +5,7 @@ import {
   type RecordBetInput,
 } from "@/lib/bet-db";
 import { errorMessage, jsonError } from "@/lib/api-response";
+import { requireMutationAuth } from "@/lib/auth";
 import type { HistoryBet } from "@/lib/history-tracker";
 import type { StrategyMode } from "@/lib/types";
 
@@ -55,6 +56,9 @@ function parseSingleBody(
  * Also accepts `{ tickets: HistoryBet[] }` to sync localStorage leftovers.
  */
 export async function POST(request: NextRequest) {
+  const denied = requireMutationAuth(request);
+  if (denied) return denied;
+
   try {
     const body = (await request.json().catch(() => null)) as
       | (Partial<RecordBetInput> & { tickets?: unknown; parlay?: unknown })

@@ -33,13 +33,10 @@ import {
   marketGroupLabel,
   deleteBetById,
   formatSignedCLP,
-  mergeLocalWithDbTickets,
-  unsyncedLocalBets,
   loadBets,
   replaceBets,
 } from "@/lib/history-tracker";
-import { syncHistoryBetsToDb } from "@/lib/bet-record-client";
-import { updatePendingBets } from "@/lib/result-checker";
+import { computePerformanceMetrics } from "@/lib/stats";
 import { refundBankroll } from "@/lib/bankroll-store";
 import { cn, chileDateString, formatPercent } from "@/lib/utils";
 import {
@@ -124,10 +121,19 @@ function summaryFromApi(
   if (!api) return computeSummary(bets);
   const settled = api.settledTickets ?? api.won + api.lost;
   const byStrategy = countSettledByStrategy(bets);
+  const perf = computePerformanceMetrics(
+    bets.map((bet) => ({
+      status: bet.status,
+      stake: bet.stakeCLP,
+      payout: bet.potentialReturn,
+    }))
+  );
   return {
     netProfit: api.netProfit,
     totalStaked: api.totalStaked,
     totalReturned: 0,
+    totalWonProfit: perf.totalWonProfit,
+    totalLost: perf.totalLost,
     roi: api.roi,
     winRate: settled > 0 ? api.won / settled : 0,
     legAccuracy: api.legAccuracy,
@@ -164,8 +170,6 @@ export default function StatsPage() {
   );
 
   const refreshFromDb = useCallback(async (): Promise<StatsApiPayload | null> => {
-    const local = loadBets();
-
     const refreshCalibration = async () => {
       try {
         const calRes = await fetch("/api/model/calibrate", {
@@ -179,88 +183,32 @@ export default function StatsPage() {
       }
     };
 
-    const applyLocalFallback = async () => {
-      setBets(local);
-      setByLeague([]);
-      setByDateMarket([]);
-      setTrainingExport([]);
-      setReadiness(null);
-      setApiSummary(undefined);
-      setHydrated(true);
-      await refreshCalibration();
-    };
-
     try {
       const res = await fetch("/api/stats/summary", { cache: "no-store" });
       const data = (await res.json()) as StatsApiPayload;
       if (res.ok && data.success) {
         const tickets = data.tickets ?? [];
-        const pendingSync = unsyncedLocalBets(local, tickets);
-        if (pendingSync.length > 0) {
-          const synced = await syncHistoryBetsToDb(pendingSync);
-          const saved =
-            synced.saved ??
-            synced.results?.filter((row) => row.ok).length ??
-            0;
-          if (saved > 0) {
-            const again = await fetch("/api/stats/summary", {
-              cache: "no-store",
-            });
-            const next = (await again.json()) as StatsApiPayload;
-            if (again.ok && next.success) {
-              const nextTickets = next.tickets ?? [];
-              const leftover = mergeLocalWithDbTickets(
-                loadBets(),
-                nextTickets
-              );
-              setBets(leftover);
-              replaceBets(
-                unsyncedLocalBets(loadBets(), nextTickets).length === 0
-                  ? nextTickets
-                  : leftover
-              );
-              setByLeague(next.byLeague ?? []);
-              setByDateMarket(next.byDateMarket ?? []);
-              setTrainingExport(next.trainingExport ?? []);
-              setReadiness(next.readiness ?? null);
-              setApiSummary(next.summary);
-              setHydrated(true);
-              setUpdateMsg(
-                `${saved} ticket${saved === 1 ? "" : "s"} del historial local guardado${saved === 1 ? "" : "s"} en Neon.`
-              );
-              await refreshCalibration();
-              return next;
-            }
-          }
-          if (!synced.success) {
-            setUpdateError(
-              synced.error ??
-                "Hay tickets locales que aún no están en Neon. Reintenta sincronizar."
-            );
-          }
-        }
-
-        const merged = mergeLocalWithDbTickets(loadBets(), tickets);
-        setBets(tickets.length > 0 ? merged : local);
-        if (tickets.length > 0 && pendingSync.length === 0) {
-          replaceBets(tickets);
-        } else {
-          replaceBets(merged);
-        }
+        setBets(tickets);
+        replaceBets(tickets);
         setByLeague(data.byLeague ?? []);
         setByDateMarket(data.byDateMarket ?? []);
         setTrainingExport(data.trainingExport ?? []);
         setReadiness(data.readiness ?? null);
         setApiSummary(data.summary);
         setHydrated(true);
+        setUpdateError(null);
         await refreshCalibration();
         return data;
       }
+      setUpdateError(
+        data.error ?? "No se pudo cargar el historial desde Neon."
+      );
     } catch {
-      // fall through to local
+      setUpdateError("Error de red al cargar estadísticas desde Neon.");
     }
 
-    await applyLocalFallback();
+    setHydrated(true);
+    await refreshCalibration();
     return null;
   }, []);
 
@@ -351,6 +299,11 @@ export default function StatsPage() {
   );
 
   useEffect(() => {
+    const optimistic = loadBets();
+    if (optimistic.length > 0) setBets(optimistic);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       setUpdating(true);
@@ -417,38 +370,15 @@ export default function StatsPage() {
     setUpdateError(null);
 
     const settle = await runSettle();
-    if (!settle?.success) {
-      const alreadyHitLiveApi =
-        (settle?.checkedFixtures ?? 0) > 0 ||
-        (settle?.diagnostics?.length ?? 0) > 0;
-      if (!alreadyHitLiveApi) {
-        const fallback = await updatePendingBets();
-        if (fallback.ok && fallback.updatedTickets > 0) {
-          setBets(fallback.bets);
-          replaceBets(fallback.bets);
-          setUpdateMsg(
-            `Sincronización completada: ${fallback.updatedTickets} boletos actualizados.`
-          );
-          await refreshFromDb();
-          setUpdating(false);
-          return;
-        }
-      }
-      applySettleFeedback(settle);
-      await refreshFromDb();
-      setUpdating(false);
-      return;
-    }
-
-    await refreshFromDb();
     applySettleFeedback(settle);
+    await refreshFromDb();
     setUpdating(false);
   }
 
   async function handleClear() {
     if (
       !window.confirm(
-        "¿Limpiar todo el historial (base de datos + local)? Esta acción no se puede deshacer."
+        "¿Limpiar todo el historial en Neon? Esta acción no se puede deshacer."
       )
     ) {
       return;
@@ -487,9 +417,7 @@ export default function StatsPage() {
 
     // Smooth exit, then drop from state so KPIs recompute immediately
     window.setTimeout(async () => {
-      const removed =
-        bets.find((b) => b.id === betId) ??
-        loadBets().find((b) => b.id === betId);
+      const removed = bets.find((b) => b.id === betId);
       deleteBetById(betId);
       if (
         removed &&

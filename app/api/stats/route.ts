@@ -6,6 +6,7 @@ import {
 } from "@/lib/bet-db";
 import { buildReadinessReport } from "@/lib/readiness";
 import { errorMessage, jsonError } from "@/lib/api-response";
+import { requireMutationAuth } from "@/lib/auth";
 
 /** Uncached — stats must reflect latest settlement outcomes. */
 export const dynamic = "force-dynamic";
@@ -35,6 +36,9 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
+  const denied = requireMutationAuth(request);
+  if (denied) return denied;
+
   try {
     const body = await request.json().catch(() => ({}));
 

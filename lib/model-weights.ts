@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "fs";
 import path from "path";
+import { prisma } from "./db";
 import type { MarketType } from "./types";
 
 /** Hard clamps for calibrated league parameters. */
@@ -112,9 +113,11 @@ export const DEFAULT_MODEL_WEIGHTS: ModelWeights = {
 };
 
 const WEIGHTS_RELATIVE = path.join("config", "model-weights.json");
+const WEIGHTS_ROW_ID = "default";
 
 let cached: ModelWeights | null = null;
 let cachedMtimeMs = 0;
+let dbHydrated = false;
 
 export function getModelWeightsPath(): string {
   return path.join(process.cwd(), WEIGHTS_RELATIVE);
@@ -261,59 +264,109 @@ function normalizeWeights(raw: Partial<ModelWeights> | null): ModelWeights {
   };
 }
 
-/** Load calibrated weights from disk (cached; refreshes on file mtime change). */
-export function loadModelWeights(): ModelWeights {
+function loadWeightsFromFileSync(): ModelWeights {
   const filePath = getModelWeightsPath();
-
   try {
     if (!existsSync(filePath)) {
-      cached = structuredClone(DEFAULT_MODEL_WEIGHTS);
-      return cached;
+      return structuredClone(DEFAULT_MODEL_WEIGHTS);
     }
-
     const stat = statSync(filePath);
-    if (cached && stat.mtimeMs === cachedMtimeMs) {
-      return cached;
-    }
-
     const parsed = JSON.parse(
       readFileSync(filePath, "utf8")
     ) as Partial<ModelWeights>;
-    cached = normalizeWeights(parsed);
     cachedMtimeMs = stat.mtimeMs;
-    return cached;
+    return normalizeWeights(parsed);
   } catch (err) {
-    console.warn("[model-weights] Failed to load, using defaults:", err);
-    cached = structuredClone(DEFAULT_MODEL_WEIGHTS);
-    return cached;
+    console.warn("[model-weights] file load failed, using defaults:", err);
+    return structuredClone(DEFAULT_MODEL_WEIGHTS);
   }
 }
 
-/** Persist weights and invalidate in-memory cache. */
-export function saveModelWeights(weights: ModelWeights): void {
-  const filePath = getModelWeightsPath();
-  const dir = path.dirname(filePath);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
+async function persistWeightsToDb(weights: ModelWeights): Promise<void> {
+  const payload = normalizeWeights(weights);
+  await prisma.modelWeightsConfig.upsert({
+    where: { id: WEIGHTS_ROW_ID },
+    create: { id: WEIGHTS_ROW_ID, weights: payload as object },
+    update: { weights: payload as object },
+  });
+}
+
+async function seedDbFromFileIfEmpty(weights: ModelWeights): Promise<void> {
+  try {
+    const existing = await prisma.modelWeightsConfig.findUnique({
+      where: { id: WEIGHTS_ROW_ID },
+    });
+    if (!existing) {
+      await persistWeightsToDb(weights);
+    }
+  } catch (err) {
+    console.warn("[model-weights] DB seed skipped:", err);
+  }
+}
+
+/** Load from Neon (primary); seeds DB from config/model-weights.json when empty. */
+export async function hydrateModelWeightsFromDb(): Promise<ModelWeights> {
+  if (cached && dbHydrated) return cached;
+  try {
+    const row = await prisma.modelWeightsConfig.findUnique({
+      where: { id: WEIGHTS_ROW_ID },
+    });
+    if (row?.weights && typeof row.weights === "object") {
+      cached = normalizeWeights(row.weights as Partial<ModelWeights>);
+      dbHydrated = true;
+      return cached;
+    }
+  } catch (err) {
+    console.warn("[model-weights] DB read failed, falling back to file:", err);
   }
 
-  const payload: ModelWeights = normalizeWeights(weights);
-  writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  const fromFile = loadWeightsFromFileSync();
+  cached = fromFile;
+  dbHydrated = true;
+  await seedDbFromFileIfEmpty(fromFile);
+  return cached;
+}
+
+/** Load calibrated weights (sync cache → file seed → defaults). Call hydrateModelWeightsFromDb() in API handlers. */
+export function loadModelWeights(): ModelWeights {
+  if (cached) return cached;
+  cached = loadWeightsFromFileSync();
+  return cached;
+}
+
+/** Persist weights to Neon; config/model-weights.json is best-effort local mirror. */
+export async function saveModelWeights(weights: ModelWeights): Promise<void> {
+  const payload = normalizeWeights(weights);
   cached = payload;
+  dbHydrated = true;
+
   try {
+    await persistWeightsToDb(payload);
+  } catch (err) {
+    console.warn("[model-weights] DB write failed:", err);
+  }
+
+  const filePath = getModelWeightsPath();
+  try {
+    const dir = path.dirname(filePath);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
     cachedMtimeMs = statSync(filePath).mtimeMs;
   } catch {
-    cachedMtimeMs = Date.now();
+    // read-only serverless — Neon is source of truth
   }
 }
 
 export function invalidateModelWeightsCache(): void {
   cached = null;
   cachedMtimeMs = 0;
+  dbHydrated = false;
 }
 
-/** Emergency wipe: restore factory-neutral weights on disk. */
-export function resetModelWeights(): ModelWeights {
+/** Emergency wipe: restore factory-neutral weights in Neon (+ file when writable). */
+export async function resetModelWeights(): Promise<ModelWeights> {
   const config = structuredClone(DEFAULT_MODEL_WEIGHTS);
   config.calibratedAt = new Date().toISOString();
   config.summary = {
@@ -322,12 +375,13 @@ export function resetModelWeights(): ModelWeights {
     message: "Pesos restaurados a valores de fábrica.",
   };
   try {
-    saveModelWeights(config);
+    await saveModelWeights(config);
     return loadModelWeights();
   } catch (err) {
     console.warn("[model-weights] reset write failed; in-memory defaults:", err);
     cached = config;
     cachedMtimeMs = 0;
+    dbHydrated = true;
     return config;
   }
 }

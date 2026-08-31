@@ -52,9 +52,15 @@ export type BacktestSummary = {
   winRate: number;
   roi: number;
   threshold: number;
+  minOdds: number;
+  maxOdds: number;
   market: BacktestMarket;
   byMarket: Record<string, { nBets: number; wins: number }>;
+  minOddsFallbackApplied?: boolean;
 };
+
+/** When strict 1X2 band yields zero bets, relax floor to this value. */
+export const BACKTEST_FALLBACK_MIN_ODDS = 1.2;
 
 type FdApiMatch = {
   id?: number;
@@ -375,18 +381,32 @@ function estimateLambdas(
 
 function dnbOddsFrom1x2(
   homeOdds?: number,
+  drawOdds?: number,
   awayOdds?: number
 ): { dnbHome?: number; dnbAway?: number } {
-  if (!(homeOdds && homeOdds > 1 && awayOdds && awayOdds > 1)) return {};
-  const pH = 1 / homeOdds;
-  const pA = 1 / awayOdds;
-  const denom = pH + pA;
-  if (!(denom > 0)) return {};
+  if (!(homeOdds && homeOdds > 1 && drawOdds && drawOdds > 1 && awayOdds && awayOdds > 1)) {
+    return {};
+  }
   return {
-    dnbHome: Number((1 / (pH / denom)).toFixed(3)),
-    dnbAway: Number((1 / (pA / denom)).toFixed(3)),
+    dnbHome: Number((homeOdds * (1 - 1 / drawOdds)).toFixed(3)),
+    dnbAway: Number((awayOdds * (1 - 1 / drawOdds)).toFixed(3)),
   };
 }
+
+/** Implied Double Chance odds from closing 1X2 (no margin). */
+export function doubleChanceOddsFrom1x2(
+  homeOdds: number,
+  drawOdds: number,
+  awayOdds: number
+): { dc1X?: number; dcX2?: number } {
+  if (!(homeOdds > 1 && drawOdds > 1 && awayOdds > 1)) return {};
+  return {
+    dc1X: Number((1 / (1 / homeOdds + 1 / drawOdds)).toFixed(3)),
+    dcX2: Number((1 / (1 / awayOdds + 1 / drawOdds)).toFixed(3)),
+  };
+}
+
+export { dnbOddsFrom1x2 };
 
 type Candidate = {
   market: string;
@@ -411,7 +431,11 @@ function candidatesForMatch(
   const hg = m.homeGoals!;
   const ag = m.awayGoals!;
   const total = hg + ag;
-  const dnbBook = dnbOddsFrom1x2(m.odds?.home, m.odds?.away);
+  const dnbBook = dnbOddsFrom1x2(m.odds?.home, m.odds?.draw, m.odds?.away);
+  const dcBook =
+    m.odds?.home && m.odds?.draw && m.odds?.away
+      ? doubleChanceOddsFrom1x2(m.odds.home, m.odds.draw, m.odds.away)
+      : {};
 
   const want1x2 = market === "ALL" || market === "1X2";
   const wantOu = market === "ALL" || market === "OVER_UNDER_2_5";
@@ -482,6 +506,25 @@ function candidatesForMatch(
     }
   }
 
+  if (market === "ALL") {
+    if (dcBook.dc1X && dcBook.dc1X > 1) {
+      out.push({
+        market: "1x",
+        modelP: model.home + model.draw,
+        odds: dcBook.dc1X,
+        won: hg >= ag,
+      });
+    }
+    if (dcBook.dcX2 && dcBook.dcX2 > 1) {
+      out.push({
+        market: "x2",
+        modelP: model.draw + model.away,
+        odds: dcBook.dcX2,
+        won: hg <= ag,
+      });
+    }
+  }
+
   return out;
 }
 
@@ -490,11 +533,18 @@ function candidatesForMatch(
  * Places unit bets when ValueMarginPercent >= threshold.
  * DNB draws return stake (void).
  */
-export function runPaperBacktest(
+function runPaperBacktestInner(
   matches: FdMatchResult[],
-  options: { threshold?: number; market?: BacktestMarket } = {}
+  options: {
+    threshold?: number;
+    market?: BacktestMarket;
+    minOdds?: number;
+    maxOdds?: number;
+  } = {}
 ): BacktestSummary {
-  const threshold = options.threshold ?? 2;
+  const threshold = options.threshold ?? 3;
+  const minOdds = options.minOdds ?? 1.4;
+  const maxOdds = options.maxOdds ?? 1.85;
   const market = options.market ?? "ALL";
   const { byTeam, leagueHomeAvg, leagueAwayAvg } = buildTeamAggs(matches);
 
@@ -524,6 +574,7 @@ export function runPaperBacktest(
     const isDraw = m.homeGoals === m.awayGoals;
 
     for (const c of candidatesForMatch(m, model, market)) {
+      if (c.odds < minOdds || c.odds > maxOdds) continue;
       if (valueMarginPercent(c.modelP, c.odds) < threshold) continue;
 
       nBets += 1;
@@ -555,9 +606,43 @@ export function runPaperBacktest(
     winRate: nBets > 0 ? Number(((wins / nBets) * 100).toFixed(2)) : 0,
     roi: Number((roi * 100).toFixed(2)),
     threshold,
+    minOdds,
+    maxOdds,
     market,
     byMarket,
   };
+}
+
+export function runPaperBacktest(
+  matches: FdMatchResult[],
+  options: {
+    threshold?: number;
+    market?: BacktestMarket;
+    minOdds?: number;
+    maxOdds?: number;
+    autoMinOddsFallback?: boolean;
+  } = {}
+): BacktestSummary {
+  const market = options.market ?? "ALL";
+  const summary = runPaperBacktestInner(matches, options);
+
+  if (
+    options.autoMinOddsFallback !== false &&
+    summary.nBets === 0 &&
+    market === "1X2"
+  ) {
+    const fallback = runPaperBacktestInner(matches, {
+      ...options,
+      minOdds: BACKTEST_FALLBACK_MIN_ODDS,
+    });
+    return {
+      ...fallback,
+      minOdds: BACKTEST_FALLBACK_MIN_ODDS,
+      minOddsFallbackApplied: true,
+    };
+  }
+
+  return { ...summary, minOddsFallbackApplied: false };
 }
 
 export function parseBacktestMarket(raw: string | null): BacktestMarket {

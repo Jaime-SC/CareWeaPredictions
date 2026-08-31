@@ -26,6 +26,7 @@ import {
   loadStoredDashboard,
   saveStoredDashboard,
 } from "@/lib/dashboard-storage";
+import { passesAiJudgeGate } from "@/lib/ai-judge-gate";
 import { mergePersistedAiJudge } from "@/lib/ai-judge-persist";
 import type { MatchPrediction } from "@/lib/types";
 import {
@@ -168,6 +169,7 @@ export default function DashboardPage() {
   const safePicks = useMemo(
     () =>
       predictions
+        .filter((p) => passesAiJudgeGate(p.aiJudge))
         .flatMap((p) =>
           p.markets
             .filter((m) => m.isSafePick)
@@ -223,7 +225,7 @@ export default function DashboardPage() {
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-neutral-400">
             Probabilidades Poisson + Dixon-Coles sobre fixtures reales de
-            API-Football. Filtro: modelo ≥ 80% y cuotas entre 1.15–1.35.
+            API-Football. Filtro: modelo ≥ 80%, cuotas 1.40–1.85 y EV ≥ 3%.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

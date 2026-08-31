@@ -27,6 +27,7 @@ import {
 import { getJugaBetLabel } from "./jugabet-labels";
 import {
   applyTeamProfileCalibration,
+  clampHistoricalBoost,
   keyAbsenceLambdaFactorForSide,
   peekTeamProfile,
 } from "./team-profiler";
@@ -37,6 +38,16 @@ import { applyStandingsAwayPenalty } from "./standings";
 
 const FATIGUE_XG_FACTOR = 0.9;
 const MAX_GOALS = 8;
+
+/** Hard floor: reject low-yield book lines (e.g. 1.15–1.35). */
+export const MIN_SELECTION_ODDS = 1.4;
+
+/** Minimum positive EV: valueMargin = (bookOdds / fairOdds) − 1. */
+export const MIN_VALUE_MARGIN = 0.03;
+/** Final model probability ceiling (matches TeamProfile historical clamp). */
+const MODEL_PROB_CEILING = 0.92;
+/** Max relative lift from base Poisson before profile/historical calibration. */
+const HISTORICAL_REL_BOOST_CAP = 0.08;
 /** Combined league × market × team Brier multiplier bounds. */
 const BRIER_COMBINED_MIN = 0.82;
 const BRIER_COMBINED_MAX = 1.12;
@@ -540,10 +551,11 @@ export function predictMatchMarkets(
   );
   const baseMinProb = options?.minSafeProbability ?? 0.8;
   const minOdds = Math.max(
+    MIN_SELECTION_ODDS,
     options?.minSafeOdds ?? weights.global.defaultMinOdds,
     leagueCfg.minOdds || weights.global.defaultMinOdds
   );
-  const maxOdds = options?.maxSafeOdds ?? 1.28;
+  const maxOdds = options?.maxSafeOdds ?? 1.85;
 
   const xg = estimateExpectedGoals(match);
   const matrix = buildScoreMatrix(xg.home, xg.away);
@@ -560,8 +572,17 @@ export function predictMatchMarkets(
     peekTeamProfile(match.home.id),
     peekTeamProfile(match.away.id)
   );
+  const profileProbs = { ...baseProbs, ...profileCal.probs };
+  if (profileCal.flags.length > 0) {
+    for (const market of Object.keys(baseProbs) as MarketType[]) {
+      profileProbs[market] = clampHistoricalBoost(
+        knockoutProbs[market] ?? baseProbs[market],
+        profileProbs[market] ?? 0
+      );
+    }
+  }
   const standingsCal = applyStandingsAwayPenalty(
-    profileCal.probs,
+    profileProbs,
     match.standings
   );
   const probs = standingsCal.probs;
@@ -606,14 +627,21 @@ export function predictMatchMarkets(
     Object.keys(probs) as MarketType[]
   ).map((market) => {
     const rawProb = probs[market];
+    const poissonBase = baseProbs[market] ?? rawProb;
     const tunedProb = applyTuningToProbability(rawProb, resolved, market);
     const mktCfg = getMarketWeight(market, weights);
     const brierMul = clampBrierCombined(
       leagueBrier * (mktCfg.brierCalibrationFactor ?? 1) * teamBrier
     );
+    const scaled = tunedProb * leagueCfg.probabilityScale * brierMul;
+    const histCap = Math.min(
+      MODEL_PROB_CEILING,
+      poissonBase * (1 + HISTORICAL_REL_BOOST_CAP)
+    );
     const modelProbability = Math.min(
-      0.99,
-      Math.max(0, tunedProb * leagueCfg.probabilityScale * brierMul)
+      MODEL_PROB_CEILING,
+      histCap,
+      Math.max(0, scaled)
     );
     const odds = usedFairOdds
       ? fairDecimalOdds(modelProbability, 1)
@@ -651,12 +679,16 @@ export function predictMatchMarkets(
       impliedProbability: implied,
       edge,
       valueMarginPercent: Number(valuePct.toFixed(2)),
-      isValueBet: usedFairOdds ? false : isValueBet(modelProbability, odds),
+      isValueBet: usedFairOdds
+        ? false
+        : isValueBet(modelProbability, odds, MIN_VALUE_MARGIN * 100),
       isSafePick:
         !mktCfg.disabled &&
         !blockedByDerby &&
         !sanity.fail &&
-        odds > 1 &&
+        odds >= MIN_SELECTION_ODDS &&
+        (usedFairOdds ||
+          isValueBet(modelProbability, odds, MIN_VALUE_MARGIN * 100)) &&
         modelProbability >= effectiveMin &&
         odds >= minOdds &&
         odds <= maxOdds,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { errorMessage, jsonError } from "@/lib/api-response";
+import { requireMutationAuth } from "@/lib/auth";
 import {
   adjustBankrollTotal,
   debitBankrollTotal,
@@ -47,6 +48,9 @@ export async function GET() {
  * PUT /api/bankroll — replace full settings.
  */
 export async function PUT(request: NextRequest) {
+  const denied = requireMutationAuth(request);
+  if (denied) return denied;
+
   try {
     const body = await request.json().catch(() => null);
     if (!body || typeof body !== "object") {
@@ -73,6 +77,9 @@ type PatchBody =
  * PATCH /api/bankroll — atomic set / adjust / debit / refund / patch.
  */
 export async function PATCH(request: NextRequest) {
+  const denied = requireMutationAuth(request);
+  if (denied) return denied;
+
   try {
     const body = (await request.json().catch(() => null)) as PatchBody | null;
     if (!body || typeof body !== "object" || !("op" in body)) {

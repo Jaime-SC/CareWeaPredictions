@@ -14,6 +14,7 @@ import {
   resolveGroqModelOrder,
   splitMatchLabel,
 } from "../lib/ai-judge";
+import { passesAiJudgeGate } from "../lib/ai-judge-gate";
 import {
   resolveGroqDailyLimit,
   resolveGroqSoftCallLimit,
@@ -73,7 +74,24 @@ function stubPrediction(
         goalsConcededAvg: 1.5,
       },
       h2h: { homeWins: 1, draws: 1, awayWins: 1, avgGoals: 2.2 },
-      odds: { home: 1.8, draw: 3.4, away: 4.2 },
+      odds: {
+        home: 1.8,
+        draw: 3.4,
+        away: 4.2,
+        doubleChance1X: 1.22,
+        doubleChanceX2: 1.55,
+        over05: 1.08,
+        over15: 1.25,
+        over25: 1.9,
+        under35: 1.4,
+        under45: 1.15,
+        bttsYes: 1.75,
+        bttsNo: 2.0,
+        dnbHome: 1.55,
+        dnbAway: 2.2,
+        homeScores: 1.35,
+        awayScores: 1.42,
+      },
     },
     expectedGoals: { home: 1.4, away: 1.0 },
     markets: pick ? [pick] : [],
@@ -186,6 +204,11 @@ assert(assembled.vetoed.length === 1 && assembled.vetoed[0].matchId === "2", "ve
 assert(assembled.kept[0].aiJudge?.approved === true, "approved tagged");
 assert(assembled.kept[1].aiJudge === undefined, "fail-open untagged");
 assert(assembled.kept[2].aiJudge === undefined, "empty summary untagged");
+
+assert(passesAiJudgeGate(ok) === true, "gate approved");
+assert(passesAiJudgeGate(veto) === false, "gate veto");
+assert(passesAiJudgeGate(null) === true, "gate fail-open");
+assert(passesAiJudgeGate(undefined) === true, "gate no verdict");
 
 const preds = [
   stubPrediction("a", true),

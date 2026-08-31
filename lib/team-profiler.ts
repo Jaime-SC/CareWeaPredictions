@@ -748,10 +748,10 @@ export function clampHistoricalBoost(
 }
 
 function boostMarket(
-  out: Record<MarketType, number>,
+  out: Partial<Record<MarketType, number>>,
   market: MarketType
 ): void {
-  const base = out[market];
+  const base = out[market] ?? 0;
   out[market] = clampHistoricalBoost(base, base * RELATIVE_BOOST);
 }
 
@@ -801,11 +801,14 @@ export function keyAbsenceLambdaFactorForSide(
  * Manager-change cooldown → that side is ignored (base Poisson for boosts).
  */
 export function applyTeamProfileCalibration(
-  probs: Record<MarketType, number>,
+  probs: Partial<Record<MarketType, number>>,
   home: TeamProfileSnapshot | null,
   away: TeamProfileSnapshot | null,
   nowMs = Date.now()
-): { probs: Record<MarketType, number>; flags: string[]; notes: string[] } {
+): {
+  probs: Partial<Record<MarketType, number>>;
+  flags: string[]; notes: string[];
+} {
   const out = { ...probs };
   const flags: string[] = [];
   const notes: string[] = [];

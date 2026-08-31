@@ -1,6 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { recalibrateModel, resetCalibration } from "@/lib/auto-tuner";
 import { errorMessage, jsonError } from "@/lib/api-response";
+import { requireMutationAuth } from "@/lib/auth";
+import { hydrateModelWeightsFromDb } from "@/lib/model-weights";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -13,8 +15,12 @@ const NO_STORE_HEADERS = {
  * POST /api/auto-tune
  * Unified recalibration: model-weights.json + Poisson tuning-config.json.
  */
-export async function POST() {
+export async function POST(request: NextRequest) {
+  const denied = requireMutationAuth(request);
+  if (denied) return denied;
+
   try {
+    await hydrateModelWeightsFromDb();
     const result = await recalibrateModel();
     return NextResponse.json(
       {
@@ -48,9 +54,12 @@ export async function POST() {
  * DELETE /api/auto-tune
  * Emergency reset: wipe model-weights and Poisson multipliers to factory 1.0.
  */
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
+  const denied = requireMutationAuth(request);
+  if (denied) return denied;
+
   try {
-    const { weights, config } = resetCalibration();
+    const { weights, config } = await resetCalibration();
     return NextResponse.json(
       {
         success: true,

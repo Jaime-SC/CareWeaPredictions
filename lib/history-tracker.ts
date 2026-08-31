@@ -1,3 +1,7 @@
+/**
+ * Client-side bet history cache (optimistic UI only).
+ * Source of truth: Neon via /api/bets/record and Prisma bet-db.
+ */
 import type { GeneratedParlay, MarketType, ParlayLeg, StrategyMode } from "./types";
 import { tryGetJugaBetLabel } from "./jugabet-labels";
 import { computePerformanceMetrics } from "./stats";
@@ -55,6 +59,10 @@ export interface HistorySummary {
   netProfit: number;
   totalStaked: number;
   totalReturned: number;
+  /** Σ(payout − stake) for WON only */
+  totalWonProfit: number;
+  /** Σ(stake) for LOST only */
+  totalLost: number;
   roi: number;
   /** Hit rate of completed tickets (won / won+lost) */
   winRate: number;
@@ -627,6 +635,8 @@ export function computeSummary(bets: HistoryBet[]): HistorySummary {
     netProfit: perf.netProfit,
     totalStaked: perf.totalStaked,
     totalReturned,
+    totalWonProfit: perf.totalWonProfit,
+    totalLost: perf.totalLost,
     roi: perf.roi,
     winRate: perf.winRate,
     legAccuracy,

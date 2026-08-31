@@ -7,7 +7,7 @@ import {
   getLeagueDisplayName,
 } from "../lib/utils/league-labels";
 
-function assert(cond: unknown, msg: string): asserts cond {
+function assert(cond: unknown, msg = "assertion failed"): void {
   if (!cond) throw new Error(msg);
 }
 

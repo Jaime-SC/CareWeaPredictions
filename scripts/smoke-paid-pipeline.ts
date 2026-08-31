@@ -67,7 +67,7 @@ async function main() {
   });
   if (safePicks.length > 0 && withJudge.length === 0) {
     softWarn(
-      "safe picks present but no aiJudge.summary (Gemini fail-open or key missing)"
+      "safe picks present but no aiJudge.summary (Groq fail-open or key missing)"
     );
   }
 

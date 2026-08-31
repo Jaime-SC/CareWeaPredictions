@@ -490,7 +490,7 @@ export async function persistTeamBrierFactors(
 export async function runBrierLearning(): Promise<BrierLearningResult> {
   const rows = await loadSettledPicksForBrier();
   const result = applyBrierLearningToWeights(rows, loadModelWeights());
-  saveModelWeights(result.weights);
+  await saveModelWeights(result.weights);
   await persistTeamBrierFactors(result.teams);
   return result;
 }

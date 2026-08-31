@@ -11,7 +11,7 @@ import {
 } from "../config/allowed-leagues";
 import { SA_CUP_NO_TOP2_MATCHUPS_MESSAGE } from "../lib/api-messages";
 
-function assert(cond: unknown, msg: string): asserts cond {
+function assert(cond: unknown, msg = "assertion failed"): void {
   if (!cond) throw new Error(msg);
 }
 

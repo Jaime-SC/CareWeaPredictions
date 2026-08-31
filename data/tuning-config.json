@@ -1,6 +1,41 @@
 {
-  "lastCalibratedAt": "2026-08-24T20:07:26.124Z",
-  "totalBetsAnalyzed": 0,
-  "leagueMultipliers": {},
-  "marketMultipliers": {}
+  "lastCalibratedAt": "2026-08-31T13:14:09.358Z",
+  "totalBetsAnalyzed": 376,
+  "leagueMultipliers": {
+    "Premier League": 1,
+    "Brasileirão Série A": 1,
+    "Primera Nacional": 1.009,
+    "Serie B (Italia)": 1,
+    "Primera División Chile": 1,
+    "Brasileirão Série B": 1.009,
+    "LaLiga 2": 0.983,
+    "Liga Profesional Argentina": 0.989,
+    "Liga MX": 1.009,
+    "Championship": 1,
+    "Major League Soccer": 0.986,
+    "La Liga": 0.967,
+    "Copa do Brasil": 1,
+    "EFL Cup": 0.974,
+    "Primera División": 1.004,
+    "Serie A": 0.972,
+    "DFB Pokal": 1,
+    "Ligue 1": 0.986,
+    "UEFA Europa League": 1,
+    "UEFA Europa Conference League": 1,
+    "CONMEBOL Sudamericana": 0.981,
+    "CONMEBOL Libertadores": 1.004,
+    "UEFA Champions League": 1.004,
+    "Coppa Italia": 1.004,
+    "Primera B": 0.983,
+    "Friendlies Clubs": 0.984
+  },
+  "marketMultipliers": {
+    "over_1_5": 1.03125,
+    "under_3_5": 1.03125,
+    "1x": 1.03125,
+    "over_0_5": 1.035375,
+    "ht_under_1_5": 1.03125,
+    "under_4_5": 1.03125,
+    "home_scores": 1.03125
+  }
 }

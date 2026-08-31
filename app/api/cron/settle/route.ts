@@ -6,8 +6,9 @@ import {
 } from "@/lib/auto-tuner";
 import { maybeUpdateBrierLearning } from "@/lib/learning-engine";
 import { errorMessage, jsonError } from "@/lib/api-response";
-import { env } from "@/lib/env";
+import { authorizeBearerSecret, unauthorizedJson } from "@/lib/auth";
 import { maybeUpdateTeamProfilesAfterSettlement } from "@/lib/team-profiler";
+import { hydrateModelWeightsFromDb } from "@/lib/model-weights";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -17,18 +18,9 @@ export const maxDuration = 60;
  * GET/POST /api/cron/settle
  * Auto-settle PENDING tickets against finished (FT) match results.
  *
- * Protect with CRON_SECRET header when set:
+ * Protect with CRON_SECRET when set (production requires it):
  *   Authorization: Bearer <CRON_SECRET>
- *   or ?secret=<CRON_SECRET>
  */
-function authorize(request: NextRequest): boolean {
-  const secret = env.CRON_SECRET;
-  if (!secret) return true; // open in local/dev when unset
-  const auth = request.headers.get("authorization");
-  if (auth === `Bearer ${secret}`) return true;
-  const q = request.nextUrl.searchParams.get("secret");
-  return q === secret;
-}
 
 function calibrationPayload(
   result: Awaited<ReturnType<typeof maybeRecalibrateAfterSettlement>>
@@ -58,14 +50,12 @@ function brierPayload(
 }
 
 async function handle(request: NextRequest) {
-  if (!authorize(request)) {
-    return NextResponse.json(
-      { success: false, error: "No autorizado." },
-      { status: 401 }
-    );
+  if (!authorizeBearerSecret(request)) {
+    return unauthorizedJson();
   }
 
   try {
+    await hydrateModelWeightsFromDb();
     const result = await settlePendingTickets();
     const newlySettledCount = result.updatedLegsCount;
 

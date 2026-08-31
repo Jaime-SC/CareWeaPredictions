@@ -10,7 +10,7 @@ import {
 } from "../config/allowed-leagues";
 import { UEFA_NO_BIG5_MATCHUPS_MESSAGE } from "../lib/api-messages";
 
-function assert(cond: unknown, msg: string): asserts cond {
+function assert(cond: unknown, msg = "assertion failed"): void {
   if (!cond) throw new Error(msg);
 }
 

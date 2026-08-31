@@ -22,6 +22,8 @@ import {
 } from "./groq-quota";
 import { chileDateString } from "./utils";
 
+export { passesAiJudgeGate } from "./ai-judge-gate";
+
 /** Official GroqCloud production IDs; first is default. Override with GROQ_MODEL. */
 export const GROQ_MODELS = [
   "llama-3.3-70b-versatile",
