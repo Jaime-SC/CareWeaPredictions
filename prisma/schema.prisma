@@ -171,10 +171,53 @@ model TeamProfile {
   keyAbsencesCount     Int      @default(0)
   /// Brier-driven Poisson probability multiplier (1 = neutral)
   brierCalibrationFactor Float  @default(1)
+  /// Advanced metrics (ingested offline via soccerdata/Understat)
+  avgNpxGScored          Float?
+  avgNpxGConceded        Float?
+  avgPPDA                Float?
+  avgCornersFor          Float?
+  avgCornersAgainst      Float?
+  avgCardsFor            Float?
+  avgCardsAgainst        Float?
   updatedAt            DateTime @updatedAt
 
   @@index([teamName])
   @@index([primaryLeagueId])
+}
+
+/// Point-in-time team profile snapshots (advanced metrics + optional rolling cache per matchday)
+model TeamProfileSnapshot {
+  id                   String   @id @default(cuid())
+  teamId               Int
+  /// Cutoff date: aggregates include only matches strictly before this calendar day
+  asOfDate             DateTime @db.Date
+  teamName             String?
+  primaryLeagueId      Int?
+  totalMatchesAnalyzed Int      @default(0)
+  homeMatchesCount     Int      @default(0)
+  awayMatchesCount     Int      @default(0)
+  avgGoalsScoredHome   Float    @default(0)
+  avgGoalsConcededHome Float    @default(0)
+  avgGoalsScoredAway   Float    @default(0)
+  avgGoalsConcededAway Float    @default(0)
+  over15GoalsRate      Float    @default(0)
+  over15GoalsRateHome  Float    @default(0)
+  over15GoalsRateAway  Float    @default(0)
+  over25GoalsRate      Float    @default(0)
+  cleanSheetRate       Float    @default(0)
+  cleanSheetRateHome   Float    @default(0)
+  cleanSheetRateAway   Float    @default(0)
+  avgNpxGScored        Float?
+  avgNpxGConceded      Float?
+  avgPPDA              Float?
+  avgCornersFor        Float?
+  avgCornersAgainst    Float?
+  avgCardsFor          Float?
+  avgCardsAgainst      Float?
+  createdAt            DateTime @default(now())
+
+  @@unique([teamId, asOfDate])
+  @@index([teamId, asOfDate])
 }
 
 /// Auto-tuned model weights (Neon primary store; config/model-weights.json is seed fallback)

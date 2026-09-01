@@ -1,6 +1,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import { humanizeAiJudgeProse } from "@/lib/ai-judge-text";
 import type { AIVerdict } from "@/lib/types";
 import { formatPercent } from "@/lib/utils";
 import { AlertTriangle, Check } from "lucide-react";
@@ -8,12 +9,18 @@ import { AlertTriangle, Check } from "lucide-react";
 /** Always-visible AI Judge badge + summary (persists with the pick). */
 export function AiJudgeBadge({ verdict }: { verdict: AIVerdict }) {
   const approved = verdict.approved;
+  const summary = verdict.summary
+    ? humanizeAiJudgeProse(verdict.summary)
+    : null;
+  const vetoReason = verdict.vetoReason
+    ? humanizeAiJudgeProse(verdict.vetoReason)
+    : null;
   return (
     <div className="min-w-0 space-y-1">
       <Badge
         variant={approved ? "success" : "danger"}
         className="gap-1"
-        title={verdict.summary}
+        title={summary ?? undefined}
       >
         {approved ? (
           <Check className="h-3 w-3" aria-hidden />
@@ -28,11 +35,11 @@ export function AiJudgeBadge({ verdict }: { verdict: AIVerdict }) {
           ? ` · ${formatPercent(verdict.confidenceScore, 0)}`
           : ""}
       </p>
-      {verdict.summary ? (
-        <p className="text-xs leading-snug text-neutral-300">{verdict.summary}</p>
+      {summary ? (
+        <p className="text-xs leading-snug text-neutral-300">{summary}</p>
       ) : null}
-      {verdict.vetoReason ? (
-        <p className="text-xs leading-snug text-[#ff453a]">{verdict.vetoReason}</p>
+      {vetoReason ? (
+        <p className="text-xs leading-snug text-[#ff453a]">{vetoReason}</p>
       ) : null}
     </div>
   );

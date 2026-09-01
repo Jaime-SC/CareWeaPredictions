@@ -2,6 +2,7 @@
  * Smoke: AI Judge JSON parse + veto/fail-open + prediction attach (no Groq call).
  * Usage: npx tsx scripts/verify-ai-judge.ts
  */
+import { humanizeAiJudgeProse } from "../lib/ai-judge-text";
 import {
   attachAiJudgeToPredictions,
   auditPredictionsWithAI,
@@ -14,7 +15,7 @@ import {
   resolveGroqModelOrder,
   splitMatchLabel,
 } from "../lib/ai-judge";
-import { passesAiJudgeGate } from "../lib/ai-judge-gate";
+import { passesAiJudgeGate, filterByAiJudgeGate } from "../lib/ai-judge-gate";
 import {
   resolveGroqDailyLimit,
   resolveGroqSoftCallLimit,
@@ -180,6 +181,34 @@ assert(!isGroqModelNotFound(new Error("network timeout")), "not model error");
 const teams = splitMatchLabel("Colo Colo vs Universidad de Chile");
 assert(teams.home === "Colo Colo" && teams.away === "Universidad de Chile", "split");
 
+assert(
+  humanizeAiJudgeProse(
+    "Presencia de flags de alto riesgo (KEY_INJURY_CLUSTER, FATIGUE_AWAY, AWAY_LEAKY) que contradicen el mercado x2."
+  ).includes("Varias bajas relevantes") &&
+    humanizeAiJudgeProse(
+      "Presencia de flags de alto riesgo (KEY_INJURY_CLUSTER, FATIGUE_AWAY, AWAY_LEAKY) que contradicen el mercado x2."
+    ).includes("apuesta doble visitante (X2)") &&
+    !humanizeAiJudgeProse(
+      "Presencia de flags de alto riesgo (KEY_INJURY_CLUSTER, FATIGUE_AWAY, AWAY_LEAKY) que contradicen el mercado x2."
+    ).includes("KEY_INJURY_CLUSTER"),
+  "humanize flags and market"
+);
+
+const parsedVeto = parseAiVerdict(
+  JSON.stringify({
+    approved: false,
+    vetoReason:
+      "Flag de KEY_INJURY_CLUSTER junto a fatiga en ambos lados y contexto de eliminación única aumentan la volatilidad del mercado.",
+    confidenceScore: 0.82,
+    summary: "Riesgo elevado.",
+  })
+);
+assert(
+  parsedVeto.vetoReason?.includes("Varias bajas relevantes") === true &&
+    !parsedVeto.vetoReason?.includes("KEY_INJURY_CLUSTER"),
+  "normalizeVerdict humanizes veto"
+);
+
 const veto: AIVerdict = {
   approved: false,
   vetoReason: "Rotación UEFA",
@@ -209,6 +238,17 @@ assert(passesAiJudgeGate(ok) === true, "gate approved");
 assert(passesAiJudgeGate(veto) === false, "gate veto");
 assert(passesAiJudgeGate(null) === true, "gate fail-open");
 assert(passesAiJudgeGate(undefined) === true, "gate no verdict");
+
+const rows = [
+  { id: "a", aiJudge: ok },
+  { id: "b", aiJudge: veto },
+  { id: "c" },
+];
+assert(filterByAiJudgeGate(rows, false).length === 3, "filter off keeps all");
+assert(
+  filterByAiJudgeGate(rows, true).map((r) => r.id).join(",") === "a,c",
+  "filter on drops veto"
+);
 
 const preds = [
   stubPrediction("a", true),

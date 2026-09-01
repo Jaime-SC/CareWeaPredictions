@@ -26,6 +26,7 @@ import {
 import {
   syncAutomatedTeamProfileFlags,
   warmTeamProfileCache,
+  warmTeamProfilesForMatches,
 } from "@/lib/team-profiler";
 import type { Match } from "@/lib/types";
 import { chileDateOffset, chileDateString } from "@/lib/utils";
@@ -41,6 +42,7 @@ async function withAutomatedTeamProfiles(matches: Match[]): Promise<Match[]> {
   await warmTeamProfileCache(matches.flatMap((m) => [m.home.id, m.away.id]));
   const enriched = await enrichMatchesFromExternalSources(matches);
   await warmTeamProfileCache(enriched.flatMap((m) => [m.home.id, m.away.id]));
+  await warmTeamProfilesForMatches(enriched);
   return enriched;
 }
 

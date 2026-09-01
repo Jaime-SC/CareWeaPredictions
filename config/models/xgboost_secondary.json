@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "description": "Secondary-market decision trees (skeleton — heuristic fallback when trees empty)",
+  "trees": {}
+}

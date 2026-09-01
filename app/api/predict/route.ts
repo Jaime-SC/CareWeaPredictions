@@ -20,13 +20,13 @@ import {
   auditPredictionsWithAI,
   hydrateAiJudgeFromCache,
   hydrateSafePicksAiJudge,
-  passesAiJudgeGate,
 } from "@/lib/ai-judge";
 import { buildMatchPredictions } from "@/lib/parlay-generator";
 import { hydrateModelWeightsFromDb } from "@/lib/model-weights";
 import {
   syncAutomatedTeamProfileFlags,
   warmTeamProfileCache,
+  warmTeamProfilesForMatches,
 } from "@/lib/team-profiler";
 import type { MatchPrediction, SafePickItem } from "@/lib/types";
 import { chileDateString } from "@/lib/utils";
@@ -42,6 +42,7 @@ async function withExternalEnrichment(
   await warmTeamProfileCache(
     enriched.flatMap((m) => [m.home.id, m.away.id])
   );
+  await warmTeamProfilesForMatches(enriched);
   return enriched;
 }
 
@@ -99,21 +100,18 @@ export async function GET(request: NextRequest) {
     const hit = await getCachedPayload<PredictSuccessBody>(cacheKey);
     if (hit?.success && Array.isArray(hit.predictions)) {
       const predictions = await hydrateAiJudgeFromCache(hit.predictions);
-      const safePicks = (
-        await hydrateSafePicksAiJudge(
-          (hit.safePicks ?? []).map((sp) => {
-            const pred = predictions.find((p) => p.matchId === sp.matchId);
-            return pred?.aiJudge?.summary
-              ? { ...sp, aiJudge: pred.aiJudge }
-              : sp;
-          })
-        )
-      ).filter((sp) => passesAiJudgeGate(sp.aiJudge));
+      const safePicks = await hydrateSafePicksAiJudge(
+        (hit.safePicks ?? []).map((sp) => {
+          const pred = predictions.find((p) => p.matchId === sp.matchId);
+          return pred?.aiJudge?.summary
+            ? { ...sp, aiJudge: pred.aiJudge }
+            : sp;
+        })
+      );
       return NextResponse.json({
         ...hit,
         predictions,
         safePicks,
-        safePickCount: safePicks.length,
         cached: true,
       });
     }
@@ -148,7 +146,6 @@ export async function GET(request: NextRequest) {
     predictions = await auditPredictionsWithAI(predictions);
 
     const safePicks = predictions
-      .filter((p) => passesAiJudgeGate(p.aiJudge))
       .flatMap((p) =>
         p.markets
           .filter(

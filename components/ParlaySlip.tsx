@@ -42,10 +42,8 @@ import {
   parseStakeCLP,
 } from "@/lib/utils";
 import {
-  AlertTriangle,
   Check,
   Flame,
-  Lightbulb,
   Loader2,
   MapPin,
   Pin,
@@ -59,6 +57,7 @@ import {
   formatSlipExportText,
   SlipExporter,
 } from "@/components/slip-exporter";
+import { PickLegDetails } from "@/components/pick-leg-details";
 import {
   formatExplicitBetLine,
   getExplicitPickFromLeg,
@@ -421,7 +420,7 @@ export function ParlaySlip({
                 : "max-h-[28rem] space-y-2 overflow-y-auto pr-1"
             }
           >
-            <ul className="space-y-2">
+            <ul className="space-y-4">
               {orderedLegs.map((leg) => {
                 legNumber += 1;
                 const key = legKey(leg);
@@ -636,120 +635,142 @@ function LegRow({
     (flag) => flag !== "NEARBY_INTERNATIONAL_MATCH_PRESENT"
   );
   const categoryBadge = restrictedCompetitionBadge(undefined, leg.leagueName);
+  const contextLabels = contextBadgeLabels(otherFlags).slice(0, 3);
+  const aiApproved = leg.aiJudge?.approved !== false;
 
   return (
     <li
       className={cn(
-        "lift flex items-start gap-2 overflow-hidden rounded-2xl bg-white/[0.04] px-3 py-3 ring-1 ring-white/10 transition-all duration-200 ease-out motion-reduce:transition-none",
+        "lift overflow-hidden rounded-3xl bg-white/[0.04] ring-1 ring-white/10 transition-all duration-200 ease-out motion-reduce:transition-none",
         exiting
-          ? "max-h-0 -translate-x-2 scale-[0.98] py-0 opacity-0 ring-transparent motion-reduce:transition-none"
-          : "max-h-[32rem] translate-x-0 scale-100 opacity-100"
+          ? "max-h-0 -translate-x-2 scale-[0.98] opacity-0 ring-transparent motion-reduce:transition-none"
+          : "max-h-[48rem] translate-x-0 scale-100 opacity-100"
       )}
     >
-      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/10 text-xs font-bold text-white">
-        {index}
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-xs text-neutral-500">
-          {leg.leagueName || "Otros"}
-          {categoryBadge ? (
-            <span className="ml-1.5 text-neutral-400" title={categoryBadge}>
-              · {categoryBadge}
-            </span>
-          ) : null}
-        </p>
-        <p className="text-sm font-semibold leading-snug text-white">
-          {leg.matchLabel}
-        </p>
-        {leg.aiJudge ? (
-          <div className="mt-1">
-            <AiJudgeBadge verdict={leg.aiJudge} />
-          </div>
-        ) : null}
-        <div className="mt-2 rounded-2xl border border-[#0a84ff]/25 bg-[#0a84ff]/12 px-3 py-2.5 ring-1 ring-[#0a84ff]/15">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-[#64d2ff]/80">
-            Apuesta
-          </p>
-          <p className="mt-0.5 break-words text-base font-bold leading-snug text-[#64d2ff] sm:text-lg">
-            {formatExplicitBetLine(explicit)}
-            {valueBadge ? (
-              <span className="ml-2 inline-flex items-center gap-0.5 align-middle text-sm font-semibold text-[#ffd60a]">
-                <Flame className="h-3.5 w-3.5" aria-hidden />
-                {valueBadge}
-              </span>
-            ) : null}
-          </p>
+      <div className="flex">
+        <div className="flex w-11 shrink-0 flex-col items-center border-r border-white/8 bg-white/[0.02] py-4">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10 text-xs font-bold text-white">
+            {index}
+          </span>
         </div>
-        <p className="mt-1.5 text-xs leading-snug text-neutral-500" title={explicit.condition}>
-          Condición: {explicit.condition}
-        </p>
-        <p className="text-xs leading-snug text-[#64d2ff]">
-          {explicit.bookmakerTab}
-        </p>
-        <p className="flex items-start gap-1.5 text-xs leading-snug text-[#ffd60a]">
-          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
-          <span>{explicit.warningNote}</span>
-        </p>
-        {explicit.cupEquivalent ? (
-          <p className="flex items-start gap-1.5 text-xs leading-snug text-[#30d158]">
-            <Lightbulb className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
-            <span>{explicit.cupEquivalent}</span>
-          </p>
-        ) : null}
-        <p className="text-xs text-neutral-500">
-          {formatKickoffDayLabel(leg.kickoff)} CL · modelo{" "}
-          {formatPercent(leg.modelProbability)}
-        </p>
-        {rotationWarning && (
-          <div className="mt-1">
-            <Badge variant="warning" className="px-1.5 py-0 text-[10px] font-semibold">
-              ⚠️ RIESGO DE ROTACIÓN (Filtro Desactivado)
-            </Badge>
+
+        <div className="min-w-0 flex-1">
+          <div className="border-b border-white/8 px-3.5 py-3 sm:px-4">
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                  <span className="rounded-full bg-white/8 px-2.5 py-0.5 text-[11px] font-medium text-neutral-300 ring-1 ring-white/10">
+                    {leg.leagueName || "Otros"}
+                  </span>
+                  {categoryBadge ? (
+                    <Badge
+                      variant="info"
+                      className="max-w-[14rem] truncate font-normal"
+                      title={categoryBadge}
+                    >
+                      {categoryBadge}
+                    </Badge>
+                  ) : null}
+                  <span className="text-xs tabular-nums text-neutral-500">
+                    {formatKickoffDayLabel(leg.kickoff)} CL
+                  </span>
+                  {valueBadge ? (
+                    <Badge variant="warning" className="ml-auto gap-1">
+                      <Flame className="h-3 w-3" aria-hidden />
+                      {valueBadge}
+                    </Badge>
+                  ) : null}
+                </div>
+                <h3 className="mt-2 text-base font-bold leading-snug tracking-tight text-white sm:text-lg">
+                  {leg.matchLabel}
+                </h3>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <span className="rounded-full bg-[#30d158]/12 px-2.5 py-0.5 text-[11px] font-medium text-[#30d158] ring-1 ring-[#30d158]/25">
+                    {formatPercent(leg.modelProbability)} modelo
+                  </span>
+                  {typeof leg.edge === "number" && leg.edge > 0 ? (
+                    <span className="rounded-full bg-[#0a84ff]/12 px-2.5 py-0.5 text-[11px] font-medium text-[#64d2ff] ring-1 ring-[#0a84ff]/25">
+                      Edge {formatPercent(leg.edge)}
+                    </span>
+                  ) : null}
+                  {contextLabels.map((label) => (
+                    <span
+                      key={label}
+                      className="rounded-full bg-white/6 px-2.5 py-0.5 text-[11px] font-normal text-neutral-400 ring-1 ring-white/10"
+                    >
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label={`Quitar ${leg.matchLabel}`}
+                title="Quitar de la apuesta"
+                onClick={onRemove}
+                disabled={exiting}
+                className="pressable inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-500 transition-colors hover:bg-[#ff453a]/15 hover:text-[#ff453a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff453a] disabled:opacity-40"
+              >
+                <Trash2 className="h-4 w-4" aria-hidden />
+              </button>
+            </div>
           </div>
-        )}
-        {contextBadgeLabels(otherFlags).length > 0 && (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {contextBadgeLabels(otherFlags)
-              .slice(0, 3)
-              .map((label) => (
-                <Badge
-                  key={label}
-                  variant="info"
-                  className="px-1.5 py-0 text-[10px] font-normal"
-                >
-                  {label}
-                </Badge>
-              ))}
+
+          <div className="space-y-3 px-3.5 py-3 sm:px-4">
+            <div className="rounded-2xl border border-[#0a84ff]/25 bg-gradient-to-br from-[#0a84ff]/14 via-[#0a84ff]/6 to-transparent p-3.5">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[#64d2ff]/75">
+                    Tu apuesta
+                  </p>
+                  <p className="mt-1 text-sm font-semibold leading-snug text-white">
+                    {formatExplicitBetLine(explicit)}
+                  </p>
+                </div>
+                <p className="shrink-0 font-mono text-xl font-bold leading-none text-[#30d158] sm:text-2xl">
+                  @{formatOdds(leg.odds)}
+                </p>
+              </div>
+            </div>
+
+            {leg.aiJudge ? (
+              <div
+                className={cn(
+                  "rounded-2xl border-l-[3px] px-3.5 py-3",
+                  aiApproved
+                    ? "border-[#30d158] bg-[#30d158]/8"
+                    : "border-[#ff453a] bg-[#ff453a]/8"
+                )}
+              >
+                <AiJudgeBadge verdict={leg.aiJudge} />
+              </div>
+            ) : null}
+
+            <PickLegDetails explicit={explicit} />
+
+            {rotationWarning ? (
+              <Badge variant="warning" className="w-full justify-center py-1.5">
+                Riesgo de rotación (filtro desactivado)
+              </Badge>
+            ) : null}
+
+            {(leg.referee || leg.venue) && (
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
+                {leg.venue ? (
+                  <span className="inline-flex items-center gap-1">
+                    <MapPin className="h-3 w-3 text-[#0a84ff]" aria-hidden />
+                    {leg.venue}
+                  </span>
+                ) : null}
+                {leg.venue && leg.referee ? (
+                  <span className="text-neutral-700">·</span>
+                ) : null}
+                {leg.referee ? <span>Árb. {leg.referee}</span> : null}
+              </p>
+            )}
           </div>
-        )}
-        {(leg.referee || leg.venue) && (
-          <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-neutral-500">
-            {leg.venue ? (
-              <span className="inline-flex items-center gap-0.5">
-                <MapPin className="h-2.5 w-2.5 text-[#0a84ff]" />
-                {leg.venue}
-              </span>
-            ) : null}
-            {leg.venue && leg.referee ? (
-              <span className="text-neutral-700">·</span>
-            ) : null}
-            {leg.referee ? <span>Árb. {leg.referee}</span> : null}
-          </p>
-        )}
+        </div>
       </div>
-      <span className="font-mono text-sm font-semibold text-[#30d158]">
-        @{formatOdds(leg.odds)}
-      </span>
-      <button
-        type="button"
-        aria-label={`Quitar ${leg.matchLabel}`}
-        title="Quitar de la apuesta"
-        onClick={onRemove}
-        disabled={exiting}
-        className="pressable mt-0.5 inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full text-neutral-500 transition-colors hover:bg-[#ff453a]/15 hover:text-[#ff453a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff453a] disabled:opacity-40"
-      >
-        <Trash2 className="h-4 w-4" aria-hidden />
-      </button>
     </li>
   );
 }

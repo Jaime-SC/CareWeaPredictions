@@ -30,11 +30,17 @@ import {
   clampHistoricalBoost,
   keyAbsenceLambdaFactorForSide,
   peekTeamProfile,
+  peekTeamProfileAt,
 } from "./team-profiler";
 import { applyTuningToProbability } from "./tuning-config";
 import { isValueBet, valueMarginPercent } from "./value-finder";
 import { failsMarketSanity } from "./filters";
 import { applyStandingsAwayPenalty } from "./standings";
+import { parseLeagueId } from "../config/allowed-leagues";
+import {
+  predictSecondaryMarkets,
+  resolveRefereeStrictness,
+} from "./xgboost-runner";
 
 const FATIGUE_XG_FACTOR = 0.9;
 const MAX_GOALS = 8;
@@ -530,6 +536,8 @@ export function predictMatchMarkets(
     minSafeProbability?: number;
     minSafeOdds?: number;
     maxSafeOdds?: number;
+    /** Temporal cutoff — uses warmed peekTeamProfileAt when set. */
+    asOf?: Date;
   }
 ): {
   expectedGoals: { home: number; away: number };
@@ -560,17 +568,32 @@ export function predictMatchMarkets(
   const xg = estimateExpectedGoals(match);
   const matrix = buildScoreMatrix(xg.home, xg.away);
   const goalProbs = marketProbsFromMatrix(matrix);
+  const asOf = options?.asOf;
+  const homeProfile = peekTeamProfileAt(match.home.id, asOf) ?? peekTeamProfile(match.home.id);
+  const awayProfile = peekTeamProfileAt(match.away.id, asOf) ?? peekTeamProfile(match.away.id);
+  const phase2Probs = phase2MarketProbs(match, xg, {
+    home: homeProfile,
+    away: awayProfile,
+  });
+  const xgbProbs = predictSecondaryMarkets({
+    homeProfile,
+    awayProfile,
+    refereeStrictness: resolveRefereeStrictness(match.referee),
+    fixture: { leagueId: parseLeagueId(match.leagueId), isDerby: derby },
+  });
   const baseProbs = {
     ...goalProbs,
-    ...phase2MarketProbs(match, xg),
+    ...phase2Probs,
+    ...xgbProbs,
   } as Record<MarketType, number>;
 
   const ctx = applyContextToMarkets(match, baseProbs);
   const knockoutProbs = applyKnockoutMarketAdjustments(match, ctx.probs);
   const profileCal = applyTeamProfileCalibration(
     knockoutProbs,
-    peekTeamProfile(match.home.id),
-    peekTeamProfile(match.away.id)
+    homeProfile,
+    awayProfile,
+    asOf?.getTime() ?? Date.now()
   );
   const profileProbs = { ...baseProbs, ...profileCal.probs };
   if (profileCal.flags.length > 0) {
@@ -588,8 +611,6 @@ export function predictMatchMarkets(
   const probs = standingsCal.probs;
   const resolved = match;
 
-  const homeProfile = peekTeamProfile(match.home.id);
-  const awayProfile = peekTeamProfile(match.away.id);
   const leagueBrier = leagueCfg.brierCalibrationFactor ?? 1;
   const teamBrier = teamPairBrierFactor(
     homeProfile?.brierCalibrationFactor ??

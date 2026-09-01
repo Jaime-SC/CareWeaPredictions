@@ -1,6 +1,10 @@
 "use client";
 
 import { AiJudgeBadge } from "@/components/ai-judge-badge";
+import {
+  AiJudgeVetoFilterSwitch,
+  useHideAiVetoesPref,
+} from "@/components/ai-judge-veto-filter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,6 +45,7 @@ import {
 } from "@/lib/formatters";
 import {
   formatCLP,
+  cn,
   formatKickoffTime,
   formatOdds,
   formatPercent,
@@ -50,11 +55,14 @@ import {
 } from "@/lib/utils";
 import { formatValueBadge } from "@/lib/value-finder";
 import {
-  AlertTriangle,
+  countAiVetoes,
+  filterByAiJudgeGate,
+} from "@/lib/ai-judge-gate";
+import { PickLegDetails } from "@/components/pick-leg-details";
+import {
   Check,
   Flame,
   Layers,
-  Lightbulb,
   Loader2,
   Pin,
   Target,
@@ -129,15 +137,22 @@ export function SafePicksList({
   const exceedsBankroll =
     stakeCLP != null && stakeCLP > settings.totalBankroll;
   const lastAutoStake = useRef("");
+  const [hideAiVetoes, setHideAiVetoes] = useHideAiVetoesPref();
+
+  const visiblePicks = useMemo(
+    () => filterByAiJudgeGate(picks, hideAiVetoes),
+    [picks, hideAiVetoes]
+  );
+  const vetoCount = useMemo(() => countAiVetoes(picks), [picks]);
 
   const ordered = useMemo(
     () =>
       sortByKickoffDesc(
-        picks,
+        visiblePicks,
         (p) => p.kickoff,
         (p) => p.leagueName
       ),
-    [picks]
+    [visiblePicks]
   );
 
   function pickKey(p: SafePickItem) {
@@ -189,16 +204,18 @@ export function SafePicksList({
   }, [picks, date, dbTickets]);
 
   const suggestedStake = useMemo(() => {
-    const pick = picks.find((item) => item.odds > 1 && item.modelProbability > 0);
+    const pick = visiblePicks.find(
+      (item) => item.odds > 1 && item.modelProbability > 0
+    );
     if (!pick) return null;
     const rec = calculateSingleStake(
       settings.totalBankroll,
       pick.modelProbability,
       pick.odds,
-      { ...settings, pickCount: picks.length }
+      { ...settings, pickCount: visiblePicks.length }
     );
     return rec.amountCLP > 0 ? rec.amountCLP : null;
-  }, [picks, settings]);
+  }, [visiblePicks, settings]);
 
   useEffect(() => {
     if (suggestedStake == null) return;
@@ -210,8 +227,8 @@ export function SafePicksList({
   }, [suggestedStake, stakeInput]);
 
   function openCombinada() {
-    if (picks.length < 2) return;
-    setCombinadaParlay(buildSafeCombinada(picks));
+    if (visiblePicks.length < 2) return;
+    setCombinadaParlay(buildSafeCombinada(visiblePicks));
     setCombinadaKey((k) => k + 1);
     setCombinadaOpen(true);
   }
@@ -296,8 +313,10 @@ export function SafePicksList({
     }
   }
 
-  const hasUnregistered = picks.some((pick) => !registeredKeys.has(pickKey(pick)));
-  const canBuildCombinada = picks.length >= 2;
+  const hasUnregistered = visiblePicks.some(
+    (pick) => !registeredKeys.has(pickKey(pick))
+  );
+  const canBuildCombinada = visiblePicks.length >= 2;
 
   return (
     <Card>
@@ -309,8 +328,11 @@ export function SafePicksList({
               Picks seguros individuales
             </h2>
             <CardDescription>
-              {date} · modelo ≥ 85% · {picks.length} selección
-              {picks.length === 1 ? "" : "es"}
+              {date} · modelo ≥ 85% · {visiblePicks.length} selección
+              {visiblePicks.length === 1 ? "" : "es"}
+              {hideAiVetoes && vetoCount > 0
+                ? ` · ${vetoCount} veto${vetoCount === 1 ? "" : "s"} oculto${vetoCount === 1 ? "" : "s"}`
+                : ""}
             </CardDescription>
             {fromCache && (
               <p role="status" className="mt-2 text-sm text-[#64d2ff]">
@@ -368,8 +390,25 @@ export function SafePicksList({
           <p className="rounded-2xl border border-dashed border-white/15 p-6 text-center text-sm text-neutral-400">
             No hay picks con probabilidad modelo ≥ 85% para esta fecha.
           </p>
+        ) : visiblePicks.length === 0 ? (
+          <div className="space-y-4">
+            <AiJudgeVetoFilterSwitch
+              hideVetoes={hideAiVetoes}
+              onChange={setHideAiVetoes}
+              vetoCount={vetoCount}
+            />
+            <p className="rounded-2xl border border-dashed border-white/15 p-6 text-center text-sm text-neutral-400">
+              Todos los picks de esta fecha están vetados por IA Judge. Desactiva
+              el filtro para verlos.
+            </p>
+          </div>
         ) : (
           <>
+            <AiJudgeVetoFilterSwitch
+              hideVetoes={hideAiVetoes}
+              onChange={setHideAiVetoes}
+              vetoCount={vetoCount}
+            />
             {hasUnregistered && (
             <div className="space-y-2 rounded-2xl bg-white/[0.04] p-4 ring-1 ring-white/10">
               <Label htmlFor="safe-stake-clp" className="!normal-case !tracking-normal !text-sm !font-medium !text-white">
@@ -402,159 +441,29 @@ export function SafePicksList({
             </div>
             )}
           <div className="max-h-[36rem] space-y-2 overflow-y-auto pr-1">
-            <ul className="space-y-3">
+            <ul className="space-y-4">
               {ordered.map((pick) => {
-                    const key = pickKey(pick);
-                    const registered = registeredKeys.has(key);
-                    const savedStake = registeredStakes[key] ?? pick.stakeCLP;
-                    const valueBadge = formatValueBadge(pick.edge);
-                    const explicit = getExplicitPickFromLeg(pick);
-                    const categoryBadge = restrictedCompetitionBadge(
+                const key = pickKey(pick);
+                return (
+                  <SafePickCard
+                    key={key}
+                    pick={pick}
+                    registered={registeredKeys.has(key)}
+                    savedStake={registeredStakes[key] ?? pick.stakeCLP}
+                    categoryBadge={restrictedCompetitionBadge(
                       undefined,
                       pick.leagueName
-                    );
-                    return (
-                      <li
-                        key={key}
-                        className="lift rounded-3xl bg-white/[0.04] p-4 ring-1 ring-white/10 sm:p-5"
-                      >
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                          <div className="min-w-0 space-y-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="rounded-full bg-white/8 px-2.5 py-0.5 text-[11px] font-medium text-neutral-300 ring-1 ring-white/10">
-                                {pick.leagueName || "Otros"}
-                              </span>
-                              {categoryBadge ? (
-                                <Badge
-                                  variant="info"
-                                  className="max-w-[16rem] truncate font-normal"
-                                  title={categoryBadge}
-                                >
-                                  {categoryBadge}
-                                </Badge>
-                              ) : null}
-                              <span className="text-xs tabular-nums text-neutral-500">
-                                {formatKickoffTime(pick.kickoff)} CL
-                              </span>
-                              {valueBadge && (
-                                <Badge variant="warning" className="gap-1">
-                                  <Flame className="h-3 w-3" />
-                                  {valueBadge}
-                                </Badge>
-                              )}
-                            </div>
-                            <p className="text-lg font-bold tracking-tight text-white">
-                              {pick.matchLabel}
-                            </p>
-                            {pick.aiJudge ? (
-                              <AiJudgeBadge verdict={pick.aiJudge} />
-                            ) : null}
-                            <div className="rounded-2xl border border-[#0a84ff]/20 bg-[#0a84ff]/10 px-3 py-2.5">
-                              <p className="text-sm font-semibold text-[#64d2ff]">
-                                {formatExplicitBetLine(explicit)}
-                                <span className="mx-1.5 text-[#64d2ff]/50">·</span>
-                                <span className="font-mono">
-                                  @{formatOdds(pick.odds)}
-                                </span>
-                              </p>
-                              <SingleStakeBadge
-                                modelProbability={pick.modelProbability}
-                                odds={pick.odds}
-                                pickCount={picks.length}
-                                className="mt-1.5 border-0 bg-transparent p-0 ring-0"
-                              />
-                            </div>
-                            {registered && typeof savedStake === "number" && savedStake > 0 && (
-                              <p className="text-sm text-[#30d158]">
-                                Apostado {formatCLP(savedStake)}
-                                <span className="mx-1.5 text-neutral-600">·</span>
-                                retorno potencial {formatCLP(savedStake * pick.odds)}
-                              </p>
-                            )}
-                            <p
-                              className="text-xs leading-snug text-neutral-500"
-                              title={explicit.condition}
-                            >
-                              Condición: {explicit.condition}
-                            </p>
-                            <p className="text-xs leading-snug text-[#64d2ff]">
-                              {explicit.bookmakerTab}
-                            </p>
-                            <p className="flex items-start gap-1.5 text-xs leading-snug text-[#ffd60a]">
-                              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
-                              <span>{explicit.warningNote}</span>
-                            </p>
-                            {explicit.cupEquivalent ? (
-                              <p className="flex items-start gap-1.5 text-xs leading-snug text-[#30d158]">
-                                <Lightbulb className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
-                                <span>{explicit.cupEquivalent}</span>
-                              </p>
-                            ) : null}
-                            <div className="flex flex-wrap gap-1.5 pt-0.5">
-                              <Badge variant="success">
-                                {formatPercent(pick.modelProbability)}{" "}
-                                Probabilidad
-                              </Badge>
-                              <Badge variant="info">
-                                Edge {formatPercent(pick.edge)}
-                              </Badge>
-                              {contextBadgeLabels(pick.contextFlags)
-                                .slice(0, 3)
-                                .map((label) => (
-                                  <Badge
-                                    key={label}
-                                    variant="default"
-                                    className="font-normal"
-                                  >
-                                    {label}
-                                  </Badge>
-                                ))}
-                            </div>
-                          </div>
-                          <div className="flex flex-col items-stretch gap-1 sm:items-end">
-                            <Button
-                              size="sm"
-                              variant={registered ? "secondary" : "default"}
-                              disabled={
-                                registered ||
-                                registeringKey === key ||
-                                (!findExistingSinglePick(pick) &&
-                                  (stakeCLP == null || exceedsBankroll))
-                              }
-                              onClick={() => handleRegister(pick)}
-                            >
-                              {registered ? (
-                                <>
-                                  <Check className="h-3.5 w-3.5" aria-hidden /> Registrado
-                                </>
-                              ) : registeringKey === key ? (
-                                <>
-                                  <Loader2
-                                    className="h-3.5 w-3.5 animate-spin"
-                                    aria-hidden
-                                  />
-                                  Guardando…
-                                </>
-                              ) : (
-                                <>
-                                  <Pin className="h-3.5 w-3.5" aria-hidden />
-                                  Registrar pick en historial
-                                </>
-                              )}
-                            </Button>
-                            {registered && (
-                              <Link
-                                href="/stats"
-                                className="inline-flex min-h-11 items-center justify-center text-center text-sm text-[#0a84ff] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]"
-                              >
-                                Ver en Estadísticas
-                              </Link>
-                            )}
-                          </div>
-                        </div>
-                      </li>
-                    );
-                  })}
+                    )}
+                    visiblePickCount={visiblePicks.length}
+                    registering={registeringKey === key}
+                    canRegister={
+                      Boolean(findExistingSinglePick(pick)) ||
+                      (stakeCLP != null && !exceedsBankroll)
+                    }
+                    onRegister={() => handleRegister(pick)}
+                  />
+                );
+              })}
             </ul>
           </div>
           </>
@@ -577,5 +486,160 @@ export function SafePicksList({
         ) : null}
       </BottomSheet>
     </Card>
+  );
+}
+
+function SafePickCard({
+  pick,
+  registered,
+  savedStake,
+  categoryBadge,
+  visiblePickCount,
+  registering,
+  canRegister,
+  onRegister,
+}: {
+  pick: SafePickItem;
+  registered: boolean;
+  savedStake?: number;
+  categoryBadge: string | null;
+  visiblePickCount: number;
+  registering: boolean;
+  canRegister: boolean;
+  onRegister: () => void;
+}) {
+  const explicit = getExplicitPickFromLeg(pick);
+  const valueBadge = formatValueBadge(pick.edge);
+  const contextLabels = contextBadgeLabels(pick.contextFlags).slice(0, 3);
+  const aiApproved = pick.aiJudge?.approved !== false;
+
+  return (
+    <li className="lift overflow-hidden rounded-3xl bg-white/[0.04] ring-1 ring-white/10">
+      <div className="border-b border-white/8 px-4 py-3.5 sm:px-5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          <span className="rounded-full bg-white/8 px-2.5 py-0.5 text-[11px] font-medium text-neutral-300 ring-1 ring-white/10">
+            {pick.leagueName || "Otros"}
+          </span>
+          {categoryBadge ? (
+            <Badge
+              variant="info"
+              className="max-w-[14rem] truncate font-normal"
+              title={categoryBadge}
+            >
+              {categoryBadge}
+            </Badge>
+          ) : null}
+          <span className="text-xs tabular-nums text-neutral-500">
+            {formatKickoffTime(pick.kickoff)} CL
+          </span>
+          {valueBadge ? (
+            <Badge variant="warning" className="ml-auto gap-1">
+              <Flame className="h-3 w-3" aria-hidden />
+              {valueBadge}
+            </Badge>
+          ) : null}
+        </div>
+        <h3 className="mt-2.5 text-lg font-bold leading-snug tracking-tight text-white sm:text-xl">
+          {pick.matchLabel}
+        </h3>
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          <span className="rounded-full bg-[#30d158]/12 px-2.5 py-0.5 text-[11px] font-medium text-[#30d158] ring-1 ring-[#30d158]/25">
+            {formatPercent(pick.modelProbability)} modelo
+          </span>
+          <span className="rounded-full bg-[#0a84ff]/12 px-2.5 py-0.5 text-[11px] font-medium text-[#64d2ff] ring-1 ring-[#0a84ff]/25">
+            Edge {formatPercent(pick.edge)}
+          </span>
+          {contextLabels.map((label) => (
+            <span
+              key={label}
+              className="rounded-full bg-white/6 px-2.5 py-0.5 text-[11px] font-normal text-neutral-400 ring-1 ring-white/10"
+            >
+              {label}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-3 px-4 py-4 sm:px-5">
+        <div className="rounded-2xl border border-[#0a84ff]/25 bg-gradient-to-br from-[#0a84ff]/14 via-[#0a84ff]/6 to-transparent p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-[#64d2ff]/75">
+                Tu apuesta
+              </p>
+              <p className="mt-1 text-sm font-semibold leading-snug text-white">
+                {formatExplicitBetLine(explicit)}
+              </p>
+            </div>
+            <p className="shrink-0 font-mono text-2xl font-bold leading-none text-white">
+              @{formatOdds(pick.odds)}
+            </p>
+          </div>
+          <SingleStakeBadge
+            modelProbability={pick.modelProbability}
+            odds={pick.odds}
+            pickCount={visiblePickCount}
+            className="mt-3"
+          />
+        </div>
+
+        {registered && typeof savedStake === "number" && savedStake > 0 ? (
+          <div className="rounded-xl bg-[#30d158]/10 px-3.5 py-2.5 text-sm text-[#30d158] ring-1 ring-[#30d158]/20">
+            <span className="font-medium">Apostado {formatCLP(savedStake)}</span>
+            <span className="mx-1.5 text-[#30d158]/50">·</span>
+            <span>retorno potencial {formatCLP(savedStake * pick.odds)}</span>
+          </div>
+        ) : null}
+
+        {pick.aiJudge ? (
+          <div
+            className={cn(
+              "rounded-2xl border-l-[3px] px-3.5 py-3",
+              aiApproved
+                ? "border-[#30d158] bg-[#30d158]/8"
+                : "border-[#ff453a] bg-[#ff453a]/8"
+            )}
+          >
+            <AiJudgeBadge verdict={pick.aiJudge} />
+          </div>
+        ) : null}
+
+        <PickLegDetails explicit={explicit} />
+
+        <div className="flex flex-col gap-2 border-t border-white/8 pt-3 sm:flex-row sm:items-center sm:justify-end">
+          <Button
+            size="sm"
+            variant={registered ? "secondary" : "default"}
+            disabled={registered || registering || !canRegister}
+            onClick={onRegister}
+            className="w-full sm:w-auto sm:min-w-[12rem]"
+          >
+            {registered ? (
+              <>
+                <Check className="h-3.5 w-3.5" aria-hidden /> Registrado
+              </>
+            ) : registering ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                Guardando…
+              </>
+            ) : (
+              <>
+                <Pin className="h-3.5 w-3.5" aria-hidden />
+                Registrar pick
+              </>
+            )}
+          </Button>
+          {registered ? (
+            <Link
+              href="/stats"
+              className="inline-flex min-h-10 items-center justify-center text-center text-sm text-[#0a84ff] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff] sm:px-3"
+            >
+              Ver en Estadísticas
+            </Link>
+          ) : null}
+        </div>
+      </div>
+    </li>
   );
 }

@@ -21,7 +21,10 @@ import {
   recordGroqCall,
 } from "./groq-quota";
 import { chileDateString } from "./utils";
+import { contextBadgeLabels } from "./context-engine";
+import { humanizeAiJudgeProse } from "./ai-judge-text";
 
+export { humanizeAiJudgeProse } from "./ai-judge-text";
 export { passesAiJudgeGate } from "./ai-judge-gate";
 
 /** Official GroqCloud production IDs; first is default. Override with GROQ_MODEL. */
@@ -116,12 +119,16 @@ const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const PERMANENT_EXPIRES = new Date("9999-12-31T00:00:00.000Z");
 
 const SYSTEM_PROMPT = `You are an expert sports prediction judge for football (soccer) bets.
-Analyze the provided match data (Poisson xG, market sanity, context flags, known injuries).
+Analyze the provided match data (Poisson xG, market sanity, context factors, known injuries).
 Do NOT invent injuries, rotations, or news not present in the input.
 If there is no clear high-risk evidence in the data, approved must be true.
 Output strictly a JSON object with key "verdicts" containing an array of match evaluation objects.
 Each object: {"fixtureId":string,"approved":boolean,"vetoReason":string|null,"confidenceScore":number,"summary":string}
-confidenceScore between 0 and 1. summary in Spanish, 1-2 sentences. Include every listed fixtureId.`;
+confidenceScore between 0 and 1.
+summary and vetoReason in Spanish, 1-2 clear sentences for a bettor (not a developer).
+Never use internal codes (KEY_INJURY_CLUSTER, H2H_DRAWISH, FATIGUE_AWAY, etc.).
+Explain what each factor means and why it supports or conflicts with the chosen bet (e.g. "doble visitante", not "x2").
+Include every listed fixtureId.`;
 
 export type AiJudgeFixtureInput = {
   fixtureId: string;
@@ -165,17 +172,20 @@ function normalizeVerdict(raw: Record<string, unknown>): AIVerdict {
     !approved && typeof raw.vetoReason === "string" && raw.vetoReason.trim()
       ? raw.vetoReason.trim()
       : null;
-  const summary =
+  const summaryRaw =
     typeof raw.summary === "string" && raw.summary.trim()
       ? raw.summary.trim()
       : approved
         ? "Sin alertas cualitativas relevantes."
         : (vetoReason ?? "Riesgo cualitativo detectado por IA.");
+  const summary = humanizeAiJudgeProse(summaryRaw);
   return {
     approved,
     vetoReason: approved
       ? null
-      : (vetoReason ?? "Riesgo cualitativo detectado por IA."),
+      : humanizeAiJudgeProse(
+          vetoReason ?? "Riesgo cualitativo detectado por IA."
+        ),
     confidenceScore: clampConfidence(raw.confidenceScore),
     summary,
   };
@@ -387,7 +397,9 @@ function formatFixtureLine(f: AiJudgeFixtureInput, i: number): string {
   }
   if (f.odds != null) bits.push(`odds=${f.odds}`);
   if (f.edge != null) bits.push(`edge=${(f.edge * 100).toFixed(1)}%`);
-  if (f.contextFlags?.length) bits.push(`flags=${f.contextFlags.join(",")}`);
+  if (f.contextFlags?.length) {
+    bits.push(`contexto=${contextBadgeLabels(f.contextFlags).join("; ")}`);
+  }
   if (f.injuriesNote) bits.push(`injuries=${f.injuriesNote}`);
   return bits.join(" | ");
 }
@@ -402,6 +414,7 @@ async function callBatchGroq(
   if (!client) return empty;
 
   const promptContent = `Evalúa estos partidos como juez cualitativo final. Solo veto (approved=false) con evidencia clara en los datos.
+Escribe summary y vetoReason en español claro para el apostador: explica el porqué con frases completas, sin códigos internos ni abreviaturas de mercado (usa "doble visitante", no "x2").
 
 Partidos:
 ${fixtures.map(formatFixtureLine).join("\n")}

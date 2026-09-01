@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { runReplayBacktest } from "@/lib/backtest-replay";
+import { loadSettledPicksForBrier } from "@/lib/learning-engine";
 import {
   fetchHistoricalMatches,
   parseBacktestMarket,
@@ -45,6 +47,7 @@ export async function GET(request: NextRequest) {
         : 1.85;
 
     const market = parseBacktestMarket(searchParams.get("market"));
+    const engine = (searchParams.get("engine") ?? "replay").trim().toLowerCase();
 
     const matches = await fetchHistoricalMatches(competition, season);
     if (matches.length === 0) {
@@ -68,15 +71,31 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const summary = runPaperBacktest(matches, {
-      threshold,
-      minOdds,
-      maxOdds,
-      market,
-    });
+    const brierRows =
+      engine === "replay"
+        ? await loadSettledPicksForBrier().catch(() => [])
+        : [];
+
+    const summary =
+      engine === "legacy"
+        ? runPaperBacktest(matches, {
+            threshold,
+            minOdds,
+            maxOdds,
+            market,
+          })
+        : await runReplayBacktest(matches, {
+            threshold,
+            minOdds,
+            maxOdds,
+            market,
+            competition,
+            brierRows,
+          });
 
     return NextResponse.json({
       success: true,
+      engine: engine === "legacy" ? "legacy" : "replay",
       competition,
       season,
       ...summary,

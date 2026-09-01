@@ -384,6 +384,16 @@ export interface ParlayLeg {
   aiJudge?: AIVerdict;
 }
 
+/** Same-game parlay: primary + secondary leg from one fixture. */
+export interface SameGameBetBuilder {
+  matchId: string;
+  matchLabel: string;
+  legs: [ParlayLeg, ParlayLeg];
+  combinedOdds: number;
+  jointProbability: number;
+  valueMarginPercent: number;
+}
+
 export interface SafePickItem {
   matchId: string;
   matchLabel: string;
@@ -452,6 +462,8 @@ export interface GeneratedParlay {
   status?: ParlayStatus;
   /** Monopoly: whether the ticket was generated with the rotation filter off. */
   ignoreRotationFilter?: boolean;
+  /** Same-game combined picks (primary + secondary leg). */
+  betBuilders?: SameGameBetBuilder[];
 }
 
 /** Canonical alias for a generated accumulator ticket. */

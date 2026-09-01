@@ -8,6 +8,7 @@ import type {
   ParlayConfig,
   ParlayLeg,
   RiskTier,
+  SameGameBetBuilder,
   StrategyMode,
 } from "./types";
 import {
@@ -24,7 +25,7 @@ import {
   MIN_SELECTION_ODDS,
   MIN_VALUE_MARGIN,
 } from "./poisson";
-import { isValueBet } from "./value-finder";
+import { isValueBet, VALUE_MARGIN_THRESHOLD_PCT, valueMarginPercent } from "./value-finder";
 import {
   derbyPreferredMarkets,
   isHighRiskDerby,
@@ -270,6 +271,84 @@ function toLeg(match: Match, pick: MarketPrediction): ParlayLeg {
   };
 }
 
+const BET_BUILDER_PRIMARY = new Set<MarketType>([
+  "1x",
+  "x2",
+  "over_1_5",
+  "home_scores",
+  "away_scores",
+]);
+
+function isBetBuilderSecondaryMarket(market: MarketType): boolean {
+  return market.startsWith("corners_") || market.startsWith("cards_");
+}
+
+/**
+ * Same-game combos: low-risk primary leg + high-probability secondary leg.
+ * // ponytail: independence assumption, upgrade with copula when calibrated
+ */
+export function buildSameGameBetBuilders(
+  matches: Match[],
+  options?: { minValuePct?: number }
+): SameGameBetBuilder[] {
+  const minValuePct = options?.minValuePct ?? VALUE_MARGIN_THRESHOLD_PCT;
+  const primaryMinProb = 0.8;
+  const secondaryMinProb = 0.7;
+  const builders: SameGameBetBuilder[] = [];
+
+  for (const match of matches) {
+    if (!hasBookmakerOdds(match.odds)) continue;
+
+    const { markets } = predictMatchMarkets(match, {
+      minSafeProbability: primaryMinProb,
+      minSafeOdds: MIN_SELECTION_ODDS,
+      maxSafeOdds: 1.85,
+      asOf: new Date(match.kickoff),
+    });
+
+    const primary = markets
+      .filter(
+        (m) =>
+          BET_BUILDER_PRIMARY.has(m.market) &&
+          m.modelProbability >= primaryMinProb &&
+          m.isSafePick
+      )
+      .sort((a, b) => b.modelProbability - a.modelProbability)[0];
+
+    const secondary = markets
+      .filter(
+        (m) =>
+          isBetBuilderSecondaryMarket(m.market) &&
+          m.modelProbability >= secondaryMinProb
+      )
+      .sort((a, b) => b.modelProbability - a.modelProbability)[0];
+
+    if (!primary || !secondary) continue;
+
+    const legPrimary = toLeg(match, primary);
+    const legSecondary = toLeg(match, secondary);
+    const combinedOdds = Number((legPrimary.odds * legSecondary.odds).toFixed(4));
+    const jointProbability = Number(
+      (legPrimary.modelProbability * legSecondary.modelProbability).toFixed(6)
+    );
+    const margin = valueMarginPercent(jointProbability, combinedOdds);
+    if (!isValueBet(jointProbability, combinedOdds, minValuePct)) continue;
+
+    builders.push({
+      matchId: match.id,
+      matchLabel: `${match.home.name} vs ${match.away.name}`,
+      legs: [legPrimary, legSecondary],
+      combinedOdds,
+      jointProbability,
+      valueMarginPercent: Number(margin.toFixed(2)),
+    });
+  }
+
+  return builders.sort(
+    (a, b) => b.valueMarginPercent - a.valueMarginPercent
+  );
+}
+
 type RankMode = "edge" | "odds" | "probability" | "balanced";
 
 function isMarketAllowed(
@@ -343,6 +422,7 @@ export function collectSafePicks(
       minSafeProbability: resolveContextMinProbability(baseMinProb, resolved),
       minSafeOdds: leagueMinOdds,
       maxSafeOdds: config.maxOdds,
+      asOf: new Date(resolved.kickoff),
     });
 
     let loggedSanityDrop = false;
@@ -694,7 +774,9 @@ export function generateParlay(
 
   const best = candidates[0];
   // Keep messaging relative to the user-facing 15-leg goal
-  return withFillNotice(best, targetLegCount, bestBackfillMeta);
+  const parlay = withFillNotice(best, targetLegCount, bestBackfillMeta);
+  const betBuilders = buildSameGameBetBuilders(eliteMatches);
+  return betBuilders.length > 0 ? { ...parlay, betBuilders } : parlay;
 }
 
 /** Last pass: Groq Llama 3.3 70B audit after Poisson + odds sanity. */
@@ -1049,6 +1131,7 @@ export function buildMatchPredictions(
           ),
           minSafeOdds: options?.minSafeOdds ?? MIN_SELECTION_ODDS,
           maxSafeOdds: options?.maxSafeOdds ?? 1.85,
+          asOf: new Date(match.kickoff),
         });
 
       const markets = options?.safeMarketsOnly

@@ -324,6 +324,18 @@ export function contextBadgeLabels(flags: string[] | undefined): string[] {
   return out;
 }
 
+/** Replace internal context flag codes in AI-judge prose with Spanish notes. */
+export function humanizeContextFlagsInText(text: string): string {
+  if (!text) return text;
+  let out = text;
+  const flags = Object.keys(FLAG_NOTES).sort((a, b) => b.length - a.length);
+  for (const flag of flags) {
+    const note = FLAG_NOTES[flag];
+    out = out.replace(new RegExp(`\\b${flag}\\b`, "g"), note);
+  }
+  return out;
+}
+
 /**
  * λ multipliers from key absences (attacking / defensive rating).
  * Striker out → attack −5…−8%; starting GK out → defense weakness ↑.

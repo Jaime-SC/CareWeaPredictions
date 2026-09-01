@@ -30,7 +30,54 @@ export type TeamProfileSnapshot = {
   keyAbsencesCount: number;
   /** Brier-driven Poisson multiplier (1 = neutral). */
   brierCalibrationFactor?: number;
+  /** Advanced metrics (offline ingest; optional). */
+  avgNpxGScored?: number | null;
+  avgNpxGConceded?: number | null;
+  avgPPDA?: number | null;
+  avgCornersFor?: number | null;
+  avgCornersAgainst?: number | null;
+  avgCardsFor?: number | null;
+  avgCardsAgainst?: number | null;
   updatedAt?: string;
+};
+
+/** Fields writable via bulk advanced-metrics ingest. */
+export type AdvancedMetricsFields = {
+  avgNpxGScored?: number | null;
+  avgNpxGConceded?: number | null;
+  avgPPDA?: number | null;
+  avgCornersFor?: number | null;
+  avgCornersAgainst?: number | null;
+  avgCardsFor?: number | null;
+  avgCardsAgainst?: number | null;
+};
+
+export type AdvancedMetricsUpdate = AdvancedMetricsFields & {
+  teamId: number;
+  teamName?: string;
+  primaryLeagueId?: number | null;
+};
+
+/** Point-in-time snapshot row (ingest / replay). asOfDate = YYYY-MM-DD cutoff. */
+export type ProfileSnapshotUpdate = AdvancedMetricsFields & {
+  teamId: number;
+  asOfDate: string;
+  teamName?: string;
+  primaryLeagueId?: number | null;
+  totalMatchesAnalyzed?: number;
+  homeMatchesCount?: number;
+  awayMatchesCount?: number;
+  avgGoalsScoredHome?: number;
+  avgGoalsConcededHome?: number;
+  avgGoalsScoredAway?: number;
+  avgGoalsConcededAway?: number;
+  over15GoalsRate?: number;
+  over15GoalsRateHome?: number;
+  over15GoalsRateAway?: number;
+  over25GoalsRate?: number;
+  cleanSheetRate?: number;
+  cleanSheetRateHome?: number;
+  cleanSheetRateAway?: number;
 };
 
 export const MANAGER_CHANGE_COOLDOWN_DAYS = 14;

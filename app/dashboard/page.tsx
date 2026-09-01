@@ -1,6 +1,10 @@
 "use client";
 
 import { MatchCard } from "@/components/MatchCard";
+import {
+  AiJudgeVetoFilterSwitch,
+  useHideAiVetoesPref,
+} from "@/components/ai-judge-veto-filter";
 import { LivePicksOverview } from "@/components/StatsOverview";
 import { SingleStakeBadge } from "@/components/stake-badge";
 import { Badge } from "@/components/ui/badge";
@@ -26,8 +30,11 @@ import {
   loadStoredDashboard,
   saveStoredDashboard,
 } from "@/lib/dashboard-storage";
-import { passesAiJudgeGate } from "@/lib/ai-judge-gate";
 import { mergePersistedAiJudge } from "@/lib/ai-judge-persist";
+import {
+  countAiVetoes,
+  passesAiJudgeGate,
+} from "@/lib/ai-judge-gate";
 import type { MatchPrediction } from "@/lib/types";
 import {
   formatKickoff,
@@ -54,6 +61,7 @@ export default function DashboardPage() {
   } = useApiRateLimitCooldown();
 
   const hasPaintedRef = useRef(false);
+  const [hideAiVetoes, setHideAiVetoes] = useHideAiVetoesPref();
 
   const applySnapshot = useCallback(
     (
@@ -166,10 +174,9 @@ export default function DashboardPage() {
   const busy = loading || refreshing;
   const showFullSpinner = loading && predictions.length === 0 && !emptyMessage;
 
-  const safePicks = useMemo(
+  const allSafePicks = useMemo(
     () =>
       predictions
-        .filter((p) => passesAiJudgeGate(p.aiJudge))
         .flatMap((p) =>
           p.markets
             .filter((m) => m.isSafePick)
@@ -177,6 +184,24 @@ export default function DashboardPage() {
         )
         .sort((a, b) => b.market.edge - a.market.edge),
     [predictions]
+  );
+
+  const safePicks = useMemo(
+    () =>
+      hideAiVetoes
+        ? allSafePicks.filter(({ prediction }) =>
+            passesAiJudgeGate(prediction.aiJudge)
+          )
+        : allSafePicks,
+    [allSafePicks, hideAiVetoes]
+  );
+
+  const vetoCount = useMemo(
+    () =>
+      countAiVetoes(
+        allSafePicks.map(({ prediction }) => prediction)
+      ),
+    [allSafePicks]
   );
 
   const avgEdge = useMemo(() => {
@@ -288,11 +313,21 @@ export default function DashboardPage() {
       )}
 
       <section className="space-y-4" aria-labelledby="top-safe-picks">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="h-5 w-5 text-[#30d158]" aria-hidden />
-          <h2 id="top-safe-picks" className="text-xl font-semibold text-white">
-            Top Safe Picks
-          </h2>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-[#30d158]" aria-hidden />
+            <h2 id="top-safe-picks" className="text-xl font-semibold text-white">
+              Top Safe Picks
+            </h2>
+          </div>
+          {!showFullSpinner && !error && allSafePicks.length > 0 ? (
+            <AiJudgeVetoFilterSwitch
+              hideVetoes={hideAiVetoes}
+              onChange={setHideAiVetoes}
+              vetoCount={vetoCount}
+              className="sm:max-w-md"
+            />
+          ) : null}
         </div>
 
         {showFullSpinner ? (
@@ -308,7 +343,9 @@ export default function DashboardPage() {
         ) : error ? null : safePicks.length === 0 ? (
           <Card>
             <CardContent className="p-8 text-center text-sm text-neutral-400">
-              {emptyMessage ?? "No hay safe picks con los filtros actuales."}
+              {allSafePicks.length > 0 && hideAiVetoes
+                ? "Todos los safe picks visibles están vetados por IA Judge. Desactiva el filtro para verlos."
+                : (emptyMessage ?? "No hay safe picks con los filtros actuales.")}
             </CardContent>
           </Card>
         ) : (

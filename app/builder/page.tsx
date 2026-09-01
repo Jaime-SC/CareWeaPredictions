@@ -41,7 +41,6 @@ import {
   ticketToParlay,
   ticketsToSafePicks,
 } from "@/lib/builder-restore";
-import { passesAiJudgeGate } from "@/lib/ai-judge-gate";
 import { mergePersistedAiJudge } from "@/lib/ai-judge-persist";
 import type { GeneratedParlay, SafePickItem, StrategyMode } from "@/lib/types";
 import { chileDateString, getWeeklyDateRange } from "@/lib/utils";
@@ -119,11 +118,8 @@ export default function BuilderPage() {
         const picks = ticketsToSafePicks(
           selectSafeTickets(tickets, selectedDate)
         );
-        const restored = mergePersistedAiJudge(picks).filter((p) =>
-          passesAiJudgeGate(p.aiJudge)
-        );
-        if (restored.length === 0) return;
-        setSafePicks(restored);
+        if (picks.length === 0) return;
+        setSafePicks(mergePersistedAiJudge(picks));
         setGenerated(true);
         setFromCache(true);
       })();
@@ -187,7 +183,7 @@ export default function BuilderPage() {
 
         const picks = mergePersistedAiJudge(
           (data.safePicks ?? []) as SafePickItem[]
-        ).filter((p) => passesAiJudgeGate(p.aiJudge));
+        );
         setSafePicks(picks);
         setGenerated(true);
         if (!data.cached) {

@@ -66,3 +66,7 @@ CLAUDE.md
 
 # internal audit / planning artifacts (not for public repo)
 CAREWEAPREDICTIONS_*.md
+
+# python
+__pycache__/
+*.py[cod]

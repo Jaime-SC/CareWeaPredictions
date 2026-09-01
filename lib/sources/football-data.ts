@@ -308,7 +308,7 @@ function emptyAgg(): TeamAgg {
   };
 }
 
-/** Season team avgs → Poisson λ (leave-one-out soft: use full season sample). */
+/** Season team avgs → Poisson λ (legacy — leaky; use replay engine for honest backtest). */
 function buildTeamAggs(matches: FdMatchResult[]): {
   byTeam: Map<string, TeamAgg>;
   leagueHomeAvg: number;

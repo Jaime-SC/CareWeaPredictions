@@ -37,6 +37,8 @@ export type BrierPickRow = {
   outcome: "WON" | "LOST";
   homeTeam: string;
   awayTeam: string;
+  /** Fixture kickoff — required for walk-forward filtering. */
+  kickoff?: Date;
 };
 
 export type BrierBucketStat = {
@@ -408,7 +410,10 @@ export function applyBrierLearningToWeights(
   };
 }
 
-export async function loadSettledPicksForBrier(): Promise<BrierPickRow[]> {
+export async function loadSettledPicksForBrier(opts?: {
+  kickoffBefore?: Date;
+  kickoffAfter?: Date;
+}): Promise<BrierPickRow[]> {
   const predictions = await prisma.prediction.findMany({
     where: { outcome: { in: ["WON", "LOST"] } },
     select: {
@@ -422,22 +427,45 @@ export async function loadSettledPicksForBrier(): Promise<BrierPickRow[]> {
           leagueId: true,
           homeTeam: true,
           awayTeam: true,
+          matchDate: true,
         },
       },
     },
     orderBy: { createdAt: "desc" },
   });
 
-  return predictions.map((p) => ({
-    league: p.fixture.leagueName,
-    leagueId: p.fixture.leagueId,
-    market: p.market,
-    modelProbability: p.modelProbability,
-    odds: p.odds,
-    outcome: p.outcome === "WON" ? ("WON" as const) : ("LOST" as const),
-    homeTeam: p.fixture.homeTeam,
-    awayTeam: p.fixture.awayTeam,
-  }));
+  const beforeMs = opts?.kickoffBefore?.getTime();
+  const afterMs = opts?.kickoffAfter?.getTime();
+
+  return predictions
+    .map((p) => {
+      const kickoff =
+        p.fixture.matchDate instanceof Date
+          ? p.fixture.matchDate
+          : new Date(p.fixture.matchDate);
+      return {
+        league: p.fixture.leagueName,
+        leagueId: p.fixture.leagueId,
+        market: p.market,
+        modelProbability: p.modelProbability,
+        odds: p.odds,
+        outcome: p.outcome === "WON" ? ("WON" as const) : ("LOST" as const),
+        homeTeam: p.fixture.homeTeam,
+        awayTeam: p.fixture.awayTeam,
+        kickoff,
+      };
+    })
+    .filter((row) => {
+      const t = row.kickoff?.getTime();
+      if (t == null || !Number.isFinite(t)) return true;
+      if (beforeMs != null && Number.isFinite(beforeMs) && t >= beforeMs) {
+        return false;
+      }
+      if (afterMs != null && Number.isFinite(afterMs) && t < afterMs) {
+        return false;
+      }
+      return true;
+    });
 }
 
 function normalizeTeamName(name: string): string {
@@ -482,6 +510,21 @@ export async function persistTeamBrierFactors(
     }
   }
   return updated;
+}
+
+/** Walk-forward: only picks with kickoff strictly before asOf tune weights. */
+export function applyBrierLearningToWeightsAsOf(
+  rows: BrierPickRow[],
+  asOf: Date,
+  previous: ModelWeights = loadModelWeights()
+): BrierLearningResult {
+  const asOfMs = asOf.getTime();
+  const train = rows.filter((r) => {
+    const t = r.kickoff?.getTime();
+    if (t == null || !Number.isFinite(t)) return true;
+    return t < asOfMs;
+  });
+  return applyBrierLearningToWeights(train, previous);
 }
 
 /**

@@ -2,7 +2,13 @@
  * Phase 2 market list + Poisson λ / O-U helpers for corners, cards, HT goals.
  * // ponytail: independent Poisson; upgrade to NegBin when overdispersion calibrated
  */
+import type { TeamProfileSnapshot } from "./team-profile-shared";
 import type { MarketType, Match, MatchOdds } from "./types";
+
+export type Phase2ProfileHints = {
+  home?: TeamProfileSnapshot | null;
+  away?: TeamProfileSnapshot | null;
+};
 
 function poissonPmf(k: number, lambda: number): number {
   if (k < 0) return 0;
@@ -139,18 +145,27 @@ function clampLam(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
 
-export function estimateCornerCardLambdas(match: Match): CornerCardLambdas {
+export function estimateCornerCardLambdas(
+  match: Match,
+  profiles?: Phase2ProfileHints
+): CornerCardLambdas {
+  const homeProfile = profiles?.home ?? null;
+  const awayProfile = profiles?.away ?? null;
   const hFor =
+    homeProfile?.avgCornersFor ??
     match.home.homeCornersForAvg ??
     match.home.cornersForAvg ??
     CORNER_PRIOR_TOTAL * CORNER_HOME_SHARE;
   const aFor =
+    awayProfile?.avgCornersFor ??
     match.away.awayCornersForAvg ??
     match.away.cornersForAvg ??
     CORNER_PRIOR_TOTAL * (1 - CORNER_HOME_SHARE);
   // Blend for+against lightly when both sides have data
-  const hAgainst = match.home.cornersAgainstAvg;
-  const aAgainst = match.away.cornersAgainstAvg;
+  const hAgainst =
+    homeProfile?.avgCornersAgainst ?? match.home.cornersAgainstAvg;
+  const aAgainst =
+    awayProfile?.avgCornersAgainst ?? match.away.cornersAgainstAvg;
   let cornersHome = hFor;
   let cornersAway = aFor;
   if (aAgainst != null && aAgainst > 0) {
@@ -164,14 +179,16 @@ export function estimateCornerCardLambdas(match: Match): CornerCardLambdas {
   const cornersTotal = clampLam(cornersHome + cornersAway, 5, 16);
 
   const cardsHome = clampLam(
-    match.home.homeYellowCardsAvg ??
+    homeProfile?.avgCardsFor ??
+      match.home.homeYellowCardsAvg ??
       match.home.yellowCardsAvg ??
       CARDS_PRIOR_TOTAL * 0.5,
     0.4,
     5
   );
   const cardsAway = clampLam(
-    match.away.awayYellowCardsAvg ??
+    awayProfile?.avgCardsFor ??
+      match.away.awayYellowCardsAvg ??
       match.away.yellowCardsAvg ??
       CARDS_PRIOR_TOTAL * 0.5,
     0.4,
@@ -214,9 +231,10 @@ function ht1x2Probs(
 
 export function phase2MarketProbs(
   match: Match,
-  ftXg: { home: number; away: number }
+  ftXg: { home: number; away: number },
+  profiles?: Phase2ProfileHints
 ): Partial<Record<MarketType, number>> {
-  const L = estimateCornerCardLambdas(match);
+  const L = estimateCornerCardLambdas(match, profiles);
   const htH = Math.max(0.05, ftXg.home * HT_GOALS_FRAC);
   const htA = Math.max(0.05, ftXg.away * HT_GOALS_FRAC);
   const ht = ht1x2Probs(htH, htA);
