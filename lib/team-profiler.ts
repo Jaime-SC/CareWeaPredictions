@@ -478,7 +478,7 @@ export function buildTeamEventsFromFixtures(
           totalGoals: total,
           teamName: mapped?.home || row.homeTeam,
         },
-        leagueId
+        leagueId ?? null
       );
     }
     if (awayId != null) {
@@ -492,7 +492,7 @@ export function buildTeamEventsFromFixtures(
           totalGoals: total,
           teamName: mapped?.away || row.awayTeam,
         },
-        leagueId
+        leagueId ?? null
       );
     }
   }
@@ -800,6 +800,97 @@ export async function bulkUpsertProfileSnapshots(
   return result;
 }
 
+function ymdUtc(d: Date): string {
+  return asOfDateUtc(d).toISOString().slice(0, 10);
+}
+
+/**
+ * One MatchFixture scan → TeamProfileSnapshot rows for calendar day of asOf.
+ * Rolling goals from matchDate < asOf; advanced metrics from prior snapshot.
+ */
+export async function materializeMatchdaySnapshots(
+  asOf = new Date()
+): Promise<SnapshotBulkResult> {
+  if (!Number.isFinite(asOf.getTime())) {
+    return { upserted: 0, skipped: 0, errors: ["invalid asOf"] };
+  }
+
+  const fixtures = await prisma.matchFixture.findMany({
+    where: {
+      finalScore: { not: null },
+      matchDate: { lt: asOf },
+    },
+    select: {
+      apiFixtureId: true,
+      homeTeam: true,
+      awayTeam: true,
+      finalScore: true,
+      status: true,
+      matchDate: true,
+      leagueId: true,
+    },
+    orderBy: { matchDate: "desc" },
+    take: 5_000,
+  });
+
+  const rows = fixtures.filter(
+    (r) => isFixtureFinished(r.status) || Boolean(parseScore(r.finalScore))
+  );
+  const { byFixture, byName } = await loadTeamIdMaps();
+  const { eventsByTeam, originLeagueByTeam } = buildTeamEventsFromFixtures(
+    rows,
+    { asOf, byFixture, byName }
+  );
+
+  const asOfDate = ymdUtc(asOf);
+  const updates: ProfileSnapshotUpdate[] = [];
+
+  for (const [teamId, events] of eventsByTeam) {
+    const agg = aggregateTeamEvents(events);
+    const leagueId = originLeagueByTeam.get(teamId) ?? null;
+    const advanced = await loadPriorAdvancedSnapshot(teamId, asOf);
+    updates.push({
+      teamId,
+      asOfDate,
+      teamName: agg.teamName,
+      primaryLeagueId: leagueId,
+      totalMatchesAnalyzed: agg.totalMatchesAnalyzed,
+      homeMatchesCount: agg.homeMatchesCount,
+      awayMatchesCount: agg.awayMatchesCount,
+      avgGoalsScoredHome: agg.avgGoalsScoredHome,
+      avgGoalsConcededHome: agg.avgGoalsConcededHome,
+      avgGoalsScoredAway: agg.avgGoalsScoredAway,
+      avgGoalsConcededAway: agg.avgGoalsConcededAway,
+      over15GoalsRate: agg.over15GoalsRate,
+      over15GoalsRateHome: agg.over15GoalsRateHome,
+      over15GoalsRateAway: agg.over15GoalsRateAway,
+      over25GoalsRate: agg.over25GoalsRate,
+      cleanSheetRate: agg.cleanSheetRate,
+      cleanSheetRateHome: agg.cleanSheetRateHome,
+      cleanSheetRateAway: agg.cleanSheetRateAway,
+      ...advanced,
+    });
+  }
+
+  return bulkUpsertProfileSnapshots(updates);
+}
+
+async function loadPriorAdvancedSnapshot(
+  teamId: number,
+  asOf: Date
+): Promise<Partial<AdvancedMetricsFields>> {
+  try {
+    const row = await prisma.teamProfileSnapshot.findFirst({
+      where: { teamId, asOfDate: { lt: asOfDateUtc(asOf) } },
+      orderBy: { asOfDate: "desc" },
+    });
+    if (!row) return {};
+    return pickAdvancedMetrics(row);
+  } catch {
+    return {};
+  }
+}
+
 async function loadAdvancedSnapshotAt(
   teamId: number,
   asOf: Date
@@ -961,17 +1052,20 @@ export async function getTeamProfileAt(
   return snapshot;
 }
 
-/** Sync read of a profile warmed for a specific cutoff. */
+/** Seed the LIVE profile cache (verify scripts / warm paths). */
+export function primeTeamProfile(snapshot: TeamProfileSnapshot): void {
+  if (!Number.isFinite(snapshot.teamId) || snapshot.teamId <= 0) return;
+  profileCache.set(snapshot.teamId, snapshot);
+}
+
+/** Sync read of a profile warmed for a specific cutoff. No LIVE fallback. */
 export function peekTeamProfileAt(
   teamId?: number | null,
   asOf?: Date | null
 ): TeamProfileSnapshot | null {
   if (teamId == null || !Number.isFinite(teamId) || teamId <= 0) return null;
-  if (asOf != null && Number.isFinite(asOf.getTime())) {
-    const cached = asOfProfileCache.get(profileAtCacheKey(teamId, asOf));
-    if (cached) return cached;
-  }
-  return peekTeamProfile(teamId);
+  if (asOf == null || !Number.isFinite(asOf.getTime())) return null;
+  return asOfProfileCache.get(profileAtCacheKey(teamId, asOf)) ?? null;
 }
 
 /** Seed the asOf cache (e.g. FD backtest computed profiles). */
@@ -984,7 +1078,7 @@ export function primeTeamProfileAt(
   trimAsOfCache();
 }
 
-/** Warm point-in-time profiles for upcoming matches (asOf = kickoff each). */
+/** Warm point-in-time profiles from Neon snapshots (no MatchFixture scan). */
 export async function warmTeamProfilesForMatches(
   matches: Array<{
     kickoff: string;
@@ -992,25 +1086,150 @@ export async function warmTeamProfilesForMatches(
     away: { id?: number };
   }>
 ): Promise<number> {
-  const tasks: Array<Promise<void>> = [];
-  const seen = new Set<string>();
+  const ids = [
+    ...new Set(
+      matches.flatMap((m) => [m.home.id, m.away.id]).filter(
+        (id): id is number => id != null && Number.isFinite(id) && id > 0
+      )
+    ),
+  ];
+  if (ids.length === 0 || matches.length === 0) return 0;
 
+  let maxDay = asOfDateUtc(new Date(0));
   for (const m of matches) {
     const asOf = new Date(m.kickoff);
     if (!Number.isFinite(asOf.getTime())) continue;
-    for (const id of [m.home.id, m.away.id]) {
-      if (id == null || !Number.isFinite(id) || id <= 0) continue;
-      const key = profileAtCacheKey(id, asOf);
-      if (seen.has(key) || asOfProfileCache.has(key)) continue;
-      seen.add(key);
-      tasks.push(
-        getTeamProfileAt(id, asOf).then(() => undefined)
-      );
-    }
+    const day = asOfDateUtc(asOf);
+    if (day.getTime() > maxDay.getTime()) maxDay = day;
   }
 
-  await Promise.all(tasks);
-  return seen.size;
+  let rows: Array<{
+    teamId: number;
+    asOfDate: Date;
+    teamName: string | null;
+    primaryLeagueId: number | null;
+    totalMatchesAnalyzed: number;
+    homeMatchesCount: number;
+    awayMatchesCount: number;
+    avgGoalsScoredHome: number;
+    avgGoalsConcededHome: number;
+    avgGoalsScoredAway: number;
+    avgGoalsConcededAway: number;
+    over15GoalsRate: number;
+    over15GoalsRateHome: number;
+    over15GoalsRateAway: number;
+    over25GoalsRate: number;
+    cleanSheetRate: number;
+    cleanSheetRateHome: number;
+    cleanSheetRateAway: number;
+    avgNpxGScored: number | null;
+    avgNpxGConceded: number | null;
+    avgPPDA: number | null;
+    avgCornersFor: number | null;
+    avgCornersAgainst: number | null;
+    avgCardsFor: number | null;
+    avgCardsAgainst: number | null;
+    createdAt: Date;
+  }> = [];
+
+  try {
+    rows = await prisma.teamProfileSnapshot.findMany({
+      where: { teamId: { in: ids }, asOfDate: { lte: maxDay } },
+      orderBy: { asOfDate: "desc" },
+    });
+  } catch (err) {
+    console.warn("[team-profiler] snapshot warm failed:", err);
+    return 0;
+  }
+
+  const byTeam = new Map<number, typeof rows>();
+  for (const row of rows) {
+    const list = byTeam.get(row.teamId);
+    if (list) list.push(row);
+    else byTeam.set(row.teamId, [row]);
+  }
+
+  let primed = 0;
+  for (const m of matches) {
+    const asOf = new Date(m.kickoff);
+    if (!Number.isFinite(asOf.getTime())) continue;
+    const dayMs = asOfDateUtc(asOf).getTime();
+    for (const id of [m.home.id, m.away.id]) {
+      if (id == null || !Number.isFinite(id) || id <= 0) continue;
+      if (asOfProfileCache.has(profileAtCacheKey(id, asOf))) continue;
+      const list = byTeam.get(id);
+      const hit = list?.find((r) => r.asOfDate.getTime() <= dayMs);
+      if (!hit) continue;
+      primeTeamProfileAt(snapshotRowToProfile(hit, null), asOf);
+      primed += 1;
+    }
+  }
+  return primed;
+}
+
+function snapshotRowToProfile(
+  row: {
+    teamId: number;
+    teamName: string | null;
+    primaryLeagueId: number | null;
+    totalMatchesAnalyzed: number;
+    homeMatchesCount: number;
+    awayMatchesCount: number;
+    avgGoalsScoredHome: number;
+    avgGoalsConcededHome: number;
+    avgGoalsScoredAway: number;
+    avgGoalsConcededAway: number;
+    over15GoalsRate: number;
+    over15GoalsRateHome: number;
+    over15GoalsRateAway: number;
+    over25GoalsRate: number;
+    cleanSheetRate: number;
+    cleanSheetRateHome: number;
+    cleanSheetRateAway: number;
+    avgNpxGScored: number | null;
+    avgNpxGConceded: number | null;
+    avgPPDA: number | null;
+    avgCornersFor: number | null;
+    avgCornersAgainst: number | null;
+    avgCardsFor: number | null;
+    avgCardsAgainst: number | null;
+    createdAt: Date;
+  },
+  live: TeamProfileSnapshot | null
+): TeamProfileSnapshot {
+  const lid = row.primaryLeagueId;
+  return {
+    teamId: row.teamId,
+    teamName: row.teamName ?? live?.teamName ?? `Team ${row.teamId}`,
+    primaryLeagueId: lid,
+    country: lid != null ? getLeagueCountry(lid) : live?.country ?? null,
+    leagueName: lid != null ? getLeagueDisplayName(lid) : live?.leagueName,
+    totalMatchesAnalyzed: row.totalMatchesAnalyzed,
+    homeMatchesCount: row.homeMatchesCount,
+    awayMatchesCount: row.awayMatchesCount,
+    avgGoalsScoredHome: row.avgGoalsScoredHome,
+    avgGoalsConcededHome: row.avgGoalsConcededHome,
+    avgGoalsScoredAway: row.avgGoalsScoredAway,
+    avgGoalsConcededAway: row.avgGoalsConcededAway,
+    over15GoalsRate: row.over15GoalsRate,
+    over15GoalsRateHome: row.over15GoalsRateHome,
+    over15GoalsRateAway: row.over15GoalsRateAway,
+    over25GoalsRate: row.over25GoalsRate,
+    cleanSheetRate: row.cleanSheetRate,
+    cleanSheetRateHome: row.cleanSheetRateHome,
+    cleanSheetRateAway: row.cleanSheetRateAway,
+    lastManagerChangeDate: live?.lastManagerChangeDate ?? null,
+    keyAbsencesCount: live?.keyAbsencesCount ?? 0,
+    brierCalibrationFactor: live?.brierCalibrationFactor ?? 1,
+    avgNpxGScored: row.avgNpxGScored,
+    avgNpxGConceded: row.avgNpxGConceded,
+    avgPPDA: row.avgPPDA,
+    avgCornersFor: row.avgCornersFor,
+    avgCornersAgainst: row.avgCornersAgainst,
+    avgCardsFor: row.avgCardsFor,
+    avgCardsAgainst: row.avgCardsAgainst,
+    updatedAt: row.createdAt.toISOString(),
+  };
 }
 
 /**

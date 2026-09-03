@@ -75,6 +75,8 @@ export type MarketType =
   | "cards_under_4_5"
   | "cards_over_5_5"
   | "cards_under_5_5"
+  // Both teams to receive a card
+  | "cards_btts"
   // Yellow cards by team
   | "cards_home_over_1_5"
   | "cards_home_under_1_5"

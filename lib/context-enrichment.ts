@@ -27,7 +27,7 @@ const CORNER_STAT_LIVE_CAP = 8;
 const CORNER_LOOKBACK = 5;
 
 type FixtureListRow = {
-  fixture?: { id?: number; status?: { short?: string } };
+  fixture?: { id?: number; date?: string; status?: { short?: string } };
   teams?: {
     home?: { id?: number };
     away?: { id?: number };
@@ -116,9 +116,16 @@ function parseH2h(
   rows: H2hRow[],
   homeId: number | undefined,
   homeName: string,
-  awayName: string
+  awayName: string,
+  asOf?: Date
 ): Match["h2h"] | null {
+  const asOfMs = asOf?.getTime();
   const finished = rows
+    .filter((r) => {
+      if (asOfMs == null) return true;
+      const t = Date.parse(r.fixture?.date ?? "");
+      return Number.isFinite(t) && t < asOfMs;
+    })
     .filter((r) => finishedShort(r.fixture?.status?.short))
     .filter((r) => r.goals?.home != null && r.goals?.away != null)
     .sort(
@@ -346,7 +353,8 @@ async function enrichTeamCornerAvgs(
   venue: "home" | "away",
   liveGet: LiveGetter | undefined,
   liveBudget: { left: number },
-  cornerStatBudget: { left: number }
+  cornerStatBudget: { left: number },
+  asOf?: Date
 ): Promise<TeamStats> {
   if (
     (venue === "home" && team.homeCornersForAvg != null && team.homeCornersForAvg > 0) ||
@@ -355,6 +363,7 @@ async function enrichTeamCornerAvgs(
     return team;
   }
 
+  const asOfMs = asOf?.getTime();
   const listKey = `fixtures_team_${teamId}_last_${CORNER_LOOKBACK}`;
   let fixtures: FixtureListRow[] = [];
   try {
@@ -371,6 +380,13 @@ async function enrichTeamCornerAvgs(
     }
   } catch (err) {
     console.warn(`[context-enrichment] corner fixtures team=${teamId}:`, err);
+  }
+
+  if (asOfMs != null && Number.isFinite(asOfMs)) {
+    fixtures = fixtures.filter((fx) => {
+      const t = Date.parse(fx.fixture?.date ?? "");
+      return Number.isFinite(t) && t < asOfMs;
+    });
   }
 
   const samples: number[] = [];
@@ -428,12 +444,13 @@ async function enrichTeamCornerAvgs(
 
 async function readCachedH2h(
   homeId: number,
-  awayId: number
+  awayId: number,
+  asOf?: Date
 ): Promise<Match["h2h"] | null> {
   const key = `h2h_${Math.min(homeId, awayId)}_${Math.max(homeId, awayId)}_last`;
   const cached = await getCachedPayload<ApiEnvelope<H2hRow[]>>(key);
   if (!cached || hasErrors(cached.errors)) return null;
-  return parseH2h(cached.response ?? [], homeId, "", "");
+  return parseH2h(cached.response ?? [], homeId, "", "", asOf);
 }
 
 /**
@@ -461,9 +478,12 @@ export async function enrichMatchContextFeatures(
       match.h2h.last4HomeWins == null;
 
     // --- H2H ---
+    const kickoffMs = Date.parse(match.kickoff);
+    const asOf =
+      Number.isFinite(kickoffMs) ? new Date(kickoffMs) : undefined;
     if (h2hEmpty && homeId && awayId) {
       const cacheKey = `h2h_${Math.min(homeId, awayId)}_${Math.max(homeId, awayId)}_last`;
-      let h2h = await readCachedH2h(homeId, awayId);
+      let h2h = await readCachedH2h(homeId, awayId, asOf);
       if (!h2h && liveBudget > 0 && liveGet) {
         try {
           // Paid plan: `last` is allowed; parseH2h still slices locally
@@ -480,7 +500,8 @@ export async function enrichMatchContextFeatures(
               json.response ?? [],
               homeId,
               match.home.name,
-              match.away.name
+              match.away.name,
+              asOf
             );
           }
         } catch (err) {
@@ -490,7 +511,13 @@ export async function enrichMatchContextFeatures(
         // Re-parse with names if cache used empty names path
         const cached = await getCachedPayload<ApiEnvelope<H2hRow[]>>(cacheKey);
         if (cached?.response) {
-          h2h = parseH2h(cached.response, homeId, match.home.name, match.away.name);
+          h2h = parseH2h(
+            cached.response,
+            homeId,
+            match.home.name,
+            match.away.name,
+            asOf
+          );
         }
       }
       if (h2h) next = { ...next, h2h };
@@ -532,14 +559,21 @@ export async function enrichMatchContextFeatures(
     }
 
     // --- Team statistics (home/away averages) ---
+    // Live YTD API is only safe for upcoming kickoffs; past asOf would leak.
+    const allowLiveYtd =
+      Number.isFinite(kickoffMs) && kickoffMs > Date.now();
     const needHomeStats =
+      allowLiveYtd &&
       homeId != null &&
       (match.home.homeGoalsScoredAvg == null || match.home.homeGoalsScoredAvg <= 0);
     const needAwayStats =
+      allowLiveYtd &&
       awayId != null &&
       (match.away.awayGoalsScoredAvg == null || match.away.awayGoalsScoredAvg <= 0);
     const leagueId = Number(match.leagueId);
-    const kickoffDate = new Date(match.kickoff);
+    const kickoffDate = Number.isFinite(kickoffMs)
+      ? new Date(kickoffMs)
+      : new Date(NaN);
     const season =
       Number.isFinite(leagueId) && Number.isFinite(kickoffDate.getTime())
         ? getTargetSeason(leagueId, kickoffDate)
@@ -599,7 +633,8 @@ export async function enrichMatchContextFeatures(
           "home",
           liveGet,
           budget,
-          cornerBudget
+          cornerBudget,
+          asOf
         ),
       };
     }
@@ -612,7 +647,8 @@ export async function enrichMatchContextFeatures(
           "away",
           liveGet,
           budget,
-          cornerBudget
+          cornerBudget,
+          asOf
         ),
       };
     }

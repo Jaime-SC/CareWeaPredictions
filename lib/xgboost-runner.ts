@@ -14,12 +14,24 @@ import {
   poissonUnderProb,
 } from "./phase2-markets";
 import type { MarketType } from "./types";
+import {
+  computeXCard,
+  computeCardProbabilities,
+  resolveRivalryMultiplier,
+} from "./friction-engine";
 
 export type XgboostFixtureInput = {
   homeProfile: TeamProfileSnapshot | null;
   awayProfile: TeamProfileSnapshot | null;
   refereeStrictness?: number;
-  fixture?: { leagueId?: number; isDerby?: boolean };
+  rivalryMultiplier?: number;
+  fixture?: {
+    leagueId?: number;
+    isDerby?: boolean;
+    roundLabel?: string | null;
+    homeCountry?: string | null;
+    awayCountry?: string | null;
+  };
 };
 
 type TreeNode = {
@@ -48,6 +60,7 @@ const SECONDARY_MARKETS: MarketType[] = [
   "cards_under_3_5",
   "cards_over_4_5",
   "cards_under_4_5",
+  "cards_btts",
   "home_over_1_5",
   "away_over_1_5",
 ];
@@ -78,11 +91,10 @@ function clampProb(p: number): number {
   return Math.min(0.99, Math.max(0.01, p));
 }
 
-/** ponytail: flat 1.0 until referee stats table exists */
-export function resolveRefereeStrictness(referee?: string | null): number {
-  void referee;
-  return 1;
-}
+export {
+  resolveRefereeStrictness,
+  resolveRefereeStrictnessAsync,
+} from "./referee-engine";
 
 function hasAdvancedMetrics(
   home: TeamProfileSnapshot | null,
@@ -123,6 +135,16 @@ function buildFeatures(input: XgboostFixtureInput): FeatureVector {
   const pressing = (homePpda + awayPpda) / 2;
   const derbyBoost = input.fixture?.isDerby ? 0.15 : 0;
 
+  // Rivalry multiplier from friction-engine (CONMEBOL KO + ARG-BRA boost)
+  const rivalryMult =
+    input.rivalryMultiplier ??
+    resolveRivalryMultiplier({
+      leagueId: input.fixture?.leagueId,
+      roundLabel: input.fixture?.roundLabel,
+      homeCountry: input.fixture?.homeCountry,
+      awayCountry: input.fixture?.awayCountry,
+    });
+
   return {
     npxg_diff: npxgDiff,
     pressing,
@@ -135,6 +157,7 @@ function buildFeatures(input: XgboostFixtureInput): FeatureVector {
     home_npxg: homeNpxg,
     away_npxg: awayNpxg,
     derby_boost: derbyBoost,
+    rivalry_mult: rivalryMult,
   };
 }
 
@@ -165,10 +188,27 @@ function heuristicProbs(
   const cornersTotal = Math.max(5, features.corners_total);
   const cornersHome = Math.max(2, features.corners_home);
   const cornersAway = Math.max(2, features.corners_away);
-  const cardsTotal = Math.max(
-    1.5,
-    features.cards_total * refereeStrictness + features.derby_boost
-  );
+
+  const rivalryMult = features.rivalry_mult ?? 1;
+
+  // Use friction-engine for card lambdas (includes rivalry + press boost)
+  const xCard = computeXCard({
+    homeAvgCardsFor: features.cards_home,
+    awayAvgCardsFor: features.cards_away,
+    refereeStrictness,
+    // press boost already factored via PPDA → cards_home/away; pass rivalry separately
+    leagueId: undefined,
+    roundLabel: undefined,
+  });
+  // Apply rivalry multiplier on top (features already carry it from buildFeatures)
+  const xCardHome = xCard.xCardHome * rivalryMult;
+  const xCardAway = xCard.xCardAway * rivalryMult;
+  const xCardTotal = xCardHome + xCardAway;
+  const cardProbs = computeCardProbabilities(xCardHome, xCardAway);
+
+  // Legacy derby_boost fallback for total cards (kept for backwards compat)
+  const legacyTotal = Math.max(1.5, features.cards_total * refereeStrictness + features.derby_boost);
+  const cardsTotal = xCardTotal > 1.5 ? xCardTotal : legacyTotal;
 
   const npxgHomeLambda = Math.max(0.4, 1.1 + features.npxg_diff * 0.35);
   const npxgAwayLambda = Math.max(0.4, 1.1 - features.npxg_diff * 0.3);
@@ -186,6 +226,7 @@ function heuristicProbs(
     cards_under_3_5: poissonUnderProb(cardsTotal, 3.5),
     cards_over_4_5: poissonOverProb(cardsTotal, 4.5),
     cards_under_4_5: poissonUnderProb(cardsTotal, 4.5),
+    cards_btts: cardProbs.cards_btts,
     home_over_1_5: poissonOverProb(npxgHomeLambda, 1.5),
     away_over_1_5: poissonOverProb(npxgAwayLambda, 1.5),
   };

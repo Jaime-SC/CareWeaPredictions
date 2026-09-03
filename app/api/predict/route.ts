@@ -23,6 +23,7 @@ import {
 } from "@/lib/ai-judge";
 import { buildMatchPredictions } from "@/lib/parlay-generator";
 import { hydrateModelWeightsFromDb } from "@/lib/model-weights";
+import { applyPredictionContexts } from "@/lib/prediction-context";
 import {
   syncAutomatedTeamProfileFlags,
   warmTeamProfileCache,
@@ -43,7 +44,7 @@ async function withExternalEnrichment(
     enriched.flatMap((m) => [m.home.id, m.away.id])
   );
   await warmTeamProfilesForMatches(enriched);
-  return enriched;
+  return applyPredictionContexts(enriched);
 }
 
 function isValidDate(value: string | null): value is string {

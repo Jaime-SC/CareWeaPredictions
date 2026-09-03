@@ -19,6 +19,7 @@ import {
   getTeamBrierFactor,
   loadModelWeights,
   resolveMinProbability,
+  type ModelWeights,
 } from "./model-weights";
 import {
   PHASE2_ODDS_KEY,
@@ -121,11 +122,14 @@ function formLambdaFactor(form: ("W" | "D" | "L")[]): number {
  * Home_xG ≈ LeagueHomeAvg × HomeAttackPower × AwayDefenseWeakness × HomeAdv
  * Away_xG ≈ LeagueAwayAvg × AwayAttackPower × HomeDefenseWeakness
  */
-export function estimateExpectedGoals(match: Match): {
+export function estimateExpectedGoals(
+  match: Match,
+  weights?: ModelWeights
+): {
   home: number;
   away: number;
 } {
-  const g = loadModelWeights().global;
+  const g = (weights ?? loadModelWeights()).global;
   const homeAvg = g.leagueAvgHomeGoals ?? g.leagueAvgGoals;
   const awayAvg = g.leagueAvgAwayGoals ?? g.leagueAvgGoals;
   const homeAdv = g.homeAdvantage;
@@ -538,6 +542,10 @@ export function predictMatchMarkets(
     maxSafeOdds?: number;
     /** Temporal cutoff — uses warmed peekTeamProfileAt when set. */
     asOf?: Date;
+    /** Walk-forward / REPLAY snapshot — never persisted. */
+    weights?: ModelWeights;
+    /** Pre-computed rivalry/friction multiplier for xCard engine. */
+    rivalryMultiplier?: number;
   }
 ): {
   expectedGoals: { home: number; away: number };
@@ -551,7 +559,8 @@ export function predictMatchMarkets(
   const knockoutContext = toKnockoutContext(knockoutEval);
   const usedFairOdds = !hasBookmakerOdds(match.odds);
 
-  const weights = loadModelWeights();
+  const weights = options?.weights ?? loadModelWeights();
+  const walkForwardWeights = options?.weights != null;
   const leagueCfg = getLeagueWeight(
     match.leagueName,
     weights,
@@ -565,12 +574,18 @@ export function predictMatchMarkets(
   );
   const maxOdds = options?.maxSafeOdds ?? 1.85;
 
-  const xg = estimateExpectedGoals(match);
+  const xg = estimateExpectedGoals(match, weights);
   const matrix = buildScoreMatrix(xg.home, xg.away);
   const goalProbs = marketProbsFromMatrix(matrix);
   const asOf = options?.asOf;
-  const homeProfile = peekTeamProfileAt(match.home.id, asOf) ?? peekTeamProfile(match.home.id);
-  const awayProfile = peekTeamProfileAt(match.away.id, asOf) ?? peekTeamProfile(match.away.id);
+  const homeProfile =
+    asOf != null && Number.isFinite(asOf.getTime())
+      ? peekTeamProfileAt(match.home.id, asOf)
+      : peekTeamProfile(match.home.id);
+  const awayProfile =
+    asOf != null && Number.isFinite(asOf.getTime())
+      ? peekTeamProfileAt(match.away.id, asOf)
+      : peekTeamProfile(match.away.id);
   const phase2Probs = phase2MarketProbs(match, xg, {
     home: homeProfile,
     away: awayProfile,
@@ -578,8 +593,16 @@ export function predictMatchMarkets(
   const xgbProbs = predictSecondaryMarkets({
     homeProfile,
     awayProfile,
-    refereeStrictness: resolveRefereeStrictness(match.referee),
-    fixture: { leagueId: parseLeagueId(match.leagueId), isDerby: derby },
+    refereeStrictness: resolveRefereeStrictness(
+      match.referee,
+      parseLeagueId(match.leagueId)
+    ),
+    rivalryMultiplier: options?.rivalryMultiplier,
+    fixture: {
+      leagueId: parseLeagueId(match.leagueId),
+      isDerby: derby,
+      roundLabel: match.round,
+    },
   });
   const baseProbs = {
     ...goalProbs,
@@ -613,10 +636,14 @@ export function predictMatchMarkets(
 
   const leagueBrier = leagueCfg.brierCalibrationFactor ?? 1;
   const teamBrier = teamPairBrierFactor(
-    homeProfile?.brierCalibrationFactor ??
-      getTeamBrierFactor(match.home.name, weights),
-    awayProfile?.brierCalibrationFactor ??
-      getTeamBrierFactor(match.away.name, weights)
+    walkForwardWeights
+      ? getTeamBrierFactor(match.home.name, weights)
+      : homeProfile?.brierCalibrationFactor ??
+          getTeamBrierFactor(match.home.name, weights),
+    walkForwardWeights
+      ? getTeamBrierFactor(match.away.name, weights)
+      : awayProfile?.brierCalibrationFactor ??
+          getTeamBrierFactor(match.away.name, weights)
   );
 
   const knockoutFlags = knockoutEval.flags;

@@ -23,6 +23,7 @@ import {
   generateParlayAudited,
   singleDayShortfallNotice,
 } from "@/lib/parlay-generator";
+import { applyPredictionContexts } from "@/lib/prediction-context";
 import {
   syncAutomatedTeamProfileFlags,
   warmTeamProfileCache,
@@ -43,7 +44,7 @@ async function withAutomatedTeamProfiles(matches: Match[]): Promise<Match[]> {
   const enriched = await enrichMatchesFromExternalSources(matches);
   await warmTeamProfileCache(enriched.flatMap((m) => [m.home.id, m.away.id]));
   await warmTeamProfilesForMatches(enriched);
-  return enriched;
+  return applyPredictionContexts(enriched);
 }
 
 /**

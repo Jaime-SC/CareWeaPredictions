@@ -1,6 +1,7 @@
 /**
- * API-Football league standings → rank context for Poisson sanity.
- * Cache TTL 12h (standings move slowly). Soft-fail / budget-aware.
+ * League standings ranks for Poisson sanity.
+ * Hot path builds tables from MatchFixture with matchDate < kickoff (no live API).
+ * fetchLeagueStandings remains for scripts / manual use.
  */
 import { apiFootballGet } from "./api-football";
 import {
@@ -9,6 +10,7 @@ import {
   getCachedPayload,
   upsertCachedPayload,
 } from "./api-cache";
+import { prisma } from "./db";
 import type { Match, MarketType } from "./types";
 import { getTargetSeason } from "./utils/season-mapper";
 
@@ -30,6 +32,14 @@ export type LeagueStandingsTable = {
   byName: Record<string, number>;
 };
 
+export type StandingsFixtureRow = {
+  homeTeam: string;
+  awayTeam: string;
+  matchDate: Date;
+  homeGoals: number;
+  awayGoals: number;
+};
+
 type StandingRow = {
   rank?: number;
   team?: { id?: number; name?: string };
@@ -42,6 +52,12 @@ type StandingsEnvelope = Array<{
     standings?: StandingRow[][];
   };
 }>;
+
+type TeamAgg = {
+  pts: number;
+  gd: number;
+  gf: number;
+};
 
 function normalizeName(name: string): string {
   return name
@@ -57,6 +73,14 @@ function seasonForLeague(leagueId: number, kickoffIso?: string): number {
   const t = kickoffIso ? Date.parse(kickoffIso) : Date.now();
   const d = new Date(Number.isFinite(t) ? t : Date.now());
   return getTargetSeason(leagueId, d);
+}
+
+function parseScore(finalScore: string | null): { home: number; away: number } | null {
+  const parts = (finalScore ?? "").split(/\s*-\s*/).map((p) => Number(p.trim()));
+  if (parts.length !== 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) {
+    return null;
+  }
+  return { home: parts[0]!, away: parts[1]! };
 }
 
 function parseTable(
@@ -80,6 +104,56 @@ function parseTable(
   return { leagueId, season, byTeamId, byName };
 }
 
+/**
+ * Point-in-time table from finished fixtures strictly before `asOf`.
+ * Ranking: points desc, then GD, then GF. Name-keyed (no team ids in fixtures).
+ */
+export function buildStandingsTableFromFixtures(
+  rows: StandingsFixtureRow[],
+  opts: { leagueId: number; season: number; asOf: Date }
+): LeagueStandingsTable {
+  const asOfMs = opts.asOf.getTime();
+  const aggs = new Map<string, TeamAgg>();
+
+  const bump = (name: string, pts: number, gf: number, ga: number) => {
+    const key = normalizeName(name);
+    if (!key) return;
+    const cur = aggs.get(key) ?? { pts: 0, gd: 0, gf: 0 };
+    cur.pts += pts;
+    cur.gf += gf;
+    cur.gd += gf - ga;
+    aggs.set(key, cur);
+  };
+
+  for (const r of rows) {
+    if (!(r.matchDate.getTime() < asOfMs)) continue;
+    bump(r.homeTeam, r.homeGoals > r.awayGoals ? 3 : r.homeGoals === r.awayGoals ? 1 : 0, r.homeGoals, r.awayGoals);
+    bump(r.awayTeam, r.awayGoals > r.homeGoals ? 3 : r.awayGoals === r.homeGoals ? 1 : 0, r.awayGoals, r.homeGoals);
+  }
+
+  const ordered = [...aggs.entries()].sort((a, b) => {
+    const [na, aa] = a;
+    const [nb, bb] = b;
+    if (bb.pts !== aa.pts) return bb.pts - aa.pts;
+    if (bb.gd !== aa.gd) return bb.gd - aa.gd;
+    if (bb.gf !== aa.gf) return bb.gf - aa.gf;
+    return na.localeCompare(nb);
+  });
+
+  const byName: Record<string, number> = {};
+  ordered.forEach(([name], i) => {
+    byName[name] = i + 1;
+  });
+
+  return {
+    leagueId: opts.leagueId,
+    season: opts.season,
+    byTeamId: {},
+    byName,
+  };
+}
+
+/** Scripts / manual — not used on predict/parlay hot path. */
 export async function fetchLeagueStandings(
   leagueId: number,
   season?: number
@@ -192,52 +266,90 @@ export function applyStandingsAwayPenalty(
   };
 }
 
-/** Max live standings fetches per enrich pass. */
-const STANDINGS_LIVE_BUDGET = 20;
-
 /**
- * Attach standings ranks to matches (cache-first, small live budget).
+ * Attach standings ranks from local fixtures (matchDate < kickoff).
+ * No live /standings API on this path.
  */
 export async function attachStandingsToMatches(
   matches: Match[]
 ): Promise<Match[]> {
   if (matches.length === 0) return matches;
 
-  const byLeague = new Map<number, Match[]>();
+  const leagueIds = [
+    ...new Set(
+      matches
+        .map((m) => Number(m.leagueId))
+        .filter((id) => Number.isFinite(id) && id > 0)
+    ),
+  ];
+  if (leagueIds.length === 0) return matches;
+
+  let maxKickoff = 0;
   for (const m of matches) {
-    const id = Number(m.leagueId);
-    if (!Number.isFinite(id) || id <= 0) continue;
-    const list = byLeague.get(id) ?? [];
-    list.push(m);
-    byLeague.set(id, list);
+    const t = Date.parse(m.kickoff);
+    if (Number.isFinite(t) && t > maxKickoff) maxKickoff = t;
+  }
+  if (maxKickoff <= 0) return matches;
+
+  const leagueIdStrs = leagueIds.map(String);
+  let raw: Array<{
+    leagueId: string;
+    homeTeam: string;
+    awayTeam: string;
+    matchDate: Date;
+    finalScore: string | null;
+  }> = [];
+
+  try {
+    raw = await prisma.matchFixture.findMany({
+      where: {
+        leagueId: { in: leagueIdStrs },
+        finalScore: { not: null },
+        matchDate: { lt: new Date(maxKickoff) },
+      },
+      select: {
+        leagueId: true,
+        homeTeam: true,
+        awayTeam: true,
+        matchDate: true,
+        finalScore: true,
+      },
+      orderBy: { matchDate: "asc" },
+    });
+  } catch (err) {
+    console.warn("[standings] fixture load failed:", err);
+    return matches;
   }
 
-  const tables = new Map<number, LeagueStandingsTable>();
-  let liveLeft = STANDINGS_LIVE_BUDGET;
-  for (const leagueId of byLeague.keys()) {
-    const season = seasonForLeague(
-      leagueId,
-      byLeague.get(leagueId)?.[0]?.kickoff
-    );
-    const cacheKey = buildCacheKey("standings", {
-      league: leagueId,
-      season,
+  const byLeague = new Map<number, StandingsFixtureRow[]>();
+  for (const r of raw) {
+    const lid = Number(r.leagueId);
+    if (!Number.isFinite(lid)) continue;
+    const score = parseScore(r.finalScore);
+    if (!score) continue;
+    const list = byLeague.get(lid) ?? [];
+    list.push({
+      homeTeam: r.homeTeam,
+      awayTeam: r.awayTeam,
+      matchDate: r.matchDate,
+      homeGoals: score.home,
+      awayGoals: score.away,
     });
-    const cached = await getCachedPayload<LeagueStandingsTable>(cacheKey);
-    if (isLeagueStandingsTable(cached)) {
-      tables.set(leagueId, cached);
-      continue;
-    }
-    if (liveLeft <= 0) continue;
-    liveLeft -= 1;
-    const table = await fetchLeagueStandings(leagueId, season);
-    if (table) tables.set(leagueId, table);
+    byLeague.set(lid, list);
   }
 
   return matches.map((m) => {
-    const id = Number(m.leagueId);
-    const table = tables.get(id);
-    if (!table) return m;
+    const leagueId = Number(m.leagueId);
+    const asOf = new Date(m.kickoff);
+    if (!Number.isFinite(leagueId) || !Number.isFinite(asOf.getTime())) return m;
+    const rows = byLeague.get(leagueId);
+    if (!rows?.length) return m;
+    const table = buildStandingsTableFromFixtures(rows, {
+      leagueId,
+      season: seasonForLeague(leagueId, m.kickoff),
+      asOf,
+    });
+    if (Object.keys(table.byName).length === 0) return m;
     return { ...m, standings: standingsContextFromTable(table, m) };
   });
 }

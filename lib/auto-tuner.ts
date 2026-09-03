@@ -52,6 +52,8 @@ export interface HistoricalPickRow {
   modelProbability: number;
   odds: number;
   outcome: "WON" | "LOST" | "PENDING" | "VOID" | string;
+  /** Fixture kickoff — required for walk-forward filtering. */
+  kickoff?: Date;
 }
 
 export interface TuningBucketStat {
@@ -593,6 +595,21 @@ export function calibrateModelParameters(
   };
 }
 
+/** Walk-forward: only rows with kickoff strictly before asOf enter tuning. */
+export function calibrateModelParametersAsOf(
+  rows: HistoricalPickRow[],
+  asOf: Date,
+  previous: ModelWeights = loadModelWeights()
+): CalibrationResult {
+  const asOfMs = asOf.getTime();
+  const train = rows.filter((r) => {
+    const t = r.kickoff?.getTime();
+    if (t == null || !Number.isFinite(t)) return true;
+    return t < asOfMs;
+  });
+  return calibrateModelParameters(train, previous);
+}
+
 function lookupPreviousLeague(
   previous: ModelWeights,
   key: string,
@@ -653,7 +670,10 @@ export function deriveTuningConfig(weights: ModelWeights): TuningConfig {
 }
 
 /** Load settled training rows from Prisma (WON/LOST only). */
-export async function loadHistoricalDataFromDb(): Promise<HistoricalPickRow[]> {
+export async function loadHistoricalDataFromDb(opts?: {
+  kickoffBefore?: Date;
+  kickoffAfter?: Date;
+}): Promise<HistoricalPickRow[]> {
   const predictions = await prisma.prediction.findMany({
     where: { outcome: { in: ["WON", "LOST"] } },
     select: {
@@ -662,20 +682,48 @@ export async function loadHistoricalDataFromDb(): Promise<HistoricalPickRow[]> {
       modelProbability: true,
       odds: true,
       outcome: true,
-      fixture: { select: { leagueName: true, leagueId: true } },
+      fixture: {
+        select: {
+          leagueName: true,
+          leagueId: true,
+          matchDate: true,
+        },
+      },
     },
     orderBy: { createdAt: "desc" },
   });
 
-  return predictions.map((p) => ({
-    league: p.fixture.leagueName,
-    leagueId: p.fixture.leagueId,
-    market: p.market,
-    selection: p.selection,
-    modelProbability: p.modelProbability,
-    odds: p.odds,
-    outcome: p.outcome,
-  }));
+  const beforeMs = opts?.kickoffBefore?.getTime();
+  const afterMs = opts?.kickoffAfter?.getTime();
+
+  return predictions
+    .map((p) => {
+      const kickoff =
+        p.fixture.matchDate instanceof Date
+          ? p.fixture.matchDate
+          : new Date(p.fixture.matchDate);
+      return {
+        league: p.fixture.leagueName,
+        leagueId: p.fixture.leagueId,
+        market: p.market,
+        selection: p.selection,
+        modelProbability: p.modelProbability,
+        odds: p.odds,
+        outcome: p.outcome,
+        kickoff,
+      } satisfies HistoricalPickRow;
+    })
+    .filter((row) => {
+      const t = row.kickoff?.getTime();
+      if (t == null || !Number.isFinite(t)) return true;
+      if (beforeMs != null && Number.isFinite(beforeMs) && t >= beforeMs) {
+        return false;
+      }
+      if (afterMs != null && Number.isFinite(afterMs) && t < afterMs) {
+        return false;
+      }
+      return true;
+    });
 }
 
 /** Accept TrainingFeatureRow[] / exported JSON payload. */
@@ -707,6 +755,14 @@ export function normalizeTrainingRows(
         outcome: String(r.outcome ?? "PENDING"),
       };
       if (leagueId) row.leagueId = leagueId;
+      const kickoffRaw = r.kickoff ?? r.matchDate;
+      if (kickoffRaw != null) {
+        const t =
+          kickoffRaw instanceof Date
+            ? kickoffRaw.getTime()
+            : Date.parse(String(kickoffRaw));
+        if (Number.isFinite(t)) row.kickoff = new Date(t);
+      }
       return row;
     })
     .filter((r): r is HistoricalPickRow => r !== null);
@@ -753,14 +809,16 @@ export function loadHistoricalDataFromJsonFile(
 export async function recalibrateModel(options?: {
   extraRows?: HistoricalPickRow[] | TrainingFeatureRow[];
   jsonPath?: string;
+  asOf?: Date;
 }): Promise<RecalibrationResult> {
-  const fromDb = await loadHistoricalDataFromDb();
+  const asOf = options?.asOf ?? new Date();
+  const fromDb = await loadHistoricalDataFromDb({ kickoffBefore: asOf });
   const fromJson = loadHistoricalDataFromJsonFile(options?.jsonPath);
   const extra = normalizeTrainingRows(options?.extraRows ?? []);
   const merged = [...fromDb, ...fromJson, ...extra];
 
   // ponytail: dual weights+tuning JSON stores, merge when one config file is enough
-  const result = calibrateModelParameters(merged, loadModelWeights());
+  const result = calibrateModelParametersAsOf(merged, asOf, loadModelWeights());
   await saveModelWeights(result.weights);
   const config = saveTuningConfig(deriveTuningConfig(result.weights));
 
@@ -772,21 +830,12 @@ export async function recalibrateModel(options?: {
 }
 
 /**
- * Hook for settlement: recalibrate only when a batch of ≥5 picks
- * was settled in the current run. Never throws — settlement must
- * succeed even if calibration fails.
+ * @deprecated Settlement no longer calibrates. Use /api/cron/calibrate.
  */
 export async function maybeRecalibrateAfterSettlement(
-  settledCount: number
+  _settledCount: number
 ): Promise<RecalibrationResult | null> {
-  if (settledCount < MIN_SETTLEMENT_CALIBRATION_BATCH) return null;
-
-  try {
-    return await recalibrateModel();
-  } catch (err) {
-    console.error("[AUTO-CALIBRATION] Failed:", err);
-    return null;
-  }
+  return null;
 }
 
 /** Restore factory-neutral model-weights + Poisson multipliers. */

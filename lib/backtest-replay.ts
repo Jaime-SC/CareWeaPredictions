@@ -1,7 +1,20 @@
 /**
  * Walk-forward backtest using the same predictMatchMarkets engine as live.
  * Strict asOf = match kickoff; only prior FT rows inform features/profiles.
+ * Weights: Brier asOf → auto-tuner asOf (expanding window), never persisted.
  */
+import {
+  calibrateModelParametersAsOf,
+  type HistoricalPickRow,
+} from "./auto-tuner";
+import {
+  aggregateCalibration,
+  emptyMarketBucket,
+  finalizeMarketBuckets,
+  recordScoredBet,
+  recordVoidBet,
+  type MarketMetricBucket,
+} from "./calibration-metrics";
 import {
   buildTeamIndexAtCutoff,
   type LocalFixtureRowForTest,
@@ -10,7 +23,7 @@ import {
   applyBrierLearningToWeightsAsOf,
   type BrierPickRow,
 } from "./learning-engine";
-import { loadModelWeights } from "./model-weights";
+import { loadModelWeights, type ModelWeights } from "./model-weights";
 import { predictMatchMarkets } from "./poisson";
 import type {
   BacktestMarket,
@@ -61,27 +74,19 @@ function normalizeTeamKey(name: string): string {
     .trim();
 }
 
-function teamBrierFromWeights(
-  rows: BrierPickRow[],
+/** Build walk-forward weights for a cutoff (Brier then ROI tuner). */
+export function buildWalkForwardWeights(
   asOf: Date,
-  teamName: string,
-  fallback: number | undefined
-): number {
-  if (!rows.length) return fallback ?? 1;
-  const result = applyBrierLearningToWeightsAsOf(
-    rows,
-    asOf,
-    loadModelWeights()
-  );
-  const key = normalizeTeamKey(teamName);
-  const team =
-    result.teams.find((t) => normalizeTeamKey(t.key) === key) ??
-    result.teams.find(
-      (t) =>
-        normalizeTeamKey(t.key).includes(key) ||
-        key.includes(normalizeTeamKey(t.key))
-    );
-  return team?.nextFactor ?? fallback ?? 1;
+  seed: ModelWeights,
+  brierRows: BrierPickRow[],
+  tunerRows: HistoricalPickRow[]
+): ModelWeights {
+  const brierW = applyBrierLearningToWeightsAsOf(brierRows, asOf, seed).weights;
+  return calibrateModelParametersAsOf(tunerRows, asOf, brierW).weights;
+}
+
+function matchdayKey(asOf: Date): string {
+  return asOf.toISOString().slice(0, 10);
 }
 
 function findHistory(
@@ -226,12 +231,14 @@ async function resolveProfileAt(
   prior: FdMatchResult[],
   asOf: Date
 ): Promise<TeamProfileSnapshot | null> {
+  // Expanding FD prior is the honest walk-forward source for this engine.
+  // Prefer it over getTeamProfileAt (full MatchFixture scan per call).
   if (teamId != null && teamId > 0) {
-    const db = await getTeamProfileAt(teamId, asOf);
-    if (db) return db;
+    const fromFd = profileFromFdEvents(teamId, teamName, prior, asOf);
+    if (fromFd) return fromFd;
+    return getTeamProfileAt(teamId, asOf);
   }
-  if (teamId == null || teamId <= 0) return null;
-  return profileFromFdEvents(teamId, teamName, prior, asOf);
+  return null;
 }
 
 function buildH2h(
@@ -303,21 +310,20 @@ function buildMatchFromFd(
     away: enrichTeamFromHistory(awayBase, findHistory(index, m.awayTeam)),
     h2h: buildH2h(prior, m.homeTeam, m.awayTeam, m.utcDate),
     odds: {
-      home: m.odds?.home,
-      draw: m.odds?.draw,
-      away: m.odds?.away,
-      over25: m.odds?.over25,
-      under25: m.odds?.under25,
-      doubleChance1X: undefined,
-      doubleChanceX2: undefined,
+      home: m.odds?.home ?? 0,
+      draw: m.odds?.draw ?? 0,
+      away: m.odds?.away ?? 0,
+      over25: m.odds?.over25 ?? 0,
+      doubleChance1X: 0,
+      doubleChanceX2: 0,
       over05: 1.08,
       over15: 1.3,
       under35: 1.4,
       under45: 1.15,
       bttsYes: 1.75,
       bttsNo: 2.0,
-      dnbHome: undefined,
-      dnbAway: undefined,
+      dnbHome: 0,
+      dnbAway: 0,
       homeScores: 1.35,
       awayScores: 1.42,
     },
@@ -327,7 +333,8 @@ function buildMatchFromFd(
 const MARKET_FILTER: Record<BacktestMarket, Set<MarketType> | null> = {
   ALL: null,
   "1X2": new Set(["home", "draw", "away", "1x", "x2"]),
-  OVER_UNDER_2_5: new Set(["over_2_5", "under_2_5"]),
+  // MarketType has over_2_5; no under_2_5 (legacy FD paper uses a separate candidate).
+  OVER_UNDER_2_5: new Set(["over_2_5"]),
   DNB: new Set(["dnb_home", "dnb_away"]),
 };
 
@@ -342,8 +349,6 @@ function marketWon(market: MarketType, hg: number, ag: number): boolean | null {
       return hg < ag;
     case "over_2_5":
       return total > 2.5;
-    case "under_2_5":
-      return total < 2.5;
     case "dnb_home":
       return hg > ag ? true : hg < ag ? false : null;
     case "dnb_away":
@@ -364,6 +369,7 @@ export type ReplayBacktestOptions = {
   maxOdds?: number;
   competition?: string;
   brierRows?: BrierPickRow[];
+  tunerRows?: HistoricalPickRow[];
   autoMinOddsFallback?: boolean;
 };
 
@@ -398,13 +404,28 @@ export async function runReplayBacktest(
   let wins = 0;
   let stake = 0;
   let returns = 0;
-  const byMarket: Record<string, { nBets: number; wins: number }> = {};
+  const byMarket: Record<string, MarketMetricBucket> = {};
 
   const prior: FdMatchResult[] = [];
   const brierRows = options.brierRows ?? [];
+  const tunerRows = options.tunerRows ?? [];
+  const seedWeights = loadModelWeights();
+  const weightsByDay = new Map<string, ModelWeights>();
 
   for (const m of sorted) {
     const asOf = new Date(m.utcDate);
+    const day = matchdayKey(asOf);
+    let walkWeights = weightsByDay.get(day);
+    if (!walkWeights) {
+      walkWeights = buildWalkForwardWeights(
+        asOf,
+        seedWeights,
+        brierRows,
+        tunerRows
+      );
+      weightsByDay.set(day, walkWeights);
+    }
+
     const homeId = resolveTeamId(m.homeTeam, undefined, byName);
     const awayId = resolveTeamId(m.awayTeam, undefined, byName);
     if (homeId == null) unmappedTeams += 1;
@@ -422,31 +443,14 @@ export async function runReplayBacktest(
       prior,
       asOf
     );
-    if (homeProfile) {
-      const homeBrier = teamBrierFromWeights(
-        brierRows,
-        asOf,
-        m.homeTeam,
-        homeProfile.brierCalibrationFactor
-      );
-      homeProfile.brierCalibrationFactor = homeBrier;
-      primeTeamProfileAt(homeProfile, asOf);
-    }
-    if (awayProfile) {
-      const awayBrier = teamBrierFromWeights(
-        brierRows,
-        asOf,
-        m.awayTeam,
-        awayProfile.brierCalibrationFactor
-      );
-      awayProfile.brierCalibrationFactor = awayBrier;
-      primeTeamProfileAt(awayProfile, asOf);
-    }
+    if (homeProfile) primeTeamProfileAt(homeProfile, asOf);
+    if (awayProfile) primeTeamProfileAt(awayProfile, asOf);
 
     const match = buildMatchFromFd(m, prior, competition, homeId, awayId);
 
     const { markets: preds } = predictMatchMarkets(match, {
       asOf,
+      weights: walkWeights,
       minSafeOdds: minOdds,
       maxSafeOdds: maxOdds,
     });
@@ -461,32 +465,32 @@ export async function runReplayBacktest(
       if (valueMarginPercent(p.modelProbability, p.odds) < threshold) continue;
 
       const won = marketWon(p.market, hg, ag);
+      const bucket = (byMarket[p.market] ??= emptyMarketBucket());
+
       if (won === null) {
         if ((p.market === "dnb_home" || p.market === "dnb_away") && isDraw) {
           nBets += 1;
           stake += 1;
           returns += 1;
-          const bucket = (byMarket[p.market] ??= { nBets: 0, wins: 0 });
-          bucket.nBets += 1;
+          recordVoidBet(bucket);
         }
         continue;
       }
 
       nBets += 1;
       stake += 1;
-      const bucket = (byMarket[p.market] ??= { nBets: 0, wins: 0 });
-      bucket.nBets += 1;
       if (won) {
         wins += 1;
-        bucket.wins += 1;
         returns += p.odds;
       }
+      recordScoredBet(bucket, p.modelProbability, won, p.odds);
     }
 
     prior.push(m);
   }
 
   const roi = stake > 0 ? (returns - stake) / stake : 0;
+  const cal = aggregateCalibration(byMarket);
   const summary: ReplayBacktestSummary = {
     engine: "replay",
     nMatches: sorted.length,
@@ -500,7 +504,9 @@ export async function runReplayBacktest(
     minOdds,
     maxOdds,
     market,
-    byMarket,
+    byMarket: finalizeMarketBuckets(byMarket),
+    meanBrier: cal.meanBrier,
+    meanLogLoss: cal.meanLogLoss,
     unmappedTeams,
     minOddsFallbackApplied: false,
   };

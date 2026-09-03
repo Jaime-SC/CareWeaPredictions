@@ -154,6 +154,8 @@ export function getJugaBetLabel(
       return "Resultado 1ª parte → Empate";
     case "ht_away":
       return `Resultado 1ª parte → ${away}`;
+    case "cards_btts":
+      return "Ambos equipos reciben tarjeta";
 
     default: {
       const _exhaustive: never = market;

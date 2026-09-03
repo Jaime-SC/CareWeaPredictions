@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { maybeRecalibrateAfterSettlement } from "@/lib/auto-tuner";
-import { maybeUpdateBrierLearning } from "@/lib/learning-engine";
 import { errorMessage, jsonError } from "@/lib/api-response";
 import { settlePendingTickets } from "@/lib/settlement";
 import { maybeUpdateTeamProfilesAfterSettlement } from "@/lib/team-profiler";
@@ -17,18 +15,11 @@ const NO_STORE_HEADERS = {
  * POST /api/settle
  * Force-sync PENDING tickets against live API-Football scores (FT/AET/PEN/EXTRA)
  * and void POSTP/CANC/ABD/SUSP/INT as CANCELLED (odds 1.00).
+ * Weights calibration is deferred to /api/cron/calibrate.
  */
 export async function POST() {
   try {
     const result = await settlePendingTickets();
-    // Sequential: concurrent Prisma calls (Promise.all) are batched into a
-    // transaction, which Neon HTTP rejects.
-    const calibration = await maybeRecalibrateAfterSettlement(
-      result.updatedLegsCount
-    );
-    const brierLearning = await maybeUpdateBrierLearning(
-      result.updatedLegsCount
-    );
     const teamProfiles = await maybeUpdateTeamProfilesAfterSettlement(
       result.updatedLegsCount
     );
@@ -49,25 +40,9 @@ export async function POST() {
         error: result.error,
         winRatePct: Number((result.winRate * 100).toFixed(2)),
         roiPct: Number(result.roi.toFixed(2)),
-        calibration: calibration
-          ? {
-              leaguesAdjusted: calibration.leaguesAdjusted,
-              marketsAdjusted: calibration.marketsAdjusted,
-              sampleSize: calibration.sampleSize,
-              calibratedAt: calibration.weights.calibratedAt,
-              message: calibration.message,
-            }
-          : null,
-        brierLearning: brierLearning
-          ? {
-              overallMeanBrier: brierLearning.overallMeanBrier,
-              leaguesAdjusted: brierLearning.leaguesAdjusted,
-              marketsAdjusted: brierLearning.marketsAdjusted,
-              teamsAdjusted: brierLearning.teamsAdjusted,
-              sampleSize: brierLearning.sampleSize,
-              message: brierLearning.message,
-            }
-          : null,
+        calibration: null,
+        brierLearning: null,
+        deferredTo: "/api/cron/calibrate",
         teamProfiles: teamProfiles
           ? {
               teamsUpserted: teamProfiles.teamsUpserted,

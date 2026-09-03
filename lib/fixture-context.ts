@@ -604,6 +604,16 @@ export async function enrichMatchesFromLocalData(
   });
 }
 
+/** ponytail: exported for prediction-context; ceiling = local fixtures only, upgrade when live H2H API is needed. */
+export function h2hForMatchAtCutoff(
+  fixtures: LocalFixtureRow[],
+  homeName: string,
+  awayName: string,
+  kickoffIso: string
+): Match["h2h"] | null {
+  return h2hForMatch(fixtures, homeName, awayName, kickoffIso);
+}
+
 /** ponytail: test-only export for leakage scripts — remove if fixture-context gets a dedicated test harness. */
 export type LocalFixtureRowForTest = LocalFixtureRow;
 export function buildTeamIndexAtCutoff(

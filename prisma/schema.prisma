@@ -226,3 +226,74 @@ model ModelWeightsConfig {
   weights   Json
   updatedAt DateTime @updatedAt
 }
+
+/// Referee historic card/foul profile for xCard friction engine
+model RefereeProfile {
+  id               String   @id @default(uuid())
+  name             String   @unique
+  avgYellowCards   Float
+  avgRedCards      Float
+  avgFoulsPerMatch Float
+  avgPenalties     Float    @default(0)
+  /// Global strictness vs cross-competition baseline. 1.0 = average.
+  strictnessIndex  Float
+  matchCount       Int      @default(0)
+  updatedAt        DateTime @updatedAt
+
+  leagueStats  RefereeLeagueStat[]
+  matchRecords RefereeMatchRecord[]
+}
+
+/// Per-competition referee averages (strictness vs league baseline).
+model RefereeLeagueStat {
+  id               String   @id @default(uuid())
+  refereeId        String
+  leagueId         Int
+  /// AllowedLeagueRegion slug from config/allowed-leagues.ts
+  region           String
+  avgYellowCards   Float
+  avgRedCards      Float
+  avgFoulsPerMatch Float
+  avgPenalties     Float    @default(0)
+  matchCount       Int
+  strictnessIndex  Float
+  updatedAt        DateTime @updatedAt
+
+  referee RefereeProfile @relation(fields: [refereeId], references: [id], onDelete: Cascade)
+
+  @@unique([refereeId, leagueId])
+  @@index([leagueId])
+  @@index([region])
+}
+
+/// League-level card/foul baseline for strictness normalization.
+model CompetitionCardBaseline {
+  leagueId         Int      @id
+  region           String
+  avgYellowCards   Float
+  avgRedCards      Float
+  avgFoulsPerMatch Float
+  avgPenalties     Float    @default(0)
+  matchCount       Int
+  updatedAt        DateTime @updatedAt
+
+  @@index([region])
+}
+
+/// Point-in-time referee fixture rows for asOf aggregation (leakage-safe).
+model RefereeMatchRecord {
+  id           String   @id @default(uuid())
+  refereeId    String
+  leagueId     Int
+  apiFixtureId Int      @unique
+  matchDate    DateTime
+  yellowCards  Float
+  redCards     Float
+  fouls        Float
+  penalties    Float    @default(0)
+
+  referee RefereeProfile @relation(fields: [refereeId], references: [id], onDelete: Cascade)
+
+  @@index([refereeId, matchDate])
+  @@index([refereeId, leagueId, matchDate])
+}

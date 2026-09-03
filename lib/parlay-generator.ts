@@ -37,6 +37,7 @@ import {
   evaluateKnockoutContext,
   toKnockoutContext,
 } from "./knockout-engine";
+import { resolveRivalryMultiplier } from "./friction-engine";
 import { rejectMatchesWithoutRealOdds } from "./filters";
 import {
   getLeagueWeight,
@@ -299,11 +300,16 @@ export function buildSameGameBetBuilders(
   for (const match of matches) {
     if (!hasBookmakerOdds(match.odds)) continue;
 
+    const rivalryMult = resolveRivalryMultiplier({
+      leagueId: match.leagueId ? Number(match.leagueId) : undefined,
+      roundLabel: match.round,
+    });
     const { markets } = predictMatchMarkets(match, {
       minSafeProbability: primaryMinProb,
       minSafeOdds: MIN_SELECTION_ODDS,
       maxSafeOdds: 1.85,
       asOf: new Date(match.kickoff),
+      rivalryMultiplier: rivalryMult,
     });
 
     const primary = markets

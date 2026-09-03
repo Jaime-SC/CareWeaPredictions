@@ -66,6 +66,7 @@ export const PHASE2_MARKET_TYPES: MarketType[] = [
   "cards_under_4_5",
   "cards_over_5_5",
   "cards_under_5_5",
+  "cards_btts",
   "cards_home_over_1_5",
   "cards_home_under_1_5",
   "cards_home_over_2_5",

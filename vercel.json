@@ -3,6 +3,14 @@
     {
       "path": "/api/cron/settle",
       "schedule": "0 */2 * * *"
+    },
+    {
+      "path": "/api/cron/profile-snapshots",
+      "schedule": "30 4 * * *"
+    },
+    {
+      "path": "/api/cron/calibrate",
+      "schedule": "15 5 * * *"
     }
   ]
 }

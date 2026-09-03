@@ -15,6 +15,14 @@ import {
   overUnderProbability,
 } from "../poisson";
 import { valueMarginPercent } from "../value-finder";
+import {
+  aggregateCalibration,
+  emptyMarketBucket,
+  finalizeMarketBuckets,
+  recordScoredBet,
+  recordVoidBet,
+  type MarketMetricBucket,
+} from "../calibration-metrics";
 
 export type FdMatchOdds = {
   /** Closing 1X2 (homeWin / PSH aliases). */
@@ -43,6 +51,17 @@ export type BacktestMarket =
   | "OVER_UNDER_2_5"
   | "DNB";
 
+export type BacktestMarketBucket = {
+  nBets: number;
+  wins: number;
+  stakeUnits?: number;
+  returnUnits?: number;
+  winRate?: number;
+  roi?: number;
+  meanBrier?: number;
+  meanLogLoss?: number;
+};
+
 export type BacktestSummary = {
   nMatches: number;
   nBets: number;
@@ -55,7 +74,9 @@ export type BacktestSummary = {
   minOdds: number;
   maxOdds: number;
   market: BacktestMarket;
-  byMarket: Record<string, { nBets: number; wins: number }>;
+  byMarket: Record<string, BacktestMarketBucket>;
+  meanBrier?: number;
+  meanLogLoss?: number;
   minOddsFallbackApplied?: boolean;
 };
 
@@ -552,7 +573,7 @@ function runPaperBacktestInner(
   let wins = 0;
   let stake = 0;
   let returns = 0;
-  const byMarket: Record<string, { nBets: number; wins: number }> = {};
+  const byMarket: Record<string, MarketMetricBucket> = {};
 
   for (const m of matches) {
     if (m.homeGoals == null || m.awayGoals == null) continue;
@@ -579,24 +600,25 @@ function runPaperBacktestInner(
 
       nBets += 1;
       stake += 1;
-      const bucket = (byMarket[c.market] ??= { nBets: 0, wins: 0 });
-      bucket.nBets += 1;
+      const bucket = (byMarket[c.market] ??= emptyMarketBucket());
 
       // DNB void on draw → stake returned
       if ((c.market === "dnb_home" || c.market === "dnb_away") && isDraw) {
         returns += 1;
+        recordVoidBet(bucket);
         continue;
       }
 
       if (c.won) {
         wins += 1;
-        bucket.wins += 1;
         returns += c.odds;
       }
+      recordScoredBet(bucket, c.modelP, c.won, c.odds);
     }
   }
 
   const roi = stake > 0 ? (returns - stake) / stake : 0;
+  const cal = aggregateCalibration(byMarket);
   return {
     nMatches: matches.length,
     nBets,
@@ -609,7 +631,9 @@ function runPaperBacktestInner(
     minOdds,
     maxOdds,
     market,
-    byMarket,
+    byMarket: finalizeMarketBuckets(byMarket),
+    meanBrier: cal.meanBrier,
+    meanLogLoss: cal.meanLogLoss,
   };
 }
 

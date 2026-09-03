@@ -3,11 +3,7 @@
  * Complements ROI auto-tuner with probability-error learning (EMA α=0.20).
  */
 import { prisma } from "./db";
-import {
-  MIN_SETTLEMENT_CALIBRATION_BATCH,
-  clamp,
-  emaBlend,
-} from "./auto-tuner";
+import { clamp, emaBlend } from "./auto-tuner";
 import {
   loadModelWeights,
   saveModelWeights,
@@ -529,26 +525,50 @@ export function applyBrierLearningToWeightsAsOf(
 
 /**
  * Full pipeline: load settled picks → Brier factors → model-weights + TeamProfile.
+ * Live/cron: prefer runOperationalCalibration (kickoff < asOf).
  */
 export async function runBrierLearning(): Promise<BrierLearningResult> {
-  const rows = await loadSettledPicksForBrier();
-  const result = applyBrierLearningToWeights(rows, loadModelWeights());
+  const asOf = new Date();
+  const rows = await loadSettledPicksForBrier({ kickoffBefore: asOf });
+  const result = applyBrierLearningToWeightsAsOf(rows, asOf, loadModelWeights());
   await saveModelWeights(result.weights);
   await persistTeamBrierFactors(result.teams);
   return result;
 }
 
 /**
- * Settlement hook: run when a batch of ≥5 legs settled. Never throws.
+ * Offline operational calibration: Brier then ROI tuner, one persist.
+ * Train window is strictly kickoff < asOf.
+ */
+export async function runOperationalCalibration(
+  asOf = new Date()
+): Promise<{
+  brier: BrierLearningResult;
+  tunerSampleSize: number;
+}> {
+  const { calibrateModelParametersAsOf, loadHistoricalDataFromDb, deriveTuningConfig } =
+    await import("./auto-tuner");
+  const { saveTuningConfig } = await import("./tuning-config");
+
+  const brierRows = await loadSettledPicksForBrier({ kickoffBefore: asOf });
+  const tunerRows = await loadHistoricalDataFromDb({ kickoffBefore: asOf });
+  const seed = loadModelWeights();
+  const brier = applyBrierLearningToWeightsAsOf(brierRows, asOf, seed);
+  const tuned = calibrateModelParametersAsOf(tunerRows, asOf, brier.weights);
+  await saveModelWeights(tuned.weights);
+  saveTuningConfig(deriveTuningConfig(tuned.weights));
+  await persistTeamBrierFactors(brier.teams);
+  return {
+    brier: { ...brier, weights: tuned.weights },
+    tunerSampleSize: tuned.sampleSize,
+  };
+}
+
+/**
+ * @deprecated Settlement no longer calibrates. Use /api/cron/calibrate.
  */
 export async function maybeUpdateBrierLearning(
-  settledCount: number
+  _settledCount: number
 ): Promise<BrierLearningResult | null> {
-  if (settledCount < MIN_SETTLEMENT_CALIBRATION_BATCH) return null;
-  try {
-    return await runBrierLearning();
-  } catch (err) {
-    console.error("[BRIER-LEARNING] Failed:", err);
-    return null;
-  }
+  return null;
 }

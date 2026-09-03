@@ -444,6 +444,22 @@ export function isConcacafRegionalCompetitionId(leagueId: number): boolean {
   return CONCACAF_REGIONAL_COMPETITION_IDS.has(leagueId);
 }
 
+/** Cup / continental KO competitions eligible for knockout friction boost. */
+export function isInternationalKnockoutCompetitionId(leagueId: number): boolean {
+  return (
+    CONMEBOL_COMPETITION_IDS.has(leagueId) ||
+    UEFA_COMPETITION_IDS.has(leagueId) ||
+    CONCACAF_REGIONAL_COMPETITION_IDS.has(leagueId) ||
+    EUROPE_NATIONAL_CUP_IDS.has(leagueId) ||
+    SA_NATIONAL_CUP_IDS.has(leagueId)
+  );
+}
+
+/** All API-Football league IDs in the elite whitelist. */
+export const ALL_WHITELIST_LEAGUE_IDS: readonly number[] = ALLOWED_LEAGUES.map(
+  (l) => l.id
+);
+
 export function saCupOriginLeagueIds(
   cupId: number
 ): readonly number[] | undefined {

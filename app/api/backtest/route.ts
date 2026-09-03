@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { loadHistoricalDataFromDb } from "@/lib/auto-tuner";
 import { runReplayBacktest } from "@/lib/backtest-replay";
 import { loadSettledPicksForBrier } from "@/lib/learning-engine";
 import {
@@ -10,14 +11,20 @@ import { errorMessage, jsonError } from "@/lib/api-response";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const maxDuration = 120;
+
+function deltaNum(a?: number, b?: number): number | null {
+  if (a == null || b == null || !Number.isFinite(a) || !Number.isFinite(b)) {
+    return null;
+  }
+  return Number((a - b).toFixed(4));
+}
 
 /**
- * Paper-trade backtest from Football-Data.org closing odds + season Poisson.
+ * Paper-trade / walk-forward backtest from Football-Data.org.
  *
  * GET ?competition=PL&season=2024&threshold=3&minOdds=1.4&maxOdds=1.85&market=ALL
- * market: ALL | 1X2 | OVER_UNDER_2_5 | DNB
- * threshold: ValueMarginPercent minimum (default 3.0)
- * minOdds / maxOdds: book line band (default 1.40–1.85)
+ * engine: replay (default) | compare
  */
 export async function GET(request: NextRequest) {
   try {
@@ -49,6 +56,17 @@ export async function GET(request: NextRequest) {
     const market = parseBacktestMarket(searchParams.get("market"));
     const engine = (searchParams.get("engine") ?? "replay").trim().toLowerCase();
 
+    if (engine === "legacy") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "engine=legacy is retired (season-wide leakage).",
+          hint: "use engine=replay (default) or engine=compare",
+        },
+        { status: 400 }
+      );
+    }
+
     const matches = await fetchHistoricalMatches(competition, season);
     if (matches.length === 0) {
       return NextResponse.json({
@@ -59,6 +77,7 @@ export async function GET(request: NextRequest) {
         minOdds,
         maxOdds,
         market,
+        engine,
         nMatches: 0,
         nBets: 0,
         wins: 0,
@@ -71,31 +90,50 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const brierRows =
-      engine === "replay"
-        ? await loadSettledPicksForBrier().catch(() => [])
-        : [];
+    const opts = { threshold, minOdds, maxOdds, market };
 
-    const summary =
-      engine === "legacy"
-        ? runPaperBacktest(matches, {
-            threshold,
-            minOdds,
-            maxOdds,
-            market,
-          })
-        : await runReplayBacktest(matches, {
-            threshold,
-            minOdds,
-            maxOdds,
-            market,
-            competition,
-            brierRows,
-          });
+    if (engine === "compare") {
+      const [brierRows, tunerRows] = await Promise.all([
+        loadSettledPicksForBrier().catch(() => []),
+        loadHistoricalDataFromDb().catch(() => []),
+      ]);
+      const legacy = runPaperBacktest(matches, opts);
+      const replay = await runReplayBacktest(matches, {
+        ...opts,
+        competition,
+        brierRows,
+        tunerRows,
+      });
+      return NextResponse.json({
+        success: true,
+        engine: "compare",
+        competition,
+        season,
+        legacy,
+        replay,
+        delta: {
+          roi: deltaNum(replay.roi, legacy.roi),
+          winRate: deltaNum(replay.winRate, legacy.winRate),
+          meanBrier: deltaNum(replay.meanBrier, legacy.meanBrier),
+          meanLogLoss: deltaNum(replay.meanLogLoss, legacy.meanLogLoss),
+          nBets: replay.nBets - legacy.nBets,
+        },
+      });
+    }
+
+    const [brierRows, tunerRows] = await Promise.all([
+      loadSettledPicksForBrier().catch(() => []),
+      loadHistoricalDataFromDb().catch(() => []),
+    ]);
+    const summary = await runReplayBacktest(matches, {
+      ...opts,
+      competition,
+      brierRows,
+      tunerRows,
+    });
 
     return NextResponse.json({
       success: true,
-      engine: engine === "legacy" ? "legacy" : "replay",
       competition,
       season,
       ...summary,

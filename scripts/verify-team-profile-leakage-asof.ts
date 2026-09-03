@@ -12,7 +12,9 @@ import { predictMatchMarkets } from "../lib/poisson";
 import {
   aggregateTeamEvents,
   buildTeamEventsFromFixtures,
+  peekTeamProfile,
   peekTeamProfileAt,
+  primeTeamProfile,
   primeTeamProfileAt,
   type MatchFixtureRowForProfile,
 } from "../lib/team-profiler";
@@ -95,6 +97,19 @@ assert(cached != null, "peekTeamProfileAt should return primed profile");
 assert(
   cached!.avgGoalsScoredHome === aggBase.avgGoalsScoredHome,
   "primed profile matches aggregate"
+);
+
+const liveLeakProfile = {
+  ...profileBase,
+  avgGoalsScoredHome: 99,
+  brierCalibrationFactor: 9,
+};
+primeTeamProfile(liveLeakProfile);
+assert(peekTeamProfile(TEAM_ID)?.avgGoalsScoredHome === 99, "LIVE cache seeded");
+const unprimedAsOf = new Date("2026-03-14T12:00:00.000Z");
+assert(
+  peekTeamProfileAt(TEAM_ID, unprimedAsOf) === null,
+  "peekTeamProfileAt must not fall back to LIVE when asOf miss"
 );
 
 const fixturesForForm = baseRows.map((r) => {
