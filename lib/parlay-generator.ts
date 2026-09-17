@@ -378,6 +378,9 @@ function derbyMarketRankBonus(match: Match, market: MarketType): number {
   return 0;
 }
 
+/** Dedup SANITY DROP across collectSafePicks passes (modes / backfill). */
+const sanityDropLogged = new Set<string>();
+
 /**
  * Collect eligible legs: one pick per match = highest modelProbability
  * (tie-break: edge, then lower odds). No market-family quotas.
@@ -431,7 +434,6 @@ export function collectSafePicks(
       asOf: new Date(resolved.kickoff),
     });
 
-    let loggedSanityDrop = false;
     const eligible = markets.filter((m) => {
       if (!isMarketAllowed(m.market, strategyMode, resolved)) return false;
       if (m.odds < MIN_SELECTION_ODDS) return false;
@@ -462,11 +464,14 @@ export function collectSafePicks(
         const sanity =
           m.contextFlags?.includes("UNDERDOG_SANITY") ||
           m.contextFlags?.includes("MODEL_MARKET_ANOMALY");
-        if (sanity && !loggedSanityDrop) {
-          loggedSanityDrop = true;
-          console.log(
-            `[SANITY DROP] ${resolved.home.name} vs ${resolved.away.name}: Market odds conflict / underdog pick`
-          );
+        if (sanity) {
+          const key = `${resolved.home.name}\0${resolved.away.name}`;
+          if (!sanityDropLogged.has(key)) {
+            sanityDropLogged.add(key);
+            console.log(
+              `[SANITY DROP] ${resolved.home.name} vs ${resolved.away.name}: Market odds conflict / underdog pick`
+            );
+          }
         }
         return false;
       }
@@ -650,6 +655,7 @@ export function generateParlay(
   matches: Match[],
   config: ParlayConfig
 ): GeneratedParlay {
+  sanityDropLogged.clear();
   const strategyMode = resolveMode(config);
   const preset = getStrategyPreset(strategyMode);
 

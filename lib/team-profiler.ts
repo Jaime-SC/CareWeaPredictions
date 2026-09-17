@@ -325,6 +325,41 @@ export function aggregateTeamEvents(
   };
 }
 
+export function isTransientDbError(err: unknown): boolean {
+  const parts: string[] = [];
+  let cur: unknown = err;
+  for (let i = 0; i < 4 && cur != null; i++) {
+    if (cur instanceof Error) {
+      parts.push(cur.message);
+      if ("code" in cur && cur.code != null) parts.push(String(cur.code));
+      cur = cur.cause;
+    } else {
+      parts.push(String(cur));
+      break;
+    }
+  }
+  return /ECONNRESET|ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|terminated|fetch failed|socket hang up|network/i.test(
+    parts.join(" ")
+  );
+}
+
+async function withTransientDbRetry<T>(
+  fn: () => Promise<T>,
+  attempts = 3
+): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      last = err;
+      if (!isTransientDbError(err) || i === attempts - 1) throw err;
+      await new Promise((r) => setTimeout(r, 250 * (i + 1)));
+    }
+  }
+  throw last;
+}
+
 /** Build apiFixtureId → team ids and name → id from CachedApiResponse. */
 export async function loadTeamIdMaps(): Promise<{
   byFixture: Map<
@@ -340,16 +375,18 @@ export async function loadTeamIdMaps(): Promise<{
   const byName = new Map<string, number>();
 
   try {
-    const rows = await prisma.cachedApiResponse.findMany({
-      where: {
-        OR: [
-          { id: { startsWith: "fixtures_date_" } },
-          { endpoint: { contains: "fixtures" } },
-        ],
-      },
-      select: { payload: true },
-      take: 200,
-    });
+    const rows = await withTransientDbRetry(() =>
+      prisma.cachedApiResponse.findMany({
+        where: {
+          OR: [
+            { id: { startsWith: "fixtures_date_" } },
+            { endpoint: { contains: "fixtures" } },
+          ],
+        },
+        select: { payload: true },
+        take: 200,
+      })
+    );
 
     for (const row of rows) {
       let parsed: CachedEnvelope;
