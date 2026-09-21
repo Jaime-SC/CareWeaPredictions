@@ -442,6 +442,12 @@ export interface ParlayConfig {
   strategyMode?: StrategyMode;
   /** Monopoly: skip ±4 day continental rotation check when true. */
   ignoreRotationFilter?: boolean;
+  /** Include whitelist leagues outside the default Europe/Brazil/CONMEBOL preset. */
+  expandLeagues?: boolean;
+  /** Selective country filter (ignores default preset when non-empty). */
+  selectedCountries?: string[];
+  /** Selective league-id filter (ignores default preset when non-empty). */
+  selectedLeagueIds?: number[];
 }
 
 export interface GeneratedParlay {

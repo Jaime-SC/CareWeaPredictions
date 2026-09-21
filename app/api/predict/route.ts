@@ -21,9 +21,14 @@ import {
   hydrateAiJudgeFromCache,
   hydrateSafePicksAiJudge,
 } from "@/lib/ai-judge";
-import { buildMatchPredictions } from "@/lib/parlay-generator";
+import { buildMatchPredictions, filterMatchesByPredictionScope } from "@/lib/parlay-generator";
 import { hydrateModelWeightsFromDb } from "@/lib/model-weights";
 import { applyPredictionContexts } from "@/lib/prediction-context";
+import {
+  scopeCacheKey,
+  scopeFromBody,
+  scopeFromRequestParams,
+} from "@/lib/prediction-scope";
 import {
   syncAutomatedTeamProfileFlags,
   warmTeamProfileCache,
@@ -83,14 +88,28 @@ export async function GET(request: NextRequest) {
   const strategyMode = resolveStrategyMode(
     searchParams.get("strategyMode") ?? "daily-safe"
   );
+  const scope = scopeFromRequestParams({
+    expandLeagues: searchParams.get("expandLeagues"),
+    expand: searchParams.get("expand"),
+    countries: searchParams.get("countries"),
+    selectedCountries: searchParams.get("selectedCountries"),
+    leagueIds: searchParams.get("leagueIds"),
+    selectedLeagueIds: searchParams.get("selectedLeagueIds"),
+  });
+  // Selective filters or expand → treat as expanded pool for cache labeling
   const poolMode =
-    poolParam === "expanded" || isFunStrategy(strategyMode)
+    scope.expandLeagues ||
+    (scope.selectedCountries?.length ?? 0) > 0 ||
+    (scope.selectedLeagueIds?.length ?? 0) > 0 ||
+    poolParam === "expanded" ||
+    isFunStrategy(strategyMode)
       ? "expanded"
       : "core";
   const forceRefresh = searchParams.get("refresh") === "1";
   const cacheKey = buildCacheKey("predict", {
     date,
     pool: poolMode,
+    scope: scopeCacheKey(scope),
     strategy: strategyMode,
     safe: safeOnly ? "1" : "0",
     minProb,
@@ -124,8 +143,11 @@ export async function GET(request: NextRequest) {
         poolMode,
         expandIfFewerThan: 8,
       });
-    const matches = await withExternalEnrichment(
-      await enrichMatchesFromLocalData(rawMatches)
+    const matches = filterMatchesByPredictionScope(
+      await withExternalEnrichment(
+        await enrichMatchesFromLocalData(rawMatches)
+      ),
+      scope
     );
 
     const preset = getStrategyPreset(strategyMode);
@@ -219,12 +241,16 @@ export async function POST(request: NextRequest) {
       typeof body.minProb === "number" && body.minProb > 0
         ? body.minProb
         : 0.85;
+    const scope = scopeFromBody(body as Record<string, unknown>);
 
     const { matches: rawMatches, source } = await fetchUpcomingMatches({
       date,
     });
-    const matches = await withExternalEnrichment(
-      await enrichMatchesFromLocalData(rawMatches)
+    const matches = filterMatchesByPredictionScope(
+      await withExternalEnrichment(
+        await enrichMatchesFromLocalData(rawMatches)
+      ),
+      scope
     );
     const filtered = matchIds
       ? matches.filter((m) => matchIds.includes(m.id))

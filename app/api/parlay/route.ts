@@ -35,6 +35,8 @@ import {
   getWeeklyDateRange,
   INSUFFICIENT_MATCHES_MESSAGE,
 } from "@/lib/monopoly-engine";
+import { scopeFromBody, scopeFromRequestParams } from "@/lib/prediction-scope";
+import type { PredictionScopeOptions } from "@/config/allowed-leagues";
 
 /** Cache-first DT/absences → external sources → TeamProfile before Poisson. */
 async function withAutomatedTeamProfiles(matches: Match[]): Promise<Match[]> {
@@ -59,7 +61,8 @@ export async function POST(request: NextRequest) {
     body?.strategyMode,
     body?.date,
     body?.multiDay === true || body?.allowMultiDay === true,
-    body?.ignoreRotationFilter === true
+    body?.ignoreRotationFilter === true,
+    scopeFromBody(body as Record<string, unknown>)
   );
 }
 
@@ -71,11 +74,20 @@ export async function GET(request: NextRequest) {
     request.nextUrl.searchParams.get("allowMultiDay") === "true";
   const ignoreRotationFilter =
     request.nextUrl.searchParams.get("ignoreRotationFilter") === "true";
+  const scope = scopeFromRequestParams({
+    expandLeagues: request.nextUrl.searchParams.get("expandLeagues"),
+    expand: request.nextUrl.searchParams.get("expand"),
+    countries: request.nextUrl.searchParams.get("countries"),
+    selectedCountries: request.nextUrl.searchParams.get("selectedCountries"),
+    leagueIds: request.nextUrl.searchParams.get("leagueIds"),
+    selectedLeagueIds: request.nextUrl.searchParams.get("selectedLeagueIds"),
+  });
   return buildAutoParlayResponse(
     strategyMode,
     date,
     multiDay,
-    ignoreRotationFilter
+    ignoreRotationFilter,
+    scope
   );
 }
 
@@ -253,7 +265,8 @@ async function buildAutoParlayResponse(
   strategyModeRaw: unknown,
   dateRaw: unknown,
   allowMultiDay: boolean,
-  ignoreRotationFilter: boolean
+  ignoreRotationFilter: boolean,
+  scope: PredictionScopeOptions = {}
 ) {
   try {
     const strategyMode = resolveStrategyMode(strategyModeRaw);
@@ -278,7 +291,12 @@ async function buildAutoParlayResponse(
         : chileDateString();
 
     const preset = getStrategyPreset(strategyMode);
-    const config = { ...preset };
+    const config = {
+      ...preset,
+      expandLeagues: scope.expandLeagues,
+      selectedCountries: scope.selectedCountries,
+      selectedLeagueIds: scope.selectedLeagueIds,
+    };
     const targetLegCount = config.targetLegCount ?? DEFAULT_TARGET_LEG_COUNT;
 
     const { matches, source, daysFetched, poolMode, datesUsed, singleDayLocked } =

@@ -19,7 +19,7 @@ assert(
   "SA label"
 );
 assert(
-  REGION_DISPLAY_LABELS.uefa === "UEFA (Filtro 1ª ENG·ESP·ITA)",
+  REGION_DISPLAY_LABELS.uefa === "UEFA (Filtro 1ª Top 5 ENG·ESP·ITA·GER·FRA)",
   "UEFA label"
 );
 assert(
@@ -27,7 +27,8 @@ assert(
   "CONMEBOL label"
 );
 assert(
-  REGION_DISPLAY_LABELS["europe-top3-and-2nd"] === "Europa (1ª y 2ª División)",
+  REGION_DISPLAY_LABELS["europe-top3-and-2nd"] ===
+    "Europa (Top 5: ENG/ESP/ITA/GER/FRA — 1ª y 2ª Div + Copas)",
   "Europe label"
 );
 assert(!("europe-top5" in REGION_DISPLAY_LABELS), "old europe key gone");
@@ -45,7 +46,7 @@ assert(resolveLeagueRegion(66) === "europe-top3-and-2nd", "Coupe de France");
 
 assert(
   restrictedCompetitionBadge(2, "UEFA Champions League") ===
-    "UEFA (Filtro 1ª ENG·ESP·ITA)"
+    "UEFA (Filtro 1ª Top 5 ENG·ESP·ITA·GER·FRA)"
 );
 assert(
   restrictedCompetitionBadge(13) === "CONMEBOL (Clubes Elegibles)"
@@ -54,11 +55,13 @@ assert(
   restrictedCompetitionBadge(71) === "Sudamérica (1ª y 2ª División)"
 );
 assert(
-  restrictedCompetitionBadge(39) === "Europa (1ª y 2ª División)",
-  "PL shows Europe 1ª/2ª badge"
+  restrictedCompetitionBadge(39) ===
+    "Europa (Top 5: ENG/ESP/ITA/GER/FRA — 1ª y 2ª Div + Copas)",
+  "PL shows Europe Top 5 badge"
 );
 assert(
-  restrictedCompetitionBadge(45) === "Europa (1ª y 2ª División)",
+  restrictedCompetitionBadge(45) ===
+    "Europa (Top 5: ENG/ESP/ITA/GER/FRA — 1ª y 2ª Div + Copas)",
   "FA Cup badge"
 );
 assert(

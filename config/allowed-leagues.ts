@@ -25,8 +25,8 @@ export type AllowedLeagueEntry = {
 export const REGION_DISPLAY_LABELS: Readonly<
   Record<AllowedLeagueRegion, string>
 > = {
-  "europe-top3-and-2nd": "Europa (1ª y 2ª División)",
-  uefa: "UEFA (Filtro 1ª ENG·ESP·ITA)",
+  "europe-top3-and-2nd": "Europa (Top 5: ENG/ESP/ITA/GER/FRA — 1ª y 2ª Div + Copas)",
+  uefa: "UEFA (Filtro 1ª Top 5 ENG·ESP·ITA·GER·FRA)",
   "south-america-eligible-divisions": "Sudamérica (1ª y 2ª División)",
   conmebol: "CONMEBOL (Clubes Elegibles)",
   concacaf: "CONCACAF",
@@ -41,11 +41,13 @@ const RESTRICTED_BADGE_REGIONS: ReadonlySet<AllowedLeagueRegion> = new Set([
   "south-america-eligible-divisions",
 ]);
 
-/** Premier / LaLiga / Serie A — UEFA origin gate (1ª only). */
+/** Top 5 1ª — UEFA origin gate (Premier / LaLiga / Serie A / Bundesliga / Ligue 1). */
 export const EUROPE_BIG5_LEAGUE_IDS: readonly number[] = [
   39, // Premier League
   140, // La Liga
   135, // Serie A
+  78, // Bundesliga
+  61, // Ligue 1
 ] as const;
 
 /** England / Spain / Italy / France / Germany 1ª + 2ª for elite roster caches. */
@@ -62,7 +64,7 @@ export const EUROPE_ELIGIBLE_DOMESTIC_LEAGUE_IDS: readonly number[] = [
   79, // 2. Bundesliga
 ] as const;
 
-/** UEFA club competitions that require both sides from EUROPE_BIG5_LEAGUE_IDS. */
+/** UEFA club competitions that require both sides from EUROPE_BIG5_LEAGUE_IDS (Top 5 1ª). */
 export const UEFA_COMPETITION_IDS: ReadonlySet<number> = new Set([
   2, // Champions League
   3, // Europa League
@@ -459,6 +461,157 @@ export function isInternationalKnockoutCompetitionId(leagueId: number): boolean 
 export const ALL_WHITELIST_LEAGUE_IDS: readonly number[] = ALLOWED_LEAGUES.map(
   (l) => l.id
 );
+
+/**
+ * Default prediction scope: Europe Top 5 (1ª+2ª+copas) + UEFA + Brazil + CONMEBOL.
+ * Expansion leagues = whitelist minus this set.
+ * UEFA (2/3/848) require both clubs from Top 5 1ª (39/140/135/78/61) at fetch/parlay gates.
+ * National cups require both clubs from that country's 1ª or 2ª.
+ */
+export const DEFAULT_PREDICTION_LEAGUE_IDS: readonly number[] = [
+  // England
+  39, 40, 45, 48,
+  // Spain
+  140, 141, 143,
+  // Italy
+  135, 136, 137,
+  // Germany
+  78, 79, 81,
+  // France
+  61, 62, 66,
+  // UEFA club competitions (Top 5 1ª origin gated elsewhere)
+  2, 3, 848,
+  // Brazil
+  71, 72, 73,
+  // CONMEBOL (eligible 1ª origin gated elsewhere)
+  13, 11,
+] as const;
+
+export const DEFAULT_PREDICTION_LEAGUE_ID_SET: ReadonlySet<number> = new Set(
+  DEFAULT_PREDICTION_LEAGUE_IDS
+);
+
+export const EXPANSION_LEAGUE_IDS: readonly number[] =
+  ALL_WHITELIST_LEAGUE_IDS.filter(
+    (id) => !DEFAULT_PREDICTION_LEAGUE_ID_SET.has(id)
+  );
+
+/** Country label → league IDs (for selective predict filters). */
+export const LEAGUE_IDS_BY_COUNTRY: Readonly<Record<string, readonly number[]>> =
+  {
+    Inglaterra: [39, 40, 45, 48],
+    España: [140, 141, 143],
+    Italia: [135, 136, 137],
+    Francia: [61, 62, 66],
+    Alemania: [78, 79, 81],
+    Brasil: [71, 72, 73],
+    Argentina: [128, 129, 130],
+    Chile: [265, 266, 267],
+    México: [262],
+    "EE.UU. / Canadá": [253],
+    UEFA: [2, 3, 848],
+    CONMEBOL: [13, 11],
+    CONCACAF: [16, 779],
+  };
+
+export const PREDICTION_FILTER_COUNTRIES: readonly string[] = Object.keys(
+  LEAGUE_IDS_BY_COUNTRY
+);
+
+export type PredictionScopeOptions = {
+  /** Include whitelist leagues outside the default preset. */
+  expandLeagues?: boolean;
+  /** When set, ignore default/expansion and keep only these countries. */
+  selectedCountries?: string[];
+  /** When set, ignore default/expansion and keep only these league IDs. */
+  selectedLeagueIds?: number[];
+};
+
+function normalizeCountryKey(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+}
+
+const COUNTRY_ALIAS: ReadonlyMap<string, string> = new Map(
+  PREDICTION_FILTER_COUNTRIES.flatMap((label) => {
+    const key = normalizeCountryKey(label);
+    const aliases: Array<[string, string]> = [[key, label]];
+    if (label === "EE.UU. / Canadá") {
+      aliases.push(
+        ["eeuu", label],
+        ["usa", label],
+        ["mls", label],
+        ["estados unidos", label]
+      );
+    }
+    if (label === "España") aliases.push(["spain", label], ["espana", label]);
+    if (label === "Inglaterra")
+      aliases.push(["england", label], ["uk", label]);
+    if (label === "Francia") aliases.push(["france", label]);
+    if (label === "Alemania") aliases.push(["germany", label], ["deutschland", label]);
+    if (label === "Italia") aliases.push(["italy", label]);
+    if (label === "Brasil") aliases.push(["brazil", label]);
+    if (label === "México") aliases.push(["mexico", label]);
+    return aliases;
+  })
+);
+
+export function resolveCountryLabel(raw: string): string | null {
+  const key = normalizeCountryKey(raw);
+  if (!key) return null;
+  return COUNTRY_ALIAS.get(key) ?? null;
+}
+
+/**
+ * Resolves which league IDs are active for a prediction/parlay run.
+ * Selective country/league filters win over default + expansion.
+ */
+export function resolvePredictionLeagueIds(
+  options?: PredictionScopeOptions
+): readonly number[] {
+  const selectedLeagueIds = (options?.selectedLeagueIds ?? [])
+    .map((id) => parseLeagueId(id))
+    .filter((id): id is number => id != null && isAllowedLeagueId(id));
+
+  if (selectedLeagueIds.length > 0) {
+    // Expansion refinement keeps the default preset and adds chosen leagues
+    if (options?.expandLeagues) {
+      return [
+        ...new Set([...DEFAULT_PREDICTION_LEAGUE_IDS, ...selectedLeagueIds]),
+      ];
+    }
+    return [...new Set(selectedLeagueIds)];
+  }
+
+  const countries = (options?.selectedCountries ?? [])
+    .map(resolveCountryLabel)
+    .filter((c): c is string => c != null);
+
+  if (countries.length > 0) {
+    const ids = new Set<number>();
+    for (const country of countries) {
+      for (const id of LEAGUE_IDS_BY_COUNTRY[country] ?? []) {
+        if (isAllowedLeagueId(id)) ids.add(id);
+      }
+    }
+    return [...ids];
+  }
+
+  if (options?.expandLeagues) return ALL_WHITELIST_LEAGUE_IDS;
+  return DEFAULT_PREDICTION_LEAGUE_IDS;
+}
+
+export function isLeagueInPredictionScope(
+  leagueId: string | number | null | undefined,
+  options?: PredictionScopeOptions
+): boolean {
+  const id = parseLeagueId(leagueId);
+  if (id == null) return false;
+  return resolvePredictionLeagueIds(options).includes(id);
+}
 
 export function saCupOriginLeagueIds(
   cupId: number

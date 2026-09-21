@@ -74,7 +74,7 @@ export const STRATEGY_PRESETS: Record<StrategyMode, StrategyPreset> = {
     minOdds: 1.01,
     maxOdds: 12,
     minProbability:
-      BUILDER_MODES.MONOPOLY_ASYMMETRY.minProbPerLeg ?? 0.82,
+      BUILDER_MODES.MONOPOLY_ASYMMETRY.minProbPerLeg ?? 0.78,
   },
 };
 

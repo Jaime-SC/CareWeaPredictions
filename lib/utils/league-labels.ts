@@ -44,6 +44,13 @@ const COUNTRY_BY_LEAGUE_ID: Readonly<Record<number, string>> = {
   267: "Chile",
   262: "México",
   253: "EE.UU. / Canadá",
+  2: "UEFA",
+  3: "UEFA",
+  848: "UEFA",
+  13: "CONMEBOL",
+  11: "CONMEBOL",
+  16: "CONCACAF",
+  779: "CONCACAF",
 };
 
 export function getLeagueDisplayName(

@@ -137,8 +137,20 @@ function monopolyMatch(opts: {
 }
 
 const safeDomestic = isSafeMonopolyFixture(domestic, [domestic]);
-const cupRejected = isSafeMonopolyFixture(cup, [cup]);
+const cupAccepted = isSafeMonopolyFixture(cup, [cup]);
+const continentalMain = isSafeMonopolyFixture(ucl, [ucl]);
 const rotationRejected = isSafeMonopolyFixture(domestic, [domestic, ucl]);
+const rotationOutsideWeek = isSafeMonopolyFixture(
+  domestic,
+  [
+    domestic,
+    // Within ±4 days of Aug 14, but outside cartelera week Mon–Sun
+    fx(99, UCL, "UEFA Champions League", HILAL, 50, "2026-08-17T18:00:00.000Z"),
+  ],
+  {
+    weekRange: { fromYmd: "2026-08-10", toYmd: "2026-08-16" },
+  }
+);
 const rotationBypassed = isSafeMonopolyFixture(domestic, [domestic, ucl], {
   ignoreRotationFilter: true,
 });
@@ -206,6 +218,7 @@ function mockFunMatch(id: number): Match {
     id: `live-${id}`,
     league: "premier-league",
     leagueName: "Premier League",
+    leagueId: "39",
     kickoff: new Date().toISOString(),
     home: {
       name: `Home${id}`,
@@ -227,11 +240,13 @@ function mockFunMatch(id: number): Match {
     },
     h2h: { homeWins: 3, draws: 1, awayWins: 1, avgGoals: 2.4 },
     odds: board({
-      doubleChance1X: Number((1.2 + bump).toFixed(2)),
-      over15: Number((1.2 + bump).toFixed(2)),
-      under35: Number((1.22 + bump).toFixed(2)),
-      homeScores: Number((1.19 + bump).toFixed(2)),
-      dnbHome: Number((1.21 + bump).toFixed(2)),
+      doubleChance1X: Number((1.45 + bump).toFixed(2)),
+      over15: Number((1.48 + bump).toFixed(2)),
+      under35: Number((1.52 + bump).toFixed(2)),
+      homeScores: Number((1.42 + bump).toFixed(2)),
+      dnbHome: Number((1.5 + bump).toFixed(2)),
+      home: Number((1.55 + bump).toFixed(2)),
+      over05: Number((1.41 + bump).toFixed(2)),
     }),
   };
 }
@@ -265,8 +280,10 @@ const weekEnd = new Date(week.to);
 
 const checks = {
   domesticSafe: safeDomestic.isSafe === true,
-  cupRejected: cupRejected.reason === "NOT_DOMESTIC_LEAGUE",
+  cupAccepted: cupAccepted.isSafe === true,
+  continentalRejected: continentalMain.reason === "NOT_DOMESTIC_LEAGUE",
   rotationRejected: rotationRejected.reason === "ROTATION_RISK",
+  rotationOutsideWeekSafe: rotationOutsideWeek.isSafe === true,
   rotationBypassSafe: rotationBypassed.isSafe === true,
   rotationBypassWarning:
     rotationBypassed.warning === "NEARBY_INTERNATIONAL_MATCH_PRESENT",
@@ -283,9 +300,9 @@ const checks = {
   ),
   homeMarket:
     homePick?.market === "home" || homePick?.market === "home_over_1_5",
-  homeFloor: (homePick?.modelProbability ?? 0) >= 0.82,
+  homeFloor: (homePick?.modelProbability ?? 0) >= 0.78,
   awayMarket: awayPick?.market === "dnb_away" || awayPick?.market === "x2",
-  awayFloor: (awayPick?.modelProbability ?? 0) >= 0.82,
+  awayFloor: (awayPick?.modelProbability ?? 0) >= 0.78,
   dynamicLegs: dynamic.legs.length === 3,
   noTruncate: dynamic.status === "OK",
   insufficient: short.status === "INSUFFICIENT_MATCHES",

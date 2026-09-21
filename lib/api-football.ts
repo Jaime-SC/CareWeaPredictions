@@ -70,6 +70,7 @@ import {
   getMonopolyTeams,
   getMonopolyTeamIds,
   getWeeklyDateRange,
+  isContinentalOrInternational,
   MONOPOLY_WINDOW_DAYS,
   type WeeklyDateRange,
 } from "./monopoly-engine";
@@ -709,7 +710,7 @@ function shouldKeepFixture(item: ApiFixture, rosters: OriginRosters): boolean {
     );
   }
 
-  // UEFA: keep ONLY when BOTH clubs originate from Europe's Big 3 (1ª)
+  // UEFA: keep ONLY when BOTH clubs originate from Europe's Top 5 1ª
   if (isUefaCompetitionId(leagueId)) {
     return bothTeamsInRoster(home.id, away.id, rosters.europeBig5TeamIds);
   }
@@ -738,7 +739,7 @@ function shouldKeepFixture(item: ApiFixture, rosters: OriginRosters): boolean {
     return bothTeamsInRoster(home.id, away.id, origin);
   }
 
-  // ENG / ESP / ITA national cups: both from that country's 1ª or 2ª
+  // ENG / ESP / ITA / FRA / GER national cups: both from that country's 1ª or 2ª
   if (isEuropeNationalCupId(leagueId)) {
     const origin = rosters.europeCupOrigins.get(leagueId) ?? new Set<number>();
     return bothTeamsInRoster(home.id, away.id, origin);
@@ -1022,6 +1023,7 @@ async function attachOddsBestEffort(
 /**
  * Upcoming domestic monopoly fixtures for the current Chile week (Mon–Sun).
  * Ignores any caller date; anti-rotation windows are ±4 days around each fixture.
+ * Fetches all competitions for the rotation scan; ticket legs stay non-continental.
  */
 export async function fetchMonopolyMatchPool(): Promise<{
   matches: Match[];
@@ -1039,6 +1041,7 @@ export async function fetchMonopolyMatchPool(): Promise<{
   const candidates: ApiFixture[] = [];
 
   for (const team of getMonopolyTeams()) {
+    // No league filter on the HTTP call — need continental fixtures for rotation
     const rows = await fetchTeamApiFixtures(
       team.teamId,
       fromScan,
@@ -1053,7 +1056,14 @@ export async function fetchMonopolyMatchPool(): Promise<{
         item.teams.home.id === team.teamId ||
         item.teams.away.id === team.teamId;
       if (!plays) continue;
-      if (item.league.id !== team.leagueId) continue;
+
+      // Ticket legs: non-continental only (domestic league + domestic cups)
+      if (
+        isContinentalOrInternational(item.league.id, item.league.name ?? "")
+      ) {
+        continue;
+      }
+
       const ymd = chileCivilDateFromKickoff(
         item.fixture.timestamp ?? item.fixture.date
       );

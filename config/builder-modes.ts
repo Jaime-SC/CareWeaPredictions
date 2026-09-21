@@ -54,7 +54,7 @@ export const BUILDER_MODES: Record<BuilderModeId, BuilderModeDefinition> = {
     name: "Modo Asimetría (Gigantes Exóticos)",
     minLegs: 2,
     maxLegs: null,
-    minProbPerLeg: 0.82,
+    minProbPerLeg: 0.78,
     dateSelectionMode: "FULL_WEEK_AUTO",
     recommendedStake: "1.5U - 2U",
     description:

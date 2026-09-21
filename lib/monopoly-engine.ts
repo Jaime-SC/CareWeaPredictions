@@ -38,7 +38,8 @@ import { chileDateOffset, chileDateString, getWeeklyDateRange } from "./utils";
 export type { WeeklyDateRange } from "./utils";
 export { getWeeklyDateRange };
 
-export const MONOPOLY_MIN_PROBABILITY = 0.82;
+/** Softened from 0.82 — exotic boards rarely clear 82% in thin weeks. */
+export const MONOPOLY_MIN_PROBABILITY = 0.78;
 export const MONOPOLY_MIN_LEGS = 2;
 export const MONOPOLY_WINDOW_DAYS = 4;
 
@@ -53,7 +54,8 @@ export type MonopolyRejectReason =
   | "NOT_MONOPOLY_TEAM"
   | "NOT_DOMESTIC_LEAGUE"
   | "ROTATION_RISK"
-  | "BELOW_PROBABILITY_FLOOR";
+  | "BELOW_PROBABILITY_FLOOR"
+  | "MISSING_REALTIME_ODDS";
 
 export const NEARBY_INTERNATIONAL_MATCH_PRESENT =
   "NEARBY_INTERNATIONAL_MATCH_PRESENT" as const;
@@ -63,6 +65,8 @@ export type MonopolyRotationWarning = typeof NEARBY_INTERNATIONAL_MATCH_PRESENT;
 export interface MonopolyOptions {
   ignoreRotationFilter?: boolean;
   poissonProbability?: number;
+  /** Cartelera week (Mon–Sun Chile). Continental outside this week is not ROTATION_RISK. */
+  weekRange?: { fromYmd: string; toYmd: string };
 }
 
 export type MonopolySafetyResult = {
@@ -153,14 +157,27 @@ function toMonopolyFixture(match: Match): MonopolyFixture {
 function hasNearbyContinentalFixture(
   fixture: MonopolyFixture,
   teamFixturesWindow: MonopolyFixture[],
-  teamId: number
+  teamId: number,
+  weekRange?: { fromYmd: string; toYmd: string }
 ): boolean {
   const centerYmd = chileYmdFromIso(fixture.date);
 
   for (const other of teamFixturesWindow) {
     if (other.id === fixture.id) continue;
     const otherYmd = chileYmdFromIso(other.date);
+    // ±4 days around THIS domestic matchday only
     if (!fixtureInWindow(otherYmd, centerYmd)) continue;
+    // Continental outside the cartelera week is not a rotation risk — but only
+    // when the domestic fixture itself sits inside that week (avoids false
+    // negatives when analyzing fixtures from another calendar week).
+    if (
+      weekRange &&
+      centerYmd >= weekRange.fromYmd &&
+      centerYmd <= weekRange.toYmd &&
+      (otherYmd < weekRange.fromYmd || otherYmd > weekRange.toYmd)
+    ) {
+      continue;
+    }
 
     const involvesTeam =
       other.teams.home.id === teamId || other.teams.away.id === teamId;
@@ -172,6 +189,10 @@ function hasNearbyContinentalFixture(
   }
 
   return false;
+}
+
+function rejectLog(teamName: string, reason: string): void {
+  console.log(`[MONOPOLY REJECTED] Team: ${teamName} | Reason: ${reason}`);
 }
 
 /**
@@ -187,6 +208,7 @@ export function isSafeMonopolyFixture(
 ): MonopolySafetyResult {
   const side = findMonopolySide(fixture);
   if (!side) {
+    rejectLog("unknown", "NOT_MONOPOLY_TEAM");
     return {
       isSafe: false,
       reason: "NOT_MONOPOLY_TEAM",
@@ -196,9 +218,18 @@ export function isSafeMonopolyFixture(
   }
 
   const fixtureLeagueId = Number(fixture.league.id);
-  if (fixtureLeagueId !== side.team.leagueId) {
-    console.log(
-      `[MONOPOLY DROP] ${side.team.teamName}: League mismatch (${fixtureLeagueId} != ${side.team.leagueId})`
+  const leagueName = fixture.league.name ?? "";
+  const isContinental = isContinentalOrInternational(
+    fixtureLeagueId,
+    leagueName
+  );
+
+  // Continental never qualifies as a monopoly ticket leg.
+  // Non-continental domestic (primary league or cup) is accepted.
+  if (isContinental) {
+    rejectLog(
+      side.team.teamName,
+      `NOT_DOMESTIC_LEAGUE (continental ${fixtureLeagueId})`
     );
     return {
       isSafe: false,
@@ -208,15 +239,27 @@ export function isSafeMonopolyFixture(
     };
   }
 
+  if (
+    fixtureLeagueId !== side.team.leagueId &&
+    !getMonopolyLeagueIds().has(fixtureLeagueId)
+  ) {
+    // Alternate domestic competition for this monopoly side (cup, etc.)
+    console.log(
+      `[MONOPOLY] ${side.team.teamName}: accepting domestic league ${fixtureLeagueId} (configured ${side.team.leagueId})`
+    );
+  }
+
   const nearbyContinental = hasNearbyContinentalFixture(
     fixture,
     teamFixturesWindow,
-    side.team.teamId
+    side.team.teamId,
+    options?.weekRange
   );
 
   if (nearbyContinental && options?.ignoreRotationFilter !== true) {
-    console.log(
-      `[MONOPOLY DROP] ${side.team.teamName}: ROTATION_RISK (Continental match within 4 days)`
+    rejectLog(
+      side.team.teamName,
+      "ROTATION_RISK (continental within ±4 days of matchday, inside cartelera week)"
     );
     return {
       isSafe: false,
@@ -231,8 +274,9 @@ export function isSafeMonopolyFixture(
     typeof poissonProbability === "number" &&
     poissonProbability < MONOPOLY_MIN_PROBABILITY
   ) {
-    console.log(
-      `[MONOPOLY DROP] ${side.team.teamName}: LOW_PROBABILITY (${(poissonProbability * 100).toFixed(1)}% < 82%)`
+    rejectLog(
+      side.team.teamName,
+      `BELOW_PROBABILITY_FLOOR (${(poissonProbability * 100).toFixed(1)}% < ${(MONOPOLY_MIN_PROBABILITY * 100).toFixed(0)}%)`
     );
     return {
       isSafe: false,
@@ -288,8 +332,17 @@ function oddsForResolvedMarket(
     const denom = pHome + pAway;
     if (denom > 0) return Number((1 / (pAway / denom)).toFixed(3));
   }
+  if (market === "dnb_home" && board.home > 1 && board.away > 1) {
+    const pHome = 1 / board.home;
+    const pAway = 1 / board.away;
+    const denom = pHome + pAway;
+    if (denom > 0) return Number((1 / (pHome / denom)).toFixed(3));
+  }
 
-  // Ban synthetic / fair-odds fallback — no explicit book line → reject.
+  // Exotic/domestic boards often lack realtime odds far ahead → Poisson fair odds
+  if (probability > 0.01 && probability < 0.99) {
+    return Number((1 / probability).toFixed(3));
+  }
   return 0;
 }
 
@@ -373,7 +426,7 @@ function toPrediction(
 /**
  * Home: 1X2 (Home Win) or Team Total Over 1.5.
  * Away: Draw No Bet or Double Chance X2.
- * Picks the highest Poisson-base probability that clears 82%.
+ * Picks the highest Poisson-base probability that clears the monopoly floor.
  */
 export function resolveMonopolyMarket(
   fixture: MonopolyFixture | Match,
@@ -404,24 +457,22 @@ export function resolveMonopolyMarket(
 
   if (eligible.length === 0) {
     const best = Math.max(0, ...candidates.map((c) => c.p));
-    console.log(
-      `[MONOPOLY DROP] ${teamName}: LOW_PROBABILITY (${(best * 100).toFixed(1)}% < 82%)`
+    rejectLog(
+      teamName,
+      `BELOW_PROBABILITY_FLOOR (${(best * 100).toFixed(1)}% < ${(MONOPOLY_MIN_PROBABILITY * 100).toFixed(0)}%)`
     );
     return null;
   }
 
-  let missingOdds = false;
   for (const c of eligible) {
     const pick = toPrediction(match, c.market, c.p);
     if (!(pick.odds > 1)) {
-      missingOdds = true;
+      rejectLog(teamName, "MISSING_REALTIME_ODDS (no Poisson fallback)");
       continue;
     }
     if (pick.isSafePick) return pick;
   }
-  if (missingOdds) {
-    console.log(`[MONOPOLY DROP] ${teamName}: MISSING_BOOKMAKER_ODDS`);
-  }
+  rejectLog(teamName, "BELOW_PROBABILITY_FLOOR (no safe pick after odds)");
   return null;
 }
 
@@ -499,8 +550,10 @@ export function collectMonopolyLegs(
 } {
   const legs: ParlayLeg[] = [];
   const rejected: Array<{ matchId: string; reason: MonopolyRejectReason }> = [];
+  const week = options?.weekRange ?? getWeeklyDateRange();
   const safetyOptions: MonopolyOptions = {
     ignoreRotationFilter: options?.ignoreRotationFilter === true,
+    weekRange: { fromYmd: week.fromYmd, toYmd: week.toYmd },
   };
 
   for (const raw of matches) {

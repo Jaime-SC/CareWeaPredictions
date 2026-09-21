@@ -56,9 +56,11 @@ import {
   isConmebolCompetitionId,
   isConcacafRegionalCompetitionId,
   isEuropeNationalCupId,
+  isLeagueInPredictionScope,
   isSaNationalCupId,
   isUefaCompetitionId,
   parseLeagueId,
+  type PredictionScopeOptions,
 } from "../config/allowed-leagues";
 import {
   peekConmebolEligibleTeamIds,
@@ -114,7 +116,7 @@ export function filterEliteWhitelistMatches(matches: Match[]): Match[] {
       if (!roster || roster.size === 0) return true;
       if (bothTeamsInRoster(m.home.id, m.away.id, roster)) return true;
       console.log(
-        `[ORIGIN DROP] ${m.home.name} vs ${m.away.name}: Teams not from allowed Big 3 / SA 1st-2nd divisions`
+        `[ORIGIN DROP] ${m.home.name} vs ${m.away.name}: Teams not from allowed Top 5 / SA 1st-2nd divisions`
       );
       return false;
     };
@@ -139,9 +141,55 @@ export function filterEliteWhitelistMatches(matches: Match[]): Match[] {
   });
 }
 
+/** Apply default preset / expansion / selective country·league filters. */
+export function filterMatchesByPredictionScope(
+  matches: Match[],
+  scope?: PredictionScopeOptions
+): Match[] {
+  return matches.filter((m) =>
+    isLeagueInPredictionScope(m.leagueId, scope)
+  );
+}
+
+function scopeFromConfig(
+  config: Pick<
+    ParlayConfig,
+    "expandLeagues" | "selectedCountries" | "selectedLeagueIds"
+  >
+): PredictionScopeOptions {
+  return {
+    expandLeagues: config.expandLeagues === true,
+    selectedCountries: config.selectedCountries,
+    selectedLeagueIds: config.selectedLeagueIds,
+  };
+}
+
 /** Probability-first pool: goals + corners/cards/HT compete on modelProbability. */
 const SAFE_MARKETS = ALL_PARLAY_MARKETS;
 const FUN_MARKETS = ALL_PARLAY_MARKETS;
+
+/**
+ * High-certainty markets preferred for accumulators (no lottery-style legs).
+ * // ponytail: no Asian Handicap market type yet; DC / DNB / team totals stand in
+ */
+const HIGH_CERTAINTY_MARKETS = new Set<MarketType>([
+  "1x",
+  "x2",
+  "dnb_home",
+  "dnb_away",
+  "home_scores",
+  "away_scores",
+  "over_0_5",
+  "home_over_1_5",
+  "away_over_1_5",
+  "under_3_5",
+  "under_4_5",
+  "ht_over_0_5",
+]);
+
+function highCertaintyBonus(market: MarketType): number {
+  return HIGH_CERTAINTY_MARKETS.has(market) ? 0.4 : 0;
+}
 
 /** Hard floor: every accumulator leg must be ≥ 80% model probability. */
 export const MIN_LEG_PROBABILITY = 0.8;
@@ -481,6 +529,15 @@ export function collectSafePicks(
     if (eligible.length === 0) continue;
 
     eligible.sort((a, b) => {
+      const aScore =
+        a.modelProbability * 10 +
+        highCertaintyBonus(a.market) +
+        a.edge;
+      const bScore =
+        b.modelProbability * 10 +
+        highCertaintyBonus(b.market) +
+        b.edge;
+      if (bScore !== aScore) return bScore - aScore;
       if (b.modelProbability !== a.modelProbability) {
         return b.modelProbability - a.modelProbability;
       }
@@ -496,11 +553,21 @@ export function collectSafePicks(
     perMatch.push({
       match: resolved,
       pick,
-      rank: pick.modelProbability * 10 + pick.edge,
+      rank:
+        pick.modelProbability * 10 +
+        pick.edge +
+        highCertaintyBonus(pick.market),
     });
   }
 
-  perMatch.sort((a, b) => b.rank - a.rank);
+  // Highest Poisson probability first (high-certainty markets nudged above lottery legs)
+  perMatch.sort((a, b) => {
+    if (b.pick.modelProbability !== a.pick.modelProbability) {
+      return b.pick.modelProbability - a.pick.modelProbability;
+    }
+    if (b.rank !== a.rank) return b.rank - a.rank;
+    return a.pick.odds - b.pick.odds;
+  });
   return perMatch
     .map((c) => toLeg(c.match, c.pick))
     .sort((a, b) => compareLegs(a, b, mode));
@@ -668,8 +735,9 @@ export function generateParlay(
     });
   }
 
-  const eliteMatches = rejectMatchesWithoutRealOdds(
-    filterEliteWhitelistMatches(matches)
+  const eliteMatches = filterMatchesByPredictionScope(
+    rejectMatchesWithoutRealOdds(filterEliteWhitelistMatches(matches)),
+    scopeFromConfig(config)
   );
   const targetLegCount = resolveTargetLegCount({
     ...preset,
@@ -701,11 +769,15 @@ export function generateParlay(
     ),
     targetLegCount: effectiveTarget,
     strategyMode,
+    expandLeagues: config.expandLeagues,
+    selectedCountries: config.selectedCountries,
+    selectedLeagueIds: config.selectedLeagueIds,
   };
 
+  // Probability-first modes — avoid lottery-style odds chasing
   const modes: RankMode[] = isSafeStrategy(strategyMode)
     ? ["probability", "balanced", "edge"]
-    : ["balanced", "odds", "edge", "probability"];
+    : ["probability", "balanced", "edge"];
   const candidates: GeneratedParlay[] = [];
   let bestBackfillMeta = { strictCount: 0, backfilled: 0 };
 
@@ -769,7 +841,10 @@ export function generateParlay(
       return aDist - bDist;
     }
 
-    // Fun: prioritize filling available unique matches, then target odds
+    // High-probability focus: joint prob first, then fill, then target odds
+    if (Math.abs(a.jointProbability - b.jointProbability) > 0.005) {
+      return b.jointProbability - a.jointProbability;
+    }
     const aFill = a.legs.length >= effectiveTarget ? 1 : 0;
     const bFill = b.legs.length >= effectiveTarget ? 1 : 0;
     if (aFill !== bFill) return bFill - aFill;

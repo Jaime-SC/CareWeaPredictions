@@ -4,6 +4,12 @@ import { ParlaySlip } from "@/components/ParlaySlip";
 import { SafePicksList } from "@/components/SafePicksList";
 import { BuilderDatePicker } from "@/components/date-picker";
 import { ModeSelector } from "@/components/mode-selector";
+import {
+  CompetitionScopeFilter,
+  scopeToBody,
+  scopeToQuery,
+  type CompetitionScopeValue,
+} from "@/components/CompetitionScopeFilter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,6 +54,11 @@ import { CalendarDays, Loader2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const DEFAULT_MODE: StrategyMode = "daily-safe";
+const DEFAULT_SCOPE: CompetitionScopeValue = {
+  expandLeagues: false,
+  selectedCountries: [],
+  selectedLeagueIds: [],
+};
 
 function emptyParlayFor(mode: StrategyMode): GeneratedParlay {
   const preset = getStrategyPreset(mode);
@@ -85,6 +96,8 @@ export default function BuilderPage() {
   const [generated, setGenerated] = useState(false);
   const [fromCache, setFromCache] = useState(false);
   const [ignoreRotationFilter, setIgnoreRotationFilter] = useState(false);
+  const [competitionScope, setCompetitionScope] =
+    useState<CompetitionScopeValue>(DEFAULT_SCOPE);
   const {
     isCoolingDown,
     label: cooldownLabel,
@@ -157,8 +170,9 @@ export default function BuilderPage() {
 
       try {
         const refresh = force ? "&refresh=1" : "";
+        const scopeQs = scopeToQuery(competitionScope);
         const res = await fetch(
-          `/api/predict?date=${encodeURIComponent(selectedDate)}&safeOnly=true&minProb=0.85&strategyMode=daily-safe${refresh}`
+          `/api/predict?date=${encodeURIComponent(selectedDate)}&safeOnly=true&minProb=0.85&strategyMode=daily-safe${scopeQs}${refresh}`
         );
         const data = await res.json().catch(() => ({}));
         const errMsg =
@@ -202,7 +216,7 @@ export default function BuilderPage() {
         setLoading(false);
       }
     },
-    [selectedDate, armRateCooldown, armRateLimitFromResponse]
+    [selectedDate, competitionScope, armRateCooldown, armRateLimitFromResponse]
   );
 
   const generateFun = useCallback(
@@ -220,6 +234,7 @@ export default function BuilderPage() {
           body: JSON.stringify({
             strategyMode: "daily-fun",
             date: selectedDate,
+            ...scopeToBody(competitionScope),
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -269,7 +284,7 @@ export default function BuilderPage() {
         setLoading(false);
       }
     },
-    [selectedDate, armRateCooldown, armRateLimitFromResponse]
+    [selectedDate, competitionScope, armRateCooldown, armRateLimitFromResponse]
   );
 
   const generateMonopoly = useCallback(
@@ -436,6 +451,13 @@ export default function BuilderPage() {
               ignoreRotationFilter={ignoreRotationFilter}
               onIgnoreRotationFilterChange={setIgnoreRotationFilter}
             />
+
+            {!isMonopoly && (
+              <CompetitionScopeFilter
+                value={competitionScope}
+                onChange={setCompetitionScope}
+              />
+            )}
 
             {showGenerateCard && (
               <div className="flex flex-col items-center gap-3 pt-2">
