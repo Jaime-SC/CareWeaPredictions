@@ -29,6 +29,7 @@ import {
   warmTeamProfileCache,
   warmTeamProfilesForMatches,
 } from "@/lib/team-profiler";
+import { warmTimesfmForecastsForMatches } from "@/lib/timesfm-forecast";
 import type { Match } from "@/lib/types";
 import { chileDateOffset, chileDateString } from "@/lib/utils";
 import {
@@ -38,7 +39,7 @@ import {
 import { scopeFromBody, scopeFromRequestParams } from "@/lib/prediction-scope";
 import type { PredictionScopeOptions } from "@/config/allowed-leagues";
 
-/** Cache-first DT/absences → external sources → TeamProfile before Poisson. */
+/** Cache-first DT/absences → external → PIT profiles/TimesFM/H2H before Poisson. */
 async function withAutomatedTeamProfiles(matches: Match[]): Promise<Match[]> {
   if (matches.length === 0) return matches;
   await syncAutomatedTeamProfileFlags(matches);
@@ -46,6 +47,8 @@ async function withAutomatedTeamProfiles(matches: Match[]): Promise<Match[]> {
   const enriched = await enrichMatchesFromExternalSources(matches);
   await warmTeamProfileCache(enriched.flatMap((m) => [m.home.id, m.away.id]));
   await warmTeamProfilesForMatches(enriched);
+  await warmTimesfmForecastsForMatches(enriched);
+  // Batch resolvePredictionContext (profiles + H2H strictly before kickoff)
   return applyPredictionContexts(enriched);
 }
 

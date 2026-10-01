@@ -13,7 +13,7 @@ import type { Match } from "../lib/types";
 function stub(leagueId: number): Match {
   return {
     id: `live-${leagueId}`,
-    league: "x",
+    league: "other-domestic",
     leagueName: "x",
     leagueId: String(leagueId),
     kickoff: new Date().toISOString(),

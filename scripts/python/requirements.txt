@@ -2,3 +2,7 @@ soccerdata>=1.8.0
 pandas>=2.0.0
 requests>=2.31.0
 psycopg2-binary>=2.9.9
+# Optional: Google TimesFM zero-shot forecaster (heavy JAX/PyTorch).
+# Install separately when running real inference:
+#   pip install timesfm
+# Without it (or with TIMESFM_MOCK=1), timesfm_forecast.py uses an EWMA stub.

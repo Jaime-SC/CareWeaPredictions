@@ -20,6 +20,7 @@ import {
   getApiQuota,
   getCachedPayload,
   buildCacheKey,
+  persistApiQuotaSnapshot,
   purgeStaleOddsAndFixtureCache,
   purgePlanLimitNegativeCache,
   type ApiQuotaSnapshot,
@@ -1896,15 +1897,33 @@ export function toErrorResponse(error: unknown): {
 }
 
 /**
- * Force one live /status call so quota mirrors official dashboard headers.
+ * Force one live /status call (free — does not burn daily quota).
+ * Prefer body.requests (same numbers as the dashboard) over stale DB.
  */
 export async function refreshApiQuotaFromStatus(): Promise<ApiQuotaSnapshot | null> {
   const apiKey = resolveApiKey();
-  await apiGet("/status", apiKey, {
+  type StatusAccount = {
+    requests?: { current?: number; limit_day?: number };
+  };
+  const json = await apiGet<StatusAccount | StatusAccount[]>("/status", apiKey, {
     ttlMinutes: CACHE_TTL_MINUTES.STATUS,
     cacheKey: "status_account",
     forceRefresh: true,
   });
+
+  const raw = json?.response;
+  const info = (Array.isArray(raw) ? raw[0] : raw) as StatusAccount | undefined;
+  const current = Number(info?.requests?.current);
+  const limitDay = Number(info?.requests?.limit_day);
+  if (Number.isFinite(current) && Number.isFinite(limitDay) && limitDay >= 0) {
+    const saved = await persistApiQuotaSnapshot({
+      used: Math.max(0, current),
+      limit: limitDay,
+      remaining: Math.max(0, limitDay - current),
+    });
+    if (saved) return saved;
+  }
+
   const quota = await getApiQuota();
   return quota.fromHeaders ? quota : null;
 }

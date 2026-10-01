@@ -33,6 +33,9 @@ export interface FrictionFixtureInput {
   homeCountry?: string | null;
   /** Country / nationality of away team (for rivalry detection). */
   awayCountry?: string | null;
+  /** TimesFM t+1 cards-for forecast (optional; 70/30 blend with rolling). */
+  homeTimesfmCardsFor?: number | null;
+  awayTimesfmCardsFor?: number | null;
 }
 
 export interface XCardResult {
@@ -94,16 +97,34 @@ export function resolveRivalryMultiplier(input: Pick<
 // ─── Core xCard calculation ───────────────────────────────────────────────────
 
 const CARDS_PRIOR = 2.0; // prior per team when no profile data
+const TIMESFM_CARD_BLEND = 0.3; // 30% TimesFM / 70% rolling
+
+function blendCardsRollingTimesfm(
+  rolling: number,
+  timesfm?: number | null
+): number {
+  if (timesfm == null || !Number.isFinite(timesfm) || timesfm <= 0) {
+    return rolling;
+  }
+  return rolling * (1 - TIMESFM_CARD_BLEND) + timesfm * TIMESFM_CARD_BLEND;
+}
 
 /**
  * Compute expected cards per team and total, applying:
  * 1. Referee strictness multiplier
  * 2. High-press (low PPDA) friction boost
  * 3. Rivalry / competition context multiplier
+ * 4. Optional TimesFM card-volume blend (fail-open)
  */
 export function computeXCard(input: FrictionFixtureInput): XCardResult {
-  const baseHome = Math.max(0.5, input.homeAvgCardsFor || CARDS_PRIOR);
-  const baseAway = Math.max(0.5, input.awayAvgCardsFor || CARDS_PRIOR);
+  const baseHome = blendCardsRollingTimesfm(
+    Math.max(0.5, input.homeAvgCardsFor || CARDS_PRIOR),
+    input.homeTimesfmCardsFor
+  );
+  const baseAway = blendCardsRollingTimesfm(
+    Math.max(0.5, input.awayAvgCardsFor || CARDS_PRIOR),
+    input.awayTimesfmCardsFor
+  );
 
   // Press boost: low PPDA → more fouls → more cards
   const homePressBoost = (input.homeAvgPPDA ?? 11) < HIGH_PRESS_PPDA ? HIGH_PRESS_BOOST : 0;

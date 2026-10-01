@@ -200,18 +200,11 @@ export function parseApiFootballQuotaHeaders(headers: Headers): {
   };
 }
 
-/**
- * Persist official quota from response headers (replaces local ++ counters).
- */
-export async function syncApiQuotaFromHeaders(
-  headers: Headers,
+/** Persist official daily quota (headers or /status body). */
+export async function persistApiQuotaSnapshot(
+  parsed: { used: number; limit: number; remaining: number },
   date = chileDateString()
 ): Promise<ApiQuotaSnapshot | null> {
-  const parsed = parseApiFootballQuotaHeaders(headers);
-  if (!parsed) {
-    return null;
-  }
-
   try {
     // ponytail: Neon HTTP rejects Prisma.upsert (implicit transaction).
     const data = {
@@ -233,9 +226,21 @@ export async function syncApiQuotaFromHeaders(
       remaining: row.remaining,
     };
   } catch (err) {
-    console.warn("[api-cache] Failed to sync quota from headers:", err);
+    console.warn("[api-cache] Failed to persist quota:", err);
     return null;
   }
+}
+
+/**
+ * Persist official quota from response headers (replaces local ++ counters).
+ */
+export async function syncApiQuotaFromHeaders(
+  headers: Headers,
+  date = chileDateString()
+): Promise<ApiQuotaSnapshot | null> {
+  const parsed = parseApiFootballQuotaHeaders(headers);
+  if (!parsed) return null;
+  return persistApiQuotaSnapshot(parsed, date);
 }
 
 export async function getApiQuota(

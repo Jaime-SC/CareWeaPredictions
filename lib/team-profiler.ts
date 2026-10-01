@@ -1095,7 +1095,10 @@ export function primeTeamProfile(snapshot: TeamProfileSnapshot): void {
   profileCache.set(snapshot.teamId, snapshot);
 }
 
-/** Sync read of a profile warmed for a specific cutoff. No LIVE fallback. */
+/** Sync read of a profile warmed for a specific cutoff.
+ * Fail-open: returns null on miss — NEVER falls back to LIVE `peekTeamProfile`
+ * (would leak post-cutoff aggregates into backtests / asOf predictions).
+ */
 export function peekTeamProfileAt(
   teamId?: number | null,
   asOf?: Date | null
@@ -1534,12 +1537,18 @@ export function keyAbsenceLambdaFactor(
 /**
  * Prefer TeamProfile.keyAbsencesCount; fallback to match.injuries keyAbsence flags
  * already attached by context-enrichment (0 extra API).
+ * When `asOf` is set, only use asOf-warmed profiles (never LIVE — fail-open to injuries).
  */
 export function keyAbsenceLambdaFactorForSide(
   teamId: number | undefined,
-  injuries?: Array<{ keyAbsence?: boolean; status?: string }>
+  injuries?: Array<{ keyAbsence?: boolean; status?: string }>,
+  asOf?: Date | null
 ): number {
-  const fromProfile = keyAbsenceLambdaFactor(peekTeamProfile(teamId));
+  const profile =
+    asOf != null && Number.isFinite(asOf.getTime())
+      ? peekTeamProfileAt(teamId, asOf)
+      : peekTeamProfile(teamId);
+  const fromProfile = keyAbsenceLambdaFactor(profile);
   if (fromProfile < 1) return fromProfile;
   const keys = (injuries ?? []).filter(
     (i) => i.keyAbsence && i.status !== "doubtful"

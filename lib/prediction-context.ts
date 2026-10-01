@@ -99,7 +99,8 @@ export async function resolvePredictionContext({
 
 /**
  * Batch apply point-in-time H2H (+ prime profiles via getTeamProfileAt cache)
- * with a single fixture query. Call after warmTeamProfilesForMatches.
+ * with a single fixture query. Route-facing equivalent of resolvePredictionContext
+ * for a match pool — call after warmTeamProfilesForMatches / warmTimesfmForecastsForMatches.
  */
 export async function applyPredictionContexts(
   matches: Match[]

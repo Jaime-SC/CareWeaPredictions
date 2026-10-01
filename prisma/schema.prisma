@@ -220,6 +220,28 @@ model TeamProfileSnapshot {
   @@index([teamId, asOfDate])
 }
 
+/// Point-in-time TimesFM t+1 forecasts (offline batch; exclusive asOf cutoff)
+model TeamTimesfmForecast {
+  id                    Int      @id @default(autoincrement())
+  teamId                Int
+  /// Cutoff date: series include only matches strictly before this calendar day
+  asOfDate              DateTime @db.Date
+  timesfmXgScored       Float?
+  timesfmXgConceded     Float?
+  timesfmNpxGScored     Float?
+  timesfmNpxGConceded   Float?
+  timesfmCornersFor     Float?
+  timesfmCornersAgainst Float?
+  timesfmCardsFor       Float?
+  timesfmCardsAgainst   Float?
+  timesfmFormScore      Float    @default(0.5)
+  updatedAt             DateTime @updatedAt
+
+  @@unique([teamId, asOfDate])
+  @@index([asOfDate])
+  @@index([teamId, asOfDate])
+}
+
 /// Auto-tuned model weights (Neon primary store; config/model-weights.json is seed fallback)
 model ModelWeightsConfig {
   id        String   @id @default("default")

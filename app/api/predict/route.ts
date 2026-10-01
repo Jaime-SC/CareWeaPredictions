@@ -34,9 +34,11 @@ import {
   warmTeamProfileCache,
   warmTeamProfilesForMatches,
 } from "@/lib/team-profiler";
+import { warmTimesfmForecastsForMatches } from "@/lib/timesfm-forecast";
 import type { MatchPrediction, SafePickItem } from "@/lib/types";
 import { chileDateString } from "@/lib/utils";
 
+/** PIT warm: TeamProfile snapshots + TimesFM + H2H via applyPredictionContexts. */
 async function withExternalEnrichment(
   matches: Awaited<ReturnType<typeof enrichMatchesFromLocalData>>
 ) {
@@ -49,6 +51,8 @@ async function withExternalEnrichment(
     enriched.flatMap((m) => [m.home.id, m.away.id])
   );
   await warmTeamProfilesForMatches(enriched);
+  await warmTimesfmForecastsForMatches(enriched);
+  // Batch resolvePredictionContext (profiles + H2H strictly before kickoff)
   return applyPredictionContexts(enriched);
 }
 

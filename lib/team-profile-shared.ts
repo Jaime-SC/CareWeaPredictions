@@ -80,6 +80,32 @@ export type ProfileSnapshotUpdate = AdvancedMetricsFields & {
   cleanSheetRateAway?: number;
 };
 
+/** TimesFM t+1 forecast fields (offline batch; optional / nullable). */
+export type TimesfmForecastFields = {
+  timesfmXgScored?: number | null;
+  timesfmXgConceded?: number | null;
+  timesfmNpxGScored?: number | null;
+  timesfmNpxGConceded?: number | null;
+  timesfmCornersFor?: number | null;
+  timesfmCornersAgainst?: number | null;
+  timesfmCardsFor?: number | null;
+  timesfmCardsAgainst?: number | null;
+  timesfmFormScore?: number;
+};
+
+/** Client-safe TimesFM forecast snapshot. */
+export type TimesfmForecastSnapshot = TimesfmForecastFields & {
+  teamId: number;
+  asOfDate: string;
+  updatedAt?: string;
+};
+
+/** Bulk upsert row for TeamTimesfmForecast. asOfDate = YYYY-MM-DD cutoff. */
+export type TimesfmForecastUpdate = TimesfmForecastFields & {
+  teamId: number;
+  asOfDate: string;
+};
+
 export const MANAGER_CHANGE_COOLDOWN_DAYS = 14;
 
 /** True when coach start is within MANAGER_CHANGE_COOLDOWN_DAYS. */

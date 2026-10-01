@@ -117,12 +117,12 @@ function parseH2h(
   homeId: number | undefined,
   homeName: string,
   awayName: string,
-  asOf?: Date
+  /** Exclusive PIT cutoff — defaults to now (never unbounded / future-inclusive). */
+  asOf: Date = new Date()
 ): Match["h2h"] | null {
-  const asOfMs = asOf?.getTime();
+  const asOfMs = Number.isFinite(asOf.getTime()) ? asOf.getTime() : Date.now();
   const finished = rows
     .filter((r) => {
-      if (asOfMs == null) return true;
       const t = Date.parse(r.fixture?.date ?? "");
       return Number.isFinite(t) && t < asOfMs;
     })
@@ -445,7 +445,7 @@ async function enrichTeamCornerAvgs(
 async function readCachedH2h(
   homeId: number,
   awayId: number,
-  asOf?: Date
+  asOf: Date
 ): Promise<Match["h2h"] | null> {
   const key = `h2h_${Math.min(homeId, awayId)}_${Math.max(homeId, awayId)}_last`;
   const cached = await getCachedPayload<ApiEnvelope<H2hRow[]>>(key);
@@ -477,10 +477,9 @@ export async function enrichMatchContextFeatures(
       match.h2h.homeWins + match.h2h.draws + match.h2h.awayWins === 0 ||
       match.h2h.last4HomeWins == null;
 
-    // --- H2H ---
+    // --- H2H (strict kickoff asOf — never include post-kickoff fixtures) ---
     const kickoffMs = Date.parse(match.kickoff);
-    const asOf =
-      Number.isFinite(kickoffMs) ? new Date(kickoffMs) : undefined;
+    const asOf = Number.isFinite(kickoffMs) ? new Date(kickoffMs) : new Date();
     if (h2hEmpty && homeId && awayId) {
       const cacheKey = `h2h_${Math.min(homeId, awayId)}_${Math.max(homeId, awayId)}_last`;
       let h2h = await readCachedH2h(homeId, awayId, asOf);

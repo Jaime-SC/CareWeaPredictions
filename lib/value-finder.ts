@@ -53,13 +53,40 @@ export function valueMarginPercent(
   return (bookmakerOdds / fair - 1) * 100;
 }
 
-/** Spec isValueBet when Value% ≥ 5. */
+/** Spec isValueBet when Value% ≥ threshold (default 5). */
+export function effectiveValueThresholdPct(
+  thresholdPct: number,
+  modelProbability: number,
+  bookmakerOdds: number,
+  timesfmFormScore?: number
+): number {
+  if (timesfmFormScore == null || !Number.isFinite(timesfmFormScore)) {
+    return thresholdPct;
+  }
+  const edge = valueEdge(modelProbability, bookmakerOdds);
+  const bullish = timesfmFormScore > 0.55;
+  const bearish = timesfmFormScore < 0.45;
+  const aligned = (bullish && edge > 0) || (bearish && edge < 0);
+  const misaligned = (bullish && edge < 0) || (bearish && edge > 0);
+  if (aligned) return thresholdPct - 1;
+  if (misaligned) return thresholdPct + 1;
+  return thresholdPct;
+}
+
+/** Spec isValueBet when Value% ≥ 5 (optional TimesFM form overlay ±1 pp). */
 export function isValueBet(
   modelProbability: number,
   bookmakerOdds: number,
-  thresholdPct = VALUE_MARGIN_THRESHOLD_PCT
+  thresholdPct = VALUE_MARGIN_THRESHOLD_PCT,
+  timesfmFormScore?: number
 ): boolean {
-  return valueMarginPercent(modelProbability, bookmakerOdds) >= thresholdPct;
+  const effective = effectiveValueThresholdPct(
+    thresholdPct,
+    modelProbability,
+    bookmakerOdds,
+    timesfmFormScore
+  );
+  return valueMarginPercent(modelProbability, bookmakerOdds) >= effective;
 }
 
 export function formatValueBadge(edge: number): string | null {

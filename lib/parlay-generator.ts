@@ -38,6 +38,10 @@ import {
   toKnockoutContext,
 } from "./knockout-engine";
 import { resolveRivalryMultiplier } from "./friction-engine";
+import {
+  meanTimesfmFormScore,
+  peekTimesfmForecastAt,
+} from "./timesfm-forecast";
 import { rejectMatchesWithoutRealOdds } from "./filters";
 import {
   getLeagueWeight,
@@ -386,7 +390,16 @@ export function buildSameGameBetBuilders(
       (legPrimary.modelProbability * legSecondary.modelProbability).toFixed(6)
     );
     const margin = valueMarginPercent(jointProbability, combinedOdds);
-    if (!isValueBet(jointProbability, combinedOdds, minValuePct)) continue;
+    const asOf = new Date(match.kickoff);
+    const timesfmFormScore = meanTimesfmFormScore(
+      peekTimesfmForecastAt(match.home.id, asOf),
+      peekTimesfmForecastAt(match.away.id, asOf)
+    );
+    if (
+      !isValueBet(jointProbability, combinedOdds, minValuePct, timesfmFormScore)
+    ) {
+      continue;
+    }
 
     builders.push({
       matchId: match.id,

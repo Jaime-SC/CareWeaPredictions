@@ -1,15 +1,15 @@
 "use client";
 
-import { cn } from "@/lib/utils";
+import { chileDateString, cn } from "@/lib/utils";
 import {
   formatDurationShort,
   msUntilUtcMidnight,
   useApiRateLimitCooldown,
 } from "@/lib/api-rate-limit-cooldown";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-const STORAGE_KEY = "parleylab_api_quota_v2";
-/** Poll / stale window — no focus revalidate. */
+const STORAGE_KEY = "parleylab_api_quota_v3";
+/** Poll / stale window — /status sync is free (does not burn daily quota). */
 const STALE_MS = 60_000;
 
 type QuotaState = {
@@ -22,6 +22,10 @@ type QuotaState = {
 
 let moduleCache: { at: number; data: QuotaState } | null = null;
 let inflight: Promise<QuotaState | null> | null = null;
+
+function isTodayQuota(state: QuotaState | null | undefined): state is QuotaState {
+  return Boolean(state?.fromHeaders && state.date === chileDateString());
+}
 
 function readLocal(): QuotaState | null {
   if (typeof window === "undefined") return null;
@@ -41,13 +45,14 @@ function readLocal(): QuotaState | null {
       typeof parsed.remaining === "number"
         ? parsed.remaining
         : Math.max(0, parsed.limit - parsed.used);
-    return {
+    const next: QuotaState = {
       date: parsed.date,
       used: parsed.used,
       limit: parsed.limit,
       remaining,
       fromHeaders: true,
     };
+    return isTodayQuota(next) ? next : null;
   } catch {
     return null;
   }
@@ -70,42 +75,50 @@ async function fetchApiQuota(opts?: {
     !opts?.force &&
     !opts?.sync &&
     moduleCache &&
+    isTodayQuota(moduleCache.data) &&
     now - moduleCache.at < STALE_MS
   ) {
     return moduleCache.data;
   }
+  // Deduplicate concurrent badge mounts (React Strict Mode).
   if (inflight) return inflight;
 
-  inflight = (async () => {
+  const run = (async () => {
     try {
       const qs = opts?.sync ? "?sync=1" : "";
       const res = await fetch(`/api/quota${qs}`, { cache: "no-store" });
       const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.success) return moduleCache?.data ?? null;
+      if (!res.ok || !data?.success) {
+        return isTodayQuota(moduleCache?.data) ? moduleCache!.data : null;
+      }
       const limit = Number(data.limit) || 100;
+      const used = Number(data.used);
       const remaining =
         typeof data.remaining === "number"
           ? data.remaining
-          : Math.max(0, limit - (Number(data.used) || 0));
+          : Math.max(0, limit - (Number.isFinite(used) ? used : 0));
       const next: QuotaState = {
         date: String(data.date),
-        used: Number(data.used) || 0,
+        used: Number.isFinite(used) ? used : 0,
         limit,
         remaining,
         fromHeaders: Boolean(data.fromHeaders),
       };
-      if (!next.fromHeaders) return moduleCache?.data ?? null;
+      if (!isTodayQuota(next)) {
+        return isTodayQuota(moduleCache?.data) ? moduleCache!.data : null;
+      }
       moduleCache = { at: Date.now(), data: next };
       writeLocal(next);
       return next;
     } catch {
-      return moduleCache?.data ?? null;
+      return isTodayQuota(moduleCache?.data) ? moduleCache!.data : null;
     } finally {
       inflight = null;
     }
   })();
 
-  return inflight;
+  inflight = run;
+  return run;
 }
 
 function toneForRemaining(remaining: number) {
@@ -135,7 +148,6 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
   const [mounted, setMounted] = useState(false);
   const [dailyResetMs, setDailyResetMs] = useState(0);
   const cooldown = useApiRateLimitCooldown();
-  const started = useRef(false);
 
   const refresh = useCallback(async (opts?: { sync?: boolean; force?: boolean }) => {
     const next = await fetchApiQuota(opts);
@@ -143,15 +155,16 @@ export function ApiQuotaBadge({ className }: { className?: string }) {
   }, []);
 
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
     setMounted(true);
     const cached = readLocal();
-    if (cached?.fromHeaders) setQuota(cached);
-    if (moduleCache?.data.fromHeaders) setQuota(moduleCache.data);
+    if (cached) setQuota(cached);
+    else if (isTodayQuota(moduleCache?.data)) setQuota(moduleCache!.data);
 
     void refresh({ sync: true, force: true });
-    const id = window.setInterval(() => void refresh(), STALE_MS);
+    const id = window.setInterval(
+      () => void refresh({ sync: true, force: true }),
+      STALE_MS
+    );
     return () => window.clearInterval(id);
   }, [refresh]);
 

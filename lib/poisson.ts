@@ -39,6 +39,13 @@ import { failsMarketSanity } from "./filters";
 import { applyStandingsAwayPenalty } from "./standings";
 import { parseLeagueId } from "../config/allowed-leagues";
 import {
+  meanTimesfmFormScore,
+  peekTimesfmForecast,
+  peekTimesfmForecastAt,
+  timesfmRatioMult,
+  type TimesfmForecastSnapshot,
+} from "./timesfm-forecast";
+import {
   predictSecondaryMarkets,
   resolveRefereeStrictness,
 } from "./xgboost-runner";
@@ -124,7 +131,8 @@ function formLambdaFactor(form: ("W" | "D" | "L")[]): number {
  */
 export function estimateExpectedGoals(
   match: Match,
-  weights?: ModelWeights
+  weights?: ModelWeights,
+  options?: { asOf?: Date }
 ): {
   home: number;
   away: number;
@@ -171,11 +179,13 @@ export function estimateExpectedGoals(
   // TeamProfile / match injuries: −15% λ when key absences detected
   lambdaHome *= keyAbsenceLambdaFactorForSide(
     match.home.id,
-    match.home.injuries
+    match.home.injuries,
+    options?.asOf
   );
   lambdaAway *= keyAbsenceLambdaFactorForSide(
     match.away.id,
-    match.away.injuries
+    match.away.injuries,
+    options?.asOf
   );
 
   // Open-Meteo: heavy rain / snow → total xG × 0.90
@@ -214,6 +224,33 @@ export function estimateExpectedGoals(
   });
   lambdaHome = knockoutLambda.home;
   lambdaAway = knockoutLambda.away;
+
+  // TimesFM t+1 soft blend (±8%); fail-open identity when missing
+  const asOf = options?.asOf;
+  const homeTf: TimesfmForecastSnapshot | null =
+    asOf != null && Number.isFinite(asOf.getTime())
+      ? peekTimesfmForecastAt(match.home.id, asOf)
+      : peekTimesfmForecast(match.home.id);
+  const awayTf: TimesfmForecastSnapshot | null =
+    asOf != null && Number.isFinite(asOf.getTime())
+      ? peekTimesfmForecastAt(match.away.id, asOf)
+      : peekTimesfmForecast(match.away.id);
+
+  const homeBaselineAtk =
+    match.home.homeGoalsScoredAvg ?? match.home.goalsScoredAvg ?? homeAvg;
+  const awayBaselineAtk =
+    match.away.awayGoalsScoredAvg ?? match.away.goalsScoredAvg ?? awayAvg;
+  const homeBaselineDef =
+    match.home.homeGoalsConcededAvg ?? match.home.goalsConcededAvg ?? homeAvg;
+  const awayBaselineDef =
+    match.away.awayGoalsConcededAvg ?? match.away.goalsConcededAvg ?? awayAvg;
+
+  lambdaHome *=
+    timesfmRatioMult(homeTf?.timesfmXgScored, homeBaselineAtk) *
+    timesfmRatioMult(awayTf?.timesfmXgConceded, awayBaselineDef);
+  lambdaAway *=
+    timesfmRatioMult(awayTf?.timesfmXgScored, awayBaselineAtk) *
+    timesfmRatioMult(homeTf?.timesfmXgConceded, homeBaselineDef);
 
   return {
     home: Math.max(0.2, Math.min(4.5, Number(lambdaHome.toFixed(3)))),
@@ -574,10 +611,10 @@ export function predictMatchMarkets(
   );
   const maxOdds = options?.maxSafeOdds ?? 1.85;
 
-  const xg = estimateExpectedGoals(match, weights);
+  const asOf = options?.asOf;
+  const xg = estimateExpectedGoals(match, weights, { asOf });
   const matrix = buildScoreMatrix(xg.home, xg.away);
   const goalProbs = marketProbsFromMatrix(matrix);
-  const asOf = options?.asOf;
   const homeProfile =
     asOf != null && Number.isFinite(asOf.getTime())
       ? peekTeamProfileAt(match.home.id, asOf)
@@ -586,6 +623,15 @@ export function predictMatchMarkets(
     asOf != null && Number.isFinite(asOf.getTime())
       ? peekTeamProfileAt(match.away.id, asOf)
       : peekTeamProfile(match.away.id);
+  const homeTimesfm =
+    asOf != null && Number.isFinite(asOf.getTime())
+      ? peekTimesfmForecastAt(match.home.id, asOf)
+      : peekTimesfmForecast(match.home.id);
+  const awayTimesfm =
+    asOf != null && Number.isFinite(asOf.getTime())
+      ? peekTimesfmForecastAt(match.away.id, asOf)
+      : peekTimesfmForecast(match.away.id);
+  const timesfmFormScore = meanTimesfmFormScore(homeTimesfm, awayTimesfm);
   const phase2Probs = phase2MarketProbs(match, xg, {
     home: homeProfile,
     away: awayProfile,
@@ -593,6 +639,8 @@ export function predictMatchMarkets(
   const xgbProbs = predictSecondaryMarkets({
     homeProfile,
     awayProfile,
+    homeTimesfm,
+    awayTimesfm,
     refereeStrictness: resolveRefereeStrictness(
       match.referee,
       parseLeagueId(match.leagueId)
@@ -729,14 +777,24 @@ export function predictMatchMarkets(
       valueMarginPercent: Number(valuePct.toFixed(2)),
       isValueBet: usedFairOdds
         ? false
-        : isValueBet(modelProbability, odds, MIN_VALUE_MARGIN * 100),
+        : isValueBet(
+            modelProbability,
+            odds,
+            MIN_VALUE_MARGIN * 100,
+            timesfmFormScore
+          ),
       isSafePick:
         !mktCfg.disabled &&
         !blockedByDerby &&
         !sanity.fail &&
         odds >= MIN_SELECTION_ODDS &&
         (usedFairOdds ||
-          isValueBet(modelProbability, odds, MIN_VALUE_MARGIN * 100)) &&
+          isValueBet(
+            modelProbability,
+            odds,
+            MIN_VALUE_MARGIN * 100,
+            timesfmFormScore
+          )) &&
         modelProbability >= effectiveMin &&
         odds >= minOdds &&
         odds <= maxOdds,

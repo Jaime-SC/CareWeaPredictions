@@ -6,6 +6,7 @@
 import { existsSync, readFileSync } from "fs";
 import path from "path";
 import type { TeamProfileSnapshot } from "./team-profile-shared";
+import type { TimesfmForecastSnapshot } from "./timesfm-forecast";
 import {
   CORNER_PRIOR_TOTAL,
   CORNER_HOME_SHARE,
@@ -23,6 +24,8 @@ import {
 export type XgboostFixtureInput = {
   homeProfile: TeamProfileSnapshot | null;
   awayProfile: TeamProfileSnapshot | null;
+  homeTimesfm?: TimesfmForecastSnapshot | null;
+  awayTimesfm?: TimesfmForecastSnapshot | null;
   refereeStrictness?: number;
   rivalryMultiplier?: number;
   fixture?: {
@@ -113,6 +116,8 @@ type FeatureVector = Record<string, number>;
 function buildFeatures(input: XgboostFixtureInput): FeatureVector {
   const home = input.homeProfile;
   const away = input.awayProfile;
+  const homeTf = input.homeTimesfm;
+  const awayTf = input.awayTimesfm;
   const homeNpxg = home?.avgNpxGScored ?? 1.2;
   const awayNpxg = away?.avgNpxGScored ?? 1.2;
   const homeNpxgConc = home?.avgNpxGConceded ?? 1.2;
@@ -145,6 +150,34 @@ function buildFeatures(input: XgboostFixtureInput): FeatureVector {
       awayCountry: input.fixture?.awayCountry,
     });
 
+  const hCornerTf = homeTf?.timesfmCornersFor;
+  const aCornerTf = awayTf?.timesfmCornersFor;
+  const hCornerAgTf = homeTf?.timesfmCornersAgainst;
+  const aCornerAgTf = awayTf?.timesfmCornersAgainst;
+  const hasCornerTf =
+    hCornerTf != null &&
+    aCornerTf != null &&
+    hCornerAgTf != null &&
+    aCornerAgTf != null &&
+    Number.isFinite(hCornerTf) &&
+    Number.isFinite(aCornerTf) &&
+    Number.isFinite(hCornerAgTf) &&
+    Number.isFinite(aCornerAgTf);
+  const timesfmCornerTrendDiff = hasCornerTf
+    ? hCornerTf! + aCornerAgTf! - (aCornerTf! + hCornerAgTf!)
+    : 0;
+
+  const hCardTf = homeTf?.timesfmCardsFor;
+  const aCardTf = awayTf?.timesfmCardsFor;
+  const hasCardTf =
+    hCardTf != null &&
+    aCardTf != null &&
+    Number.isFinite(hCardTf) &&
+    Number.isFinite(aCardTf);
+  const timesfmCardIntensityIndex = hasCardTf
+    ? (hCardTf! + aCardTf!) / Math.max(0.5, CARDS_PRIOR_TOTAL)
+    : 1;
+
   return {
     npxg_diff: npxgDiff,
     pressing,
@@ -158,6 +191,8 @@ function buildFeatures(input: XgboostFixtureInput): FeatureVector {
     away_npxg: awayNpxg,
     derby_boost: derbyBoost,
     rivalry_mult: rivalryMult,
+    timesfm_corner_trend_diff: timesfmCornerTrendDiff,
+    timesfm_card_intensity_index: timesfmCardIntensityIndex,
   };
 }
 
@@ -183,22 +218,30 @@ function treeProb(
 
 function heuristicProbs(
   features: FeatureVector,
-  refereeStrictness: number
+  refereeStrictness: number,
+  input: XgboostFixtureInput
 ): Partial<Record<MarketType, number>> {
-  const cornersTotal = Math.max(5, features.corners_total);
-  const cornersHome = Math.max(2, features.corners_home);
-  const cornersAway = Math.max(2, features.corners_away);
+  const cornerTrend = features.timesfm_corner_trend_diff ?? 0;
+  const cornersTotal = Math.max(5, features.corners_total + cornerTrend * 0.15);
+  const cornersHome = Math.max(2, features.corners_home + Math.max(0, cornerTrend) * 0.08);
+  const cornersAway = Math.max(2, features.corners_away + Math.max(0, -cornerTrend) * 0.08);
 
   const rivalryMult = features.rivalry_mult ?? 1;
+  const cardIntensity = features.timesfm_card_intensity_index ?? 1;
 
-  // Use friction-engine for card lambdas (includes rivalry + press boost)
+  // Use friction-engine for card lambdas (includes rivalry + press + TimesFM blend)
   const xCard = computeXCard({
-    homeAvgCardsFor: features.cards_home,
-    awayAvgCardsFor: features.cards_away,
+    homeAvgCardsFor: features.cards_home * cardIntensity,
+    awayAvgCardsFor: features.cards_away * cardIntensity,
+    homeAvgPPDA: input.homeProfile?.avgPPDA,
+    awayAvgPPDA: input.awayProfile?.avgPPDA,
+    homeTimesfmCardsFor: input.homeTimesfm?.timesfmCardsFor,
+    awayTimesfmCardsFor: input.awayTimesfm?.timesfmCardsFor,
     refereeStrictness,
-    // press boost already factored via PPDA → cards_home/away; pass rivalry separately
-    leagueId: undefined,
-    roundLabel: undefined,
+    leagueId: input.fixture?.leagueId,
+    roundLabel: input.fixture?.roundLabel,
+    homeCountry: input.fixture?.homeCountry,
+    awayCountry: input.fixture?.awayCountry,
   });
   // Apply rivalry multiplier on top (features already carry it from buildFeatures)
   const xCardHome = xCard.xCardHome * rivalryMult;
@@ -241,7 +284,7 @@ export function predictSecondaryMarkets(
   const features = buildFeatures(input);
   const refereeStrictness = input.refereeStrictness ?? 1;
   const model = loadModel();
-  const heuristic = heuristicProbs(features, refereeStrictness);
+  const heuristic = heuristicProbs(features, refereeStrictness, input);
   const out: Partial<Record<MarketType, number>> = {};
 
   for (const market of SECONDARY_MARKETS) {
@@ -250,6 +293,13 @@ export function predictSecondaryMarkets(
   }
 
   return out;
+}
+
+/** Expose feature builder for verify scripts. */
+export function buildXgboostFeaturesForVerify(
+  input: XgboostFixtureInput
+): Record<string, number> {
+  return buildFeatures(input);
 }
 
 /** Reset model cache (tests). */
