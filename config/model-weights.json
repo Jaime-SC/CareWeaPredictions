@@ -1,9 +1,9 @@
 {
-  "version": 8,
-  "calibratedAt": "2026-09-21T12:32:50.664Z",
-  "sampleSize": 1346,
+  "version": 10,
+  "calibratedAt": "2026-10-01T14:02:27.512Z",
+  "sampleSize": 1354,
   "global": {
-    "strictMinProbability": 0.795,
+    "strictMinProbability": 0.788,
     "backfillMinProbability": 0.8,
     "over15MinProbability": 0.809,
     "defaultMinOdds": 1.12,
@@ -14,10 +14,10 @@
   },
   "leagues": {
     "EFL Cup": {
-      "riskPenalty": 1.14,
-      "probabilityScale": 0.933,
-      "minOdds": 1.148,
-      "minProbabilityBoost": 0.045,
+      "riskPenalty": 1.188,
+      "probabilityScale": 0.91,
+      "minOdds": 1.157,
+      "minProbabilityBoost": 0.06,
       "brierCalibrationFactor": 0.908,
       "meanBrierScore": 0.4645,
       "leagueId": "unknown",
@@ -27,10 +27,10 @@
       "sampleSize": 24
     },
     "La Liga": {
-      "riskPenalty": 1.135,
-      "probabilityScale": 0.934,
-      "minOdds": 1.152,
-      "minProbabilityBoost": 0.037,
+      "riskPenalty": 1.144,
+      "probabilityScale": 0.929,
+      "minOdds": 1.154,
+      "minProbabilityBoost": 0.039,
       "brierCalibrationFactor": 0.941,
       "meanBrierScore": 0.3091,
       "leagueId": "unknown",
@@ -40,10 +40,10 @@
       "sampleSize": 32
     },
     "Liga MX": {
-      "riskPenalty": 1.009,
-      "probabilityScale": 0.998,
-      "minOdds": 1.116,
-      "minProbabilityBoost": -0.006,
+      "riskPenalty": 1.054,
+      "probabilityScale": 0.975,
+      "minOdds": 1.132,
+      "minProbabilityBoost": 0.008,
       "brierCalibrationFactor": 1.036,
       "meanBrierScore": 0.0787,
       "leagueId": "unknown",
@@ -53,10 +53,10 @@
       "sampleSize": 76
     },
     "Ligue 1": {
-      "riskPenalty": 1.075,
-      "probabilityScale": 0.963,
-      "minOdds": 1.139,
-      "minProbabilityBoost": 0.019,
+      "riskPenalty": 1.105,
+      "probabilityScale": 0.949,
+      "minOdds": 1.146,
+      "minProbabilityBoost": 0.027,
       "brierCalibrationFactor": 0.937,
       "meanBrierScore": 0.3222,
       "leagueId": "unknown",
@@ -65,11 +65,23 @@
       "roi": -0.1164,
       "sampleSize": 28
     },
+    "Ligue 2": {
+      "riskPenalty": 1.05,
+      "probabilityScale": 0.975,
+      "minOdds": 1.132,
+      "minProbabilityBoost": 0.014,
+      "brierCalibrationFactor": 1,
+      "leagueId": "unknown",
+      "leagueName": "Ligue 2",
+      "winRate": 0.6,
+      "roi": -0.098,
+      "sampleSize": 10
+    },
     "Serie A": {
-      "riskPenalty": 1.112,
-      "probabilityScale": 0.944,
-      "minOdds": 1.149,
-      "minProbabilityBoost": 0.027,
+      "riskPenalty": 1.119,
+      "probabilityScale": 0.941,
+      "minOdds": 1.151,
+      "minProbabilityBoost": 0.029,
       "brierCalibrationFactor": 0.937,
       "meanBrierScore": 0.3217,
       "leagueId": "unknown",
@@ -79,10 +91,10 @@
       "sampleSize": 30
     },
     "LaLiga 2": {
-      "riskPenalty": 1.088,
-      "probabilityScale": 0.958,
-      "minOdds": 1.141,
-      "minProbabilityBoost": 0.023,
+      "riskPenalty": 1.118,
+      "probabilityScale": 0.943,
+      "minOdds": 1.148,
+      "minProbabilityBoost": 0.032,
       "brierCalibrationFactor": 0.942,
       "meanBrierScore": 0.307,
       "leagueId": "unknown",
@@ -105,10 +117,10 @@
       "sampleSize": 12
     },
     "Primera B": {
-      "riskPenalty": 1.088,
-      "probabilityScale": 0.958,
-      "minOdds": 1.141,
-      "minProbabilityBoost": 0.023,
+      "riskPenalty": 1.118,
+      "probabilityScale": 0.943,
+      "minOdds": 1.148,
+      "minProbabilityBoost": 0.032,
       "brierCalibrationFactor": 0.946,
       "meanBrierScore": 0.2958,
       "leagueId": "unknown",
@@ -116,6 +128,18 @@
       "winRate": 0.625,
       "roi": -0.2159,
       "sampleSize": 16
+    },
+    "Bundesliga": {
+      "riskPenalty": 1,
+      "probabilityScale": 1,
+      "minOdds": 1.12,
+      "minProbabilityBoost": 0,
+      "brierCalibrationFactor": 1,
+      "leagueId": "unknown",
+      "leagueName": "Bundesliga",
+      "winRate": 0.7576,
+      "roi": 0.1167,
+      "sampleSize": 66
     },
     "Championship": {
       "riskPenalty": 1,
@@ -131,10 +155,10 @@
       "sampleSize": 92
     },
     "Coppa Italia": {
-      "riskPenalty": 0.983,
-      "probabilityScale": 1.011,
-      "minOdds": 1.109,
-      "minProbabilityBoost": -0.012,
+      "riskPenalty": 0.978,
+      "probabilityScale": 1.015,
+      "minOdds": 1.105,
+      "minProbabilityBoost": -0.015,
       "brierCalibrationFactor": 1.036,
       "meanBrierScore": 0.0038,
       "leagueId": "unknown",
@@ -142,6 +166,30 @@
       "winRate": 1,
       "roi": 0.36,
       "sampleSize": 22
+    },
+    "2. Bundesliga": {
+      "riskPenalty": 1.133,
+      "probabilityScale": 0.936,
+      "minOdds": 1.148,
+      "minProbabilityBoost": 0.042,
+      "brierCalibrationFactor": 1,
+      "leagueId": "unknown",
+      "leagueName": "2. Bundesliga",
+      "winRate": 0.5263,
+      "roi": -0.1763,
+      "sampleSize": 38
+    },
+    "Copa Argentina": {
+      "riskPenalty": 0.982,
+      "probabilityScale": 1.012,
+      "minOdds": 1.108,
+      "minProbabilityBoost": -0.012,
+      "brierCalibrationFactor": 1,
+      "leagueId": "unknown",
+      "leagueName": "Copa Argentina",
+      "winRate": 1,
+      "roi": 0.4122,
+      "sampleSize": 18
     },
     "Copa do Brasil": {
       "riskPenalty": 1,
@@ -169,11 +217,23 @@
       "roi": -0.0553,
       "sampleSize": 64
     },
+    "Primera B Chile": {
+      "riskPenalty": 0.993,
+      "probabilityScale": 1.004,
+      "minOdds": 1.116,
+      "minProbabilityBoost": -0.005,
+      "brierCalibrationFactor": 1,
+      "leagueId": "unknown",
+      "leagueName": "Primera B Chile",
+      "winRate": 1,
+      "roi": 0.3133,
+      "sampleSize": 6
+    },
     "Friendlies Clubs": {
-      "riskPenalty": 1.082,
-      "probabilityScale": 0.959,
-      "minOdds": 1.14,
-      "minProbabilityBoost": 0.022,
+      "riskPenalty": 1.11,
+      "probabilityScale": 0.945,
+      "minOdds": 1.147,
+      "minProbabilityBoost": 0.029,
       "brierCalibrationFactor": 0.956,
       "meanBrierScore": 0.2739,
       "leagueId": "unknown",
@@ -183,23 +243,35 @@
       "sampleSize": 22
     },
     "Primera Nacional": {
-      "riskPenalty": 1.03,
-      "probabilityScale": 0.988,
-      "minOdds": 1.119,
-      "minProbabilityBoost": 0.003,
+      "riskPenalty": 1.092,
+      "probabilityScale": 0.957,
+      "minOdds": 1.137,
+      "minProbabilityBoost": 0.023,
       "brierCalibrationFactor": 1.036,
       "meanBrierScore": 0.0584,
       "leagueId": "unknown",
       "leagueName": "Primera Nacional",
-      "winRate": 0.5714,
-      "roi": -0.2777,
-      "sampleSize": 70
+      "winRate": 0.6053,
+      "roi": -0.2187,
+      "sampleSize": 76
+    },
+    "Serie A (Italia)": {
+      "riskPenalty": 1.072,
+      "probabilityScale": 0.964,
+      "minOdds": 1.139,
+      "minProbabilityBoost": 0.017,
+      "brierCalibrationFactor": 1,
+      "leagueId": "unknown",
+      "leagueName": "Serie A (Italia)",
+      "winRate": 0.6667,
+      "roi": -0.0111,
+      "sampleSize": 36
     },
     "Serie B (Italia)": {
-      "riskPenalty": 1.039,
-      "probabilityScale": 0.981,
-      "minOdds": 1.129,
-      "minProbabilityBoost": 0.011,
+      "riskPenalty": 1.09,
+      "probabilityScale": 0.956,
+      "minOdds": 1.141,
+      "minProbabilityBoost": 0.025,
       "brierCalibrationFactor": 1,
       "meanBrierScore": 0.1994,
       "leagueId": "unknown",
@@ -208,11 +280,35 @@
       "roi": -0.0978,
       "sampleSize": 64
     },
+    "Copa Libertadores": {
+      "riskPenalty": 0.991,
+      "probabilityScale": 1.006,
+      "minOdds": 1.115,
+      "minProbabilityBoost": -0.006,
+      "brierCalibrationFactor": 1,
+      "leagueId": "unknown",
+      "leagueName": "Copa Libertadores",
+      "winRate": 1,
+      "roi": 0.5133,
+      "sampleSize": 6
+    },
+    "Copa Sudamericana": {
+      "riskPenalty": 1.037,
+      "probabilityScale": 0.982,
+      "minOdds": 1.129,
+      "minProbabilityBoost": 0.009,
+      "brierCalibrationFactor": 1,
+      "leagueId": "unknown",
+      "leagueName": "Copa Sudamericana",
+      "winRate": 0.6667,
+      "roi": -0.02,
+      "sampleSize": 12
+    },
     "Primera División": {
-      "riskPenalty": 0.983,
-      "probabilityScale": 1.011,
-      "minOdds": 1.109,
-      "minProbabilityBoost": -0.012,
+      "riskPenalty": 0.978,
+      "probabilityScale": 1.015,
+      "minOdds": 1.105,
+      "minProbabilityBoost": -0.015,
       "brierCalibrationFactor": 1.036,
       "meanBrierScore": 0.0771,
       "leagueId": "unknown",
@@ -235,10 +331,10 @@
       "sampleSize": 46
     },
     "Major League Soccer": {
-      "riskPenalty": 1.04,
-      "probabilityScale": 0.98,
-      "minOdds": 1.13,
-      "minProbabilityBoost": 0.01,
+      "riskPenalty": 1.022,
+      "probabilityScale": 0.989,
+      "minOdds": 1.125,
+      "minProbabilityBoost": 0.005,
       "brierCalibrationFactor": 0.952,
       "meanBrierScore": 0.2817,
       "leagueId": "unknown",
@@ -248,10 +344,10 @@
       "sampleSize": 40
     },
     "Brasileirão Série A": {
-      "riskPenalty": 1.034,
-      "probabilityScale": 0.983,
-      "minOdds": 1.129,
-      "minProbabilityBoost": 0.008,
+      "riskPenalty": 1.078,
+      "probabilityScale": 0.962,
+      "minOdds": 1.14,
+      "minProbabilityBoost": 0.019,
       "brierCalibrationFactor": 0.976,
       "meanBrierScore": 0.2558,
       "leagueId": "unknown",
@@ -261,10 +357,10 @@
       "sampleSize": 52
     },
     "Brasileirão Série B": {
-      "riskPenalty": 0.981,
-      "probabilityScale": 1.012,
-      "minOdds": 1.108,
-      "minProbabilityBoost": -0.012,
+      "riskPenalty": 0.99,
+      "probabilityScale": 1.007,
+      "minOdds": 1.113,
+      "minProbabilityBoost": -0.007,
       "brierCalibrationFactor": 1.036,
       "meanBrierScore": 0.0893,
       "leagueId": "unknown",
@@ -274,10 +370,10 @@
       "sampleSize": 144
     },
     "CONMEBOL Libertadores": {
-      "riskPenalty": 0.983,
-      "probabilityScale": 1.011,
-      "minOdds": 1.109,
-      "minProbabilityBoost": -0.012,
+      "riskPenalty": 0.978,
+      "probabilityScale": 1.015,
+      "minOdds": 1.105,
+      "minProbabilityBoost": -0.015,
       "brierCalibrationFactor": 1.036,
       "meanBrierScore": 0.0808,
       "leagueId": "unknown",
@@ -287,10 +383,10 @@
       "sampleSize": 22
     },
     "CONMEBOL Sudamericana": {
-      "riskPenalty": 1.097,
-      "probabilityScale": 0.953,
-      "minOdds": 1.142,
-      "minProbabilityBoost": 0.027,
+      "riskPenalty": 1.131,
+      "probabilityScale": 0.937,
+      "minOdds": 1.15,
+      "minProbabilityBoost": 0.037,
       "brierCalibrationFactor": 0.94,
       "meanBrierScore": 0.3126,
       "leagueId": "unknown",
@@ -300,10 +396,10 @@
       "sampleSize": 20
     },
     "UEFA Champions League": {
-      "riskPenalty": 0.983,
-      "probabilityScale": 1.011,
-      "minOdds": 1.109,
-      "minProbabilityBoost": -0.012,
+      "riskPenalty": 0.978,
+      "probabilityScale": 1.015,
+      "minOdds": 1.105,
+      "minProbabilityBoost": -0.015,
       "brierCalibrationFactor": 1.036,
       "meanBrierScore": 0.0077,
       "leagueId": "unknown",
@@ -313,10 +409,10 @@
       "sampleSize": 32
     },
     "Primera División Chile": {
-      "riskPenalty": 1.053,
-      "probabilityScale": 0.975,
-      "minOdds": 1.131,
-      "minProbabilityBoost": 0.016,
+      "riskPenalty": 1.123,
+      "probabilityScale": 0.942,
+      "minOdds": 1.145,
+      "minProbabilityBoost": 0.037,
       "brierCalibrationFactor": 1,
       "meanBrierScore": 0.2112,
       "leagueId": "unknown",
@@ -326,10 +422,10 @@
       "sampleSize": 58
     },
     "Liga Profesional Argentina": {
-      "riskPenalty": 1.165,
-      "probabilityScale": 0.921,
-      "minOdds": 1.155,
-      "minProbabilityBoost": 0.05,
+      "riskPenalty": 1.184,
+      "probabilityScale": 0.912,
+      "minOdds": 1.159,
+      "minProbabilityBoost": 0.056,
       "brierCalibrationFactor": 0.929,
       "meanBrierScore": 0.3829,
       "leagueId": "unknown",
@@ -350,106 +446,22 @@
       "winRate": 0.8,
       "roi": -0.0001,
       "sampleSize": 80
-    },
-    "Bundesliga": {
-      "riskPenalty": 1,
-      "probabilityScale": 1,
-      "minOdds": 1.12,
-      "minProbabilityBoost": 0,
-      "brierCalibrationFactor": 1,
-      "leagueId": "unknown",
-      "leagueName": "Bundesliga",
-      "winRate": 0.7576,
-      "roi": 0.1167,
-      "sampleSize": 66
-    },
-    "Serie A (Italia)": {
-      "riskPenalty": 1.031,
-      "probabilityScale": 0.985,
-      "minOdds": 1.128,
-      "minProbabilityBoost": 0.007,
-      "brierCalibrationFactor": 1,
-      "leagueId": "unknown",
-      "leagueName": "Serie A (Italia)",
-      "winRate": 0.6667,
-      "roi": -0.0111,
-      "sampleSize": 36
-    },
-    "2. Bundesliga": {
-      "riskPenalty": 1.058,
-      "probabilityScale": 0.972,
-      "minOdds": 1.132,
-      "minProbabilityBoost": 0.018,
-      "brierCalibrationFactor": 1,
-      "leagueId": "unknown",
-      "leagueName": "2. Bundesliga",
-      "winRate": 0.5263,
-      "roi": -0.1763,
-      "sampleSize": 38
-    },
-    "Copa Sudamericana": {
-      "riskPenalty": 1.016,
-      "probabilityScale": 0.992,
-      "minOdds": 1.124,
-      "minProbabilityBoost": 0.004,
-      "brierCalibrationFactor": 1,
-      "leagueId": "unknown",
-      "leagueName": "Copa Sudamericana",
-      "winRate": 0.6667,
-      "roi": -0.02,
-      "sampleSize": 12
-    },
-    "Copa Argentina": {
-      "riskPenalty": 0.992,
-      "probabilityScale": 1.005,
-      "minOdds": 1.115,
-      "minProbabilityBoost": -0.005,
-      "brierCalibrationFactor": 1,
-      "leagueId": "unknown",
-      "leagueName": "Copa Argentina",
-      "winRate": 1,
-      "roi": 0.4122,
-      "sampleSize": 18
-    },
-    "Copa Libertadores": {
-      "riskPenalty": 0.996,
-      "probabilityScale": 1.002,
-      "minOdds": 1.118,
-      "minProbabilityBoost": -0.003,
-      "brierCalibrationFactor": 1,
-      "leagueId": "unknown",
-      "leagueName": "Copa Libertadores",
-      "winRate": 1,
-      "roi": 0.5133,
-      "sampleSize": 6
-    },
-    "Ligue 2": {
-      "riskPenalty": 1.022,
-      "probabilityScale": 0.989,
-      "minOdds": 1.125,
-      "minProbabilityBoost": 0.006,
-      "brierCalibrationFactor": 1,
-      "leagueId": "unknown",
-      "leagueName": "Ligue 2",
-      "winRate": 0.6,
-      "roi": -0.098,
-      "sampleSize": 10
     }
   },
   "markets": {
     "1x": {
       "weight": 1,
-      "minProbability": 0.8,
+      "minProbability": 0.7968,
       "disabled": false,
       "brierCalibrationFactor": 1,
       "meanBrierScore": 0.2207,
-      "roi": -6.34,
-      "winRate": 0.7236,
-      "sampleSize": 246
+      "roi": -5.94,
+      "winRate": 0.7258,
+      "sampleSize": 248
     },
     "x2": {
-      "weight": 0.838,
-      "minProbability": 0.82,
+      "weight": 0.624,
+      "minProbability": 0.843,
       "disabled": false,
       "brierCalibrationFactor": 1,
       "meanBrierScore": 0.171,
@@ -457,9 +469,36 @@
       "winRate": 0.4286,
       "sampleSize": 42
     },
+    "home": {
+      "weight": 1,
+      "minProbability": 0.7968,
+      "disabled": false,
+      "brierCalibrationFactor": 1,
+      "roi": 1.64,
+      "winRate": 0.6818,
+      "sampleSize": 44
+    },
+    "btts_no": {
+      "weight": 1,
+      "minProbability": 0.794,
+      "disabled": false,
+      "brierCalibrationFactor": 1,
+      "roi": -28,
+      "winRate": 0.5,
+      "sampleSize": 8
+    },
+    "btts_yes": {
+      "weight": 1,
+      "minProbability": 0.7968,
+      "disabled": false,
+      "brierCalibrationFactor": 1,
+      "roi": -5.56,
+      "winRate": 0.6111,
+      "sampleSize": 36
+    },
     "over_0_5": {
-      "weight": 1.065,
-      "minProbability": 0.8,
+      "weight": 1.069,
+      "minProbability": 0.7984,
       "disabled": false,
       "brierCalibrationFactor": 1.036,
       "meanBrierScore": 0.002,
@@ -469,17 +508,17 @@
     },
     "over_1_5": {
       "weight": 1,
-      "minProbability": 0.8,
+      "minProbability": 0.7968,
       "disabled": false,
       "brierCalibrationFactor": 1,
       "meanBrierScore": 0.1874,
-      "roi": -1.01,
-      "winRate": 0.7662,
-      "sampleSize": 462
+      "roi": -0.78,
+      "winRate": 0.7672,
+      "sampleSize": 464
     },
     "over_2_5": {
-      "weight": 1.025,
-      "minProbability": 0.8,
+      "weight": 1.014,
+      "minProbability": 0.7968,
       "disabled": false,
       "brierCalibrationFactor": 1.012,
       "meanBrierScore": 0.1396,
@@ -489,7 +528,7 @@
     },
     "under_3_5": {
       "weight": 1,
-      "minProbability": 0.8,
+      "minProbability": 0.7968,
       "disabled": false,
       "brierCalibrationFactor": 1,
       "meanBrierScore": 0.1737,
@@ -499,7 +538,7 @@
     },
     "under_4_5": {
       "weight": 1,
-      "minProbability": 0.8,
+      "minProbability": 0.7968,
       "disabled": false,
       "brierCalibrationFactor": 0.94,
       "meanBrierScore": 0.3168,
@@ -509,7 +548,7 @@
     },
     "home_scores": {
       "weight": 1,
-      "minProbability": 0.8,
+      "minProbability": 0.7968,
       "disabled": false,
       "brierCalibrationFactor": 1.036,
       "meanBrierScore": 0.1479,
@@ -517,9 +556,18 @@
       "winRate": 0.8,
       "sampleSize": 10
     },
+    "ht_over_0_5": {
+      "weight": 1,
+      "minProbability": 0.7968,
+      "disabled": false,
+      "brierCalibrationFactor": 1,
+      "roi": -1.8,
+      "winRate": 0.68,
+      "sampleSize": 100
+    },
     "ht_under_1_5": {
       "weight": 1,
-      "minProbability": 0.8,
+      "minProbability": 0.7968,
       "disabled": false,
       "brierCalibrationFactor": 1,
       "meanBrierScore": 0.1617,
@@ -527,50 +575,23 @@
       "winRate": 0.7619,
       "sampleSize": 42
     },
-    "home_over_1_5": {
-      "weight": 1,
-      "minProbability": 0.8,
-      "disabled": false,
-      "brierCalibrationFactor": 1,
-      "roi": 12.94,
-      "winRate": 0.7222,
-      "sampleSize": 36
-    },
-    "btts_yes": {
-      "weight": 1,
-      "minProbability": 0.8,
-      "disabled": false,
-      "brierCalibrationFactor": 1,
-      "roi": -5.56,
-      "winRate": 0.6111,
-      "sampleSize": 36
-    },
-    "ht_over_0_5": {
-      "weight": 1,
-      "minProbability": 0.8,
-      "disabled": false,
-      "brierCalibrationFactor": 1,
-      "roi": -1.8,
-      "winRate": 0.68,
-      "sampleSize": 100
-    },
-    "home": {
-      "weight": 1,
-      "minProbability": 0.8,
-      "disabled": false,
-      "brierCalibrationFactor": 1,
-      "roi": 1.64,
-      "winRate": 0.6818,
-      "sampleSize": 44
-    },
     "away_over_1_5": {
       "weight": 1,
-      "minProbability": 0.8,
+      "minProbability": 0.7968,
       "disabled": false,
       "brierCalibrationFactor": 1,
       "roi": -53.33,
       "winRate": 0.3333,
       "sampleSize": 6
+    },
+    "home_over_1_5": {
+      "weight": 1,
+      "minProbability": 0.7968,
+      "disabled": false,
+      "brierCalibrationFactor": 1,
+      "roi": 12.94,
+      "winRate": 0.7222,
+      "sampleSize": 36
     }
   },
   "teams": {
@@ -738,8 +759,8 @@
     }
   },
   "summary": {
-    "leaguesAdjusted": 24,
+    "leaguesAdjusted": 25,
     "marketsAdjusted": 3,
-    "message": "Parámetros actualizados: 24 ligas ajustadas, 3 mercados recalibrados, umbral de goles ajustado a 81%"
+    "message": "Parámetros actualizados: 25 ligas ajustadas, 3 mercados recalibrados, umbral de goles ajustado a 81%"
   }
 }

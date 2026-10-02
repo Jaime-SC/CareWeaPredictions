@@ -247,10 +247,9 @@ def post_snapshot_bulk(
     base_url: str, cron_secret: str, updates: list[dict[str, Any]]
 ) -> dict[str, Any]:
     url = f"{base_url.rstrip('/')}/api/teams/profiles/snapshot-bulk"
-    headers = {
-        "Authorization": f"Bearer {cron_secret}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Content-Type": "application/json"}
+    if cron_secret:
+        headers["Authorization"] = f"Bearer {cron_secret}"
     resp = requests.post(
         url, headers=headers, json={"updates": updates}, timeout=300
     )
@@ -313,10 +312,9 @@ def post_bulk_update(
     base_url: str, cron_secret: str, updates: list[dict[str, Any]]
 ) -> dict[str, Any]:
     url = f"{base_url.rstrip('/')}/api/teams/profiles/bulk-update"
-    headers = {
-        "Authorization": f"Bearer {cron_secret}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Content-Type": "application/json"}
+    if cron_secret:
+        headers["Authorization"] = f"Bearer {cron_secret}"
     resp = requests.post(
         url, headers=headers, json={"updates": updates}, timeout=120
     )
@@ -423,8 +421,10 @@ def main() -> int:
         return 0 if (n > 0 or sn > 0) else 1
 
     if not cron_secret:
-        print("CRON_SECRET required for API mode", file=sys.stderr)
-        return 1
+        print(
+            "CRON_SECRET unset — posting without Bearer (dev open auth)",
+            file=sys.stderr,
+        )
 
     if updates:
         result = post_bulk_update(base_url, cron_secret, updates)

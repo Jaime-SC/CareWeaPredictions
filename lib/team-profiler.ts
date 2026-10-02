@@ -420,6 +420,19 @@ export async function loadTeamIdMaps(): Promise<{
     console.warn("[team-profiler] cache id map failed:", err);
   }
 
+  // Fail-open seed from LIVE TeamProfile when API cache lacks name→id maps
+  try {
+    const profiles = await prisma.teamProfile.findMany({
+      select: { teamId: true, teamName: true },
+    });
+    for (const p of profiles) {
+      const key = normalizeName(p.teamName);
+      if (key && !byName.has(key)) byName.set(key, p.teamId);
+    }
+  } catch (err) {
+    console.warn("[team-profiler] TeamProfile name map failed:", err);
+  }
+
   return { byFixture, byName };
 }
 
@@ -874,9 +887,10 @@ export async function materializeMatchdaySnapshots(
     (r) => isFixtureFinished(r.status) || Boolean(parseScore(r.finalScore))
   );
   const { byFixture, byName } = await loadTeamIdMaps();
+  // MatchFixture.leagueId is often "unknown" in Neon — do not drop rows on origin filter
   const { eventsByTeam, originLeagueByTeam } = buildTeamEventsFromFixtures(
     rows,
-    { asOf, byFixture, byName }
+    { asOf, byFixture, byName, leagueFilter: false }
   );
 
   const asOfDate = ymdUtc(asOf);

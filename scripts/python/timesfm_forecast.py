@@ -117,10 +117,56 @@ def load_series_from_neon(
 ) -> dict[int, dict[str, list[float]]]:
     """
     Build per-team metric series from TeamProfileSnapshot rows with asOfDate < as_of.
-    Falls back to MatchFixture goal deltas when advanced metrics are sparse.
+    Tries psycopg2 (port 5432); on failure falls back to Prisma HTTP dump
+    (scripts/dump-timesfm-series.ts) — same path as db:migrate:http when 5432 is blocked.
     """
+    if psycopg2 is not None:
+        try:
+            return _load_series_psycopg2(database_url, as_of, window)
+        except Exception as err:
+            print(
+                f"[timesfm_forecast] psycopg2 failed ({err}); falling back to Prisma HTTP dump",
+                file=sys.stderr,
+            )
+    return _load_series_via_tsx(as_of, window)
+
+
+def _load_series_via_tsx(as_of: str, window: int) -> dict[int, dict[str, list[float]]]:
+    import json
+    import subprocess
+
+    cmd = [
+        "npx",
+        "tsx",
+        "scripts/dump-timesfm-series.ts",
+        f"--as-of={as_of}",
+        f"--window={window}",
+    ]
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+        shell=(os.name == "nt"),
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"dump-timesfm-series failed: {proc.stderr.strip() or proc.stdout.strip()}"
+        )
+    raw = json.loads(proc.stdout)
+    out: dict[int, dict[str, list[float]]] = {}
+    for team_id_str, series in raw.items():
+        out[int(team_id_str)] = {
+            k: [float(x) for x in (v or [])] for k, v in series.items()
+        }
+    return out
+
+
+def _load_series_psycopg2(
+    database_url: str, as_of: str, window: int = 20
+) -> dict[int, dict[str, list[float]]]:
     if psycopg2 is None:
-        raise RuntimeError("psycopg2 required to load series from Neon")
+        raise RuntimeError("psycopg2 required for --direct-db")
 
     conn = psycopg2.connect(sanitize_pg_url(database_url))
     by_team: dict[int, dict[str, list[float]]] = {}
@@ -206,11 +252,12 @@ def forecast_team(series: dict[str, list[float]]) -> dict[str, float]:
 def post_bulk_upsert(
     base_url: str, cron_secret: str, updates: list[dict[str, Any]]
 ) -> dict[str, Any]:
+    if not updates:
+        return {"upserted": 0, "skipped": 0, "errors": []}
     url = f"{base_url.rstrip('/')}/api/teams/timesfm/bulk-upsert"
-    headers = {
-        "Authorization": f"Bearer {cron_secret}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Content-Type": "application/json"}
+    if cron_secret:
+        headers["Authorization"] = f"Bearer {cron_secret}"
     resp = requests.post(
         url, headers=headers, json={"updates": updates}, timeout=300
     )
@@ -292,15 +339,24 @@ def main() -> int:
         return 0
 
     if args.direct_db:
-        n = direct_db_upsert(database_url, updates)
-        print(f"[timesfm_forecast] direct-db upserted={n}")
-        return 0
+        try:
+            n = direct_db_upsert(database_url, updates)
+            print(f"[timesfm_forecast] direct-db upserted={n}")
+            return 0
+        except Exception as err:
+            print(
+                f"[timesfm_forecast] direct-db upsert failed ({err}); falling back to API",
+                file=sys.stderr,
+            )
 
     base_url = os.environ.get("BASE_URL", "http://localhost:3000").strip()
     cron_secret = os.environ.get("CRON_SECRET", "").strip()
+    # Dev: Next opens mutation routes when CRON_SECRET is unset
     if not cron_secret:
-        print("CRON_SECRET required for API mode (or use --direct-db)", file=sys.stderr)
-        return 1
+        print(
+            "[timesfm_forecast] CRON_SECRET unset — posting without Bearer (dev open auth)",
+            file=sys.stderr,
+        )
     result = post_bulk_upsert(base_url, cron_secret, updates)
     print(f"[timesfm_forecast] api result={result}")
     return 0
